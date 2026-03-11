@@ -16,6 +16,7 @@ import { createCursorAdapter } from './host-adapters/cursor.js';
 import { createGenericStdioAdapter } from './host-adapters/generic-stdio.js';
 import { dirExists, readJsonFile, writeJsonFile } from './host-adapters/shared.js';
 import { getGlobalDir } from '../storage/repo-manager.js';
+import type { HostAdapter } from './host-adapters/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,61 @@ interface SetupResult {
   manual: Array<{ name: string; steps: string[] }>;
   skipped: string[];
   errors: string[];
+}
+
+export interface HostSetupPlan {
+  adapter: HostAdapter;
+  checkConfigured: () => Promise<boolean>;
+  needsManualConfig: boolean;
+}
+
+async function hasConfiguredServer(configPath: string, segments: string[]): Promise<boolean> {
+  const config = await readJsonFile(configPath);
+  let current: any = config;
+
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object') {
+      return false;
+    }
+    current = current[segment];
+  }
+
+  return Boolean(current && typeof current === 'object' && current.gitnexus);
+}
+
+export function getHostPlans(options?: { homeDir?: string }): HostSetupPlan[] {
+  const homeDir = options?.homeDir ?? os.homedir();
+  const openCodeConfigPath = path.join(homeDir, '.config', 'opencode', 'config.json');
+  const cursorConfigPath = path.join(homeDir, '.cursor', 'mcp.json');
+
+  return [
+    {
+      adapter: createCursorAdapter({ homeDir }),
+      checkConfigured: async () => hasConfiguredServer(cursorConfigPath, ['mcpServers']),
+      needsManualConfig: false,
+    },
+    {
+      adapter: createClaudeCodeAdapter({ homeDir }),
+      checkConfigured: async () => false,
+      needsManualConfig: true,
+    },
+    {
+      adapter: createGenericStdioAdapter({
+        id: 'opencode',
+        displayName: 'OpenCode',
+        detectPath: path.join(homeDir, '.config', 'opencode'),
+        configPath: openCodeConfigPath,
+        serverContainerPath: ['mcp'],
+      }),
+      checkConfigured: async () => hasConfiguredServer(openCodeConfigPath, ['mcp']),
+      needsManualConfig: false,
+    },
+    {
+      adapter: createCodexAdapter({ homeDir }),
+      checkConfigured: async () => false,
+      needsManualConfig: true,
+    },
+  ];
 }
 
 /**
@@ -244,22 +300,9 @@ export const setupCommand = async () => {
     errors: [],
   };
 
-  const openCodeAdapter = createGenericStdioAdapter({
-    id: 'opencode',
-    displayName: 'OpenCode',
-    detectPath: path.join(os.homedir(), '.config', 'opencode'),
-    configPath: path.join(os.homedir(), '.config', 'opencode', 'config.json'),
-    serverContainerPath: ['mcp'],
-  });
+  const hostPlans = getHostPlans();
 
-  const adapters = [
-    createCursorAdapter(),
-    createClaudeCodeAdapter(),
-    openCodeAdapter,
-    createCodexAdapter(),
-  ];
-
-  for (const adapter of adapters) {
+  for (const { adapter } of hostPlans) {
     const setup = await adapter.configure();
     if (setup.status === 'configured' && setup.message) {
       result.configured.push(setup.message);

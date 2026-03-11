@@ -22,6 +22,14 @@ program
   .action(createLazyAction(() => import('./setup.js'), 'setupCommand'));
 
 program
+  .command('doctor')
+  .description('Diagnose index, registry, and host MCP readiness')
+  .option('--host <name>', 'Check a specific host configuration')
+  .option('--repo <path>', 'Check a specific repository path')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
+
+program
   .command('analyze [path]')
   .description('Index a repository (full analysis)')
   .option('-f, --force', 'Force full re-index even if up to date')
