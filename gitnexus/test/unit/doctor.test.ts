@@ -193,4 +193,47 @@ describe('runDoctor', () => {
       ]),
     );
   });
+
+  it('returns pass when Claude Code config exists in ~/.claude.json', async () => {
+    const homeDir = await createTempDir('gitnexus-doctor-claude-global-home-');
+    const repoDir = await createTempDir('gitnexus-doctor-claude-global-repo-');
+    await fs.mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify({
+        mcpServers: {
+          gitnexus: {
+            command: 'npx',
+            args: ['-y', 'gitnexus@latest', 'mcp'],
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const result = await runDoctor(
+      { host: 'claude-code', repo: repoDir, json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => repoDir,
+        hasIndex: async () => true,
+        readRegistry: async () => [
+          {
+            name: 'repo',
+            path: repoDir,
+            storagePath: path.join(repoDir, '.gitnexus'),
+            indexedAt: new Date().toISOString(),
+            lastCommit: 'abc123',
+          },
+        ],
+        getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'host-config', status: 'pass' }),
+      ]),
+    );
+  });
 });

@@ -65,6 +65,7 @@ export function getHostPlans(options?: { homeDir?: string; repoPath?: string }):
   const openCodeConfigPath = path.join(homeDir, '.config', 'opencode', 'config.json');
   const cursorConfigPath = path.join(homeDir, '.cursor', 'mcp.json');
   const claudeConfigPath = path.join(repoPath, '.mcp.json');
+  const claudeGlobalConfigPath = path.join(homeDir, '.claude.json');
   const codexConfigPath = path.join(homeDir, '.codex', 'config.toml');
 
   return [
@@ -75,7 +76,9 @@ export function getHostPlans(options?: { homeDir?: string; repoPath?: string }):
     },
     {
       adapter: createClaudeCodeAdapter({ homeDir }),
-      checkConfigured: async () => hasConfiguredServer(claudeConfigPath, ['mcpServers']),
+      checkConfigured: async () =>
+        (await hasConfiguredServer(claudeConfigPath, ['mcpServers']))
+        || (await hasConfiguredServer(claudeGlobalConfigPath, ['mcpServers'])),
       needsManualConfig: true,
     },
     {
