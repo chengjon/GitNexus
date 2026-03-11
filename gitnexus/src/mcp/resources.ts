@@ -50,7 +50,7 @@ export function getResourceTemplates(): ResourceTemplate[] {
     {
       uriTemplate: 'gitnexus://repo/{name}/context',
       name: 'Repo Overview',
-      description: 'Codebase stats, staleness check, and available tools',
+      description: 'Codebase stats, index health, and available tools',
       mimeType: 'text/yaml',
     },
     {
@@ -471,7 +471,7 @@ async function getSetupResource(backend: LocalBackend): Promise<string> {
       '',
       '## Resources',
       '',
-      `- \`gitnexus://repo/${repo.name}/context\` — Stats, staleness check`,
+      `- \`gitnexus://repo/${repo.name}/context\` — Stats and Index health`,
       `- \`gitnexus://repo/${repo.name}/clusters\` — All functional areas`,
       `- \`gitnexus://repo/${repo.name}/processes\` — All execution flows`,
       `- \`gitnexus://repo/${repo.name}/schema\` — Graph schema for Cypher`,

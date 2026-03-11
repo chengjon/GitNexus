@@ -1,10 +1,10 @@
 /**
  * P1 Unit Tests: Repository Manager
  *
- * Tests: getStoragePath, getStoragePaths, readRegistry, registerRepo, unregisterRepo
+ * Tests: storage paths, registry reads, config helpers, RepoMeta persistence defaults
  * Covers hardening fixes #29 (API key file permissions) and #30 (case-insensitive paths on Windows)
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
@@ -12,6 +12,8 @@ import {
   getStoragePath,
   getStoragePaths,
   readRegistry,
+  loadMeta,
+  saveMeta,
   saveCLIConfig,
   loadCLIConfig,
 } from '../../src/storage/repo-manager.js';
@@ -135,14 +137,65 @@ describe('API key file permissions', () => {
   });
 });
 
-describe('RepoMeta shape', () => {
-  it('includes index health metadata fields', async () => {
-    const source = await fs.readFile(
-      path.join(process.cwd(), 'src', 'storage', 'repo-manager.ts'),
+describe('RepoMeta persistence', () => {
+  let tmpHandle: Awaited<ReturnType<typeof createTempDir>>;
+
+  beforeEach(async () => {
+    tmpHandle = await createTempDir('gitnexus-meta-test-');
+  });
+
+  afterEach(async () => {
+    await tmpHandle.cleanup();
+  });
+
+  it('loadMeta backfills default health metadata for legacy meta.json', async () => {
+    const storagePath = path.join(tmpHandle.dbPath, '.gitnexus');
+    await fs.mkdir(storagePath, { recursive: true });
+    await fs.writeFile(
+      path.join(storagePath, 'meta.json'),
+      JSON.stringify({
+        repoPath: '/tmp/legacy-repo',
+        lastCommit: 'abc1234',
+        indexedAt: '2026-03-11T00:00:00.000Z',
+      }, null, 2),
       'utf-8',
     );
-    expect(source).toContain('indexedBranch');
-    expect(source).toContain('schemaVersion');
-    expect(source).toContain('toolVersion');
+
+    const loaded = await loadMeta(storagePath);
+
+    expect(loaded).toMatchObject({
+      repoPath: '/tmp/legacy-repo',
+      lastCommit: 'abc1234',
+      indexedAt: '2026-03-11T00:00:00.000Z',
+      indexedBranch: null,
+      schemaVersion: 'v1',
+      toolVersion: null,
+    });
+  });
+
+  it('saveMeta writes default health metadata fields to disk', async () => {
+    const storagePath = path.join(tmpHandle.dbPath, '.gitnexus');
+
+    await saveMeta(storagePath, {
+      repoPath: '/tmp/current-repo',
+      lastCommit: 'def5678',
+      indexedAt: '2026-03-11T01:00:00.000Z',
+    });
+
+    const raw = JSON.parse(
+      await fs.readFile(path.join(storagePath, 'meta.json'), 'utf-8'),
+    );
+
+    expect(raw).toMatchObject({
+      repoPath: '/tmp/current-repo',
+      lastCommit: 'def5678',
+      indexedAt: '2026-03-11T01:00:00.000Z',
+      indexedBranch: null,
+      schemaVersion: 'v1',
+      toolVersion: null,
+    });
+
+    const reloaded = await loadMeta(storagePath);
+    expect(reloaded).toEqual(raw);
   });
 });

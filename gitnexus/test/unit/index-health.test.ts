@@ -76,6 +76,21 @@ describe('getIndexHealth', () => {
     expect(health.dirty).toBe(true);
   });
 
+  it('returns degraded with both reasons when commit is behind and worktree is dirty', async () => {
+    const repoDir = await createTempGitRepo('gitnexus-health-combined-');
+    await fs.writeFile(path.join(repoDir, 'file.txt'), 'v2\n', 'utf-8');
+    git(repoDir, ['commit', '-am', 'second']);
+    const previousCommit = git(repoDir, ['rev-parse', 'HEAD~1']);
+    await fs.writeFile(path.join(repoDir, 'file.txt'), 'dirty\n', 'utf-8');
+
+    const health = getIndexHealth(repoDir, previousCommit);
+
+    expect(health.level).toBe('degraded');
+    expect(health.reasons).toEqual(expect.arrayContaining(['commit-behind', 'dirty-worktree']));
+    expect(health.commitsBehind).toBeGreaterThan(0);
+    expect(health.dirty).toBe(true);
+  });
+
   it('returns invalid when git inspection fails', () => {
     const health = getIndexHealth('/nonexistent/path', 'abc123');
 

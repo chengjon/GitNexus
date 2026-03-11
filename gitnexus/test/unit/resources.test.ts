@@ -126,6 +126,16 @@ describe('getResourceTemplates', () => {
       expect(tmpl.mimeType).toBeTruthy();
     }
   });
+
+  it('describes repo context in health terminology', () => {
+    const contextTemplate = getResourceTemplates().find(
+      (template) => template.uriTemplate === 'gitnexus://repo/{name}/context',
+    );
+
+    expect(contextTemplate).toBeDefined();
+    expect(contextTemplate!.description).toContain('health');
+    expect(contextTemplate!.description).not.toContain('staleness');
+  });
 });
 
 // ─── readResource URI parsing ────────────────────────────────────────
@@ -158,6 +168,8 @@ describe('readResource', () => {
     const result = await readResource('gitnexus://setup', backend);
     expect(result).toContain('GitNexus MCP');
     expect(result).toContain('proj');
+    expect(result).toContain('Index health');
+    expect(result).not.toContain('staleness check');
   });
 
   it('returns fallback when setup has no repos', async () => {
