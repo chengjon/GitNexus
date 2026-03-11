@@ -1,11 +1,12 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createClaudeCodeAdapter } from '../../src/cli/host-adapters/claude-code.js';
 import { createCodexAdapter } from '../../src/cli/host-adapters/codex.js';
 import { createCursorAdapter } from '../../src/cli/host-adapters/cursor.js';
 import { createGenericStdioAdapter } from '../../src/cli/host-adapters/generic-stdio.js';
+import { setupCommand } from '../../src/cli/setup.js';
 
 const tempDirs: string[] = [];
 
@@ -16,6 +17,7 @@ async function createTempHome(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
   );
@@ -70,6 +72,33 @@ describe('host adapters', () => {
     expect(config.mcpServers.gitnexus.args).toEqual(adapter.getMcpEntry().args);
   });
 
+  it('Cursor adapter merge preserves existing mcpServers and top-level fields', async () => {
+    const homeDir = await createTempHome('gitnexus-cursor-merge-');
+    const cursorDir = path.join(homeDir, '.cursor');
+    const configPath = path.join(cursorDir, 'mcp.json');
+    await fs.mkdir(cursorDir, { recursive: true });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        theme: 'light',
+        mcpServers: {
+          existing: { command: 'node', args: ['existing.js'] },
+        },
+      }),
+      'utf-8',
+    );
+
+    const adapter = createCursorAdapter({ homeDir });
+    await adapter.configure();
+
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.theme).toBe('light');
+    expect(config.mcpServers.existing).toEqual({ command: 'node', args: ['existing.js'] });
+    expect(config.mcpServers.gitnexus.command).toBe(adapter.getMcpEntry().command);
+  });
+
   it('generic stdio adapter writes command and args to configured container', async () => {
     const homeDir = await createTempHome('gitnexus-generic-host-');
     const configPath = path.join(homeDir, '.config', 'example', 'config.json');
@@ -92,5 +121,65 @@ describe('host adapters', () => {
     expect(adapter.getMcpEntry().command).toBe('npx');
     expect(config.mcp.gitnexus.command).toBe('npx');
     expect(config.mcp.gitnexus.args).toEqual(['-y', 'gitnexus@latest', 'mcp']);
+  });
+
+  it('generic stdio adapter merge preserves existing mcp entries and top-level fields', async () => {
+    const homeDir = await createTempHome('gitnexus-generic-merge-');
+    const configPath = path.join(homeDir, '.config', 'example', 'config.json');
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        telemetry: true,
+        mcp: {
+          existing: { command: 'node', args: ['existing.js'] },
+        },
+      }),
+      'utf-8',
+    );
+
+    const adapter = createGenericStdioAdapter({
+      id: 'example',
+      displayName: 'Example Host',
+      detectPath: path.join(homeDir, '.config', 'example'),
+      configPath,
+      serverContainerPath: ['mcp'],
+    });
+
+    await adapter.configure();
+
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.telemetry).toBe(true);
+    expect(config.mcp.existing).toEqual({ command: 'node', args: ['existing.js'] });
+    expect(config.mcp.gitnexus.command).toBe(adapter.getMcpEntry().command);
+  });
+});
+
+describe('setupCommand orchestration', () => {
+  it('prints configured, manual, and skipped sections and includes Codex in manual results', async () => {
+    const homeDir = await createTempHome('gitnexus-setup-command-');
+    await fs.mkdir(path.join(homeDir, '.cursor'), { recursive: true });
+    await fs.mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await fs.mkdir(path.join(homeDir, '.codex'), { recursive: true });
+
+    vi.spyOn(os, 'homedir').mockReturnValue(homeDir);
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.join(' '));
+    });
+
+    await setupCommand();
+
+    const output = logs.join('\n');
+    expect(output).toContain('Configured:');
+    expect(output).toContain('Manual steps required:');
+    expect(output).toContain('Skipped:');
+    expect(output).toContain('Cursor');
+    expect(output).toContain('Claude Code');
+    expect(output).toContain('Codex');
+    expect(output).toContain('OpenCode (not installed)');
+    expect(output).toContain('codex mcp add gitnexus -- npx -y gitnexus@latest mcp');
   });
 });
