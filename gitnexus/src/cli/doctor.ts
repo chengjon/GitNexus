@@ -95,7 +95,7 @@ export async function runDoctor(
       : 'No registry entry found for this repository.',
   });
 
-  const hostPlans = deps.getHostPlans().filter((plan) => {
+  const hostPlans = deps.getHostPlans({ repoPath: repoRoot }).filter((plan) => {
     if (!options.host) return true;
     const requestedHost = options.host.toLowerCase();
     return plan.adapter.id === requestedHost || plan.adapter.displayName.toLowerCase() === requestedHost;

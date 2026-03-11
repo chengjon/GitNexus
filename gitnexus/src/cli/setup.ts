@@ -48,10 +48,24 @@ async function hasConfiguredServer(configPath: string, segments: string[]): Prom
   return Boolean(current && typeof current === 'object' && current.gitnexus);
 }
 
-export function getHostPlans(options?: { homeDir?: string }): HostSetupPlan[] {
+async function hasConfiguredTomlTable(configPath: string, tableName: string): Promise<boolean> {
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tablePattern = new RegExp(`^\\s*\\[\\s*${escaped}\\s*\\]\\s*$`, 'm');
+    return tablePattern.test(content);
+  } catch {
+    return false;
+  }
+}
+
+export function getHostPlans(options?: { homeDir?: string; repoPath?: string }): HostSetupPlan[] {
   const homeDir = options?.homeDir ?? os.homedir();
+  const repoPath = options?.repoPath ?? process.cwd();
   const openCodeConfigPath = path.join(homeDir, '.config', 'opencode', 'config.json');
   const cursorConfigPath = path.join(homeDir, '.cursor', 'mcp.json');
+  const claudeConfigPath = path.join(repoPath, '.mcp.json');
+  const codexConfigPath = path.join(homeDir, '.codex', 'config.toml');
 
   return [
     {
@@ -61,7 +75,7 @@ export function getHostPlans(options?: { homeDir?: string }): HostSetupPlan[] {
     },
     {
       adapter: createClaudeCodeAdapter({ homeDir }),
-      checkConfigured: async () => false,
+      checkConfigured: async () => hasConfiguredServer(claudeConfigPath, ['mcpServers']),
       needsManualConfig: true,
     },
     {
@@ -77,7 +91,7 @@ export function getHostPlans(options?: { homeDir?: string }): HostSetupPlan[] {
     },
     {
       adapter: createCodexAdapter({ homeDir }),
-      checkConfigured: async () => false,
+      checkConfigured: async () => hasConfiguredTomlTable(codexConfigPath, 'mcp_servers.gitnexus'),
       needsManualConfig: true,
     },
   ];
