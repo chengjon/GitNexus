@@ -134,3 +134,15 @@ describe('API key file permissions', () => {
     expect(source).toContain("process.platform !== 'win32'");
   });
 });
+
+describe('RepoMeta shape', () => {
+  it('includes index health metadata fields', async () => {
+    const source = await fs.readFile(
+      path.join(process.cwd(), 'src', 'storage', 'repo-manager.ts'),
+      'utf-8',
+    );
+    expect(source).toContain('indexedBranch');
+    expect(source).toContain('schemaVersion');
+    expect(source).toContain('toolVersion');
+  });
+});

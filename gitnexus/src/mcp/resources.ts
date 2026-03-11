@@ -6,7 +6,7 @@
  */
 
 import type { LocalBackend } from './local/local-backend.js';
-import { checkStaleness } from './staleness.js';
+import { getIndexHealth } from './staleness.js';
 
 export interface ResourceDefinition {
   uri: string;
@@ -195,20 +195,30 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
     return 'error: No codebase loaded. Run: gitnexus analyze';
   }
   
-  // Check staleness
+  // Check index health
   const repoPath = repo.repoPath;
   const lastCommit = repo.lastCommit || 'HEAD';
-  const staleness = repoPath ? checkStaleness(repoPath, lastCommit) : { isStale: false, commitsBehind: 0 };
+  const health = repoPath
+    ? getIndexHealth(repoPath, lastCommit)
+    : { level: 'invalid', reasons: ['git-error'], commitsBehind: 0, dirty: false };
   
   const lines: string[] = [
     `project: ${context.projectName}`,
   ];
   
-  if (staleness.isStale && staleness.hint) {
-    lines.push('');
-    lines.push(`staleness: "${staleness.hint}"`);
+  lines.push('');
+  lines.push('health:');
+  lines.push(`  level: "${health.level}"`);
+  lines.push(`  commitsBehind: ${health.commitsBehind}`);
+  lines.push(`  dirty: ${health.dirty}`);
+  if (health.reasons.length > 0) {
+    lines.push('  reasons:');
+    for (const reason of health.reasons) {
+      lines.push(`    - ${reason}`);
+    }
+  } else {
+    lines.push('  reasons: []');
   }
-  
   lines.push('');
   lines.push('stats:');
   lines.push(`  files: ${context.stats.fileCount}`);
@@ -224,7 +234,7 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   lines.push('  - cypher: Raw graph queries');
   lines.push('  - list_repos: Discover all indexed repositories');
   lines.push('');
-  lines.push('re_index: Run `npx gitnexus analyze` in terminal if data is stale');
+  lines.push('re_index: Run `npx gitnexus analyze` in terminal if health is not fresh');
   lines.push('');
   lines.push('resources_available:');
   lines.push('  - gitnexus://repos: All indexed repositories');

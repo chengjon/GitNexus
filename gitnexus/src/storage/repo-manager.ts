@@ -14,6 +14,9 @@ export interface RepoMeta {
   repoPath: string;
   lastCommit: string;
   indexedAt: string;
+  indexedBranch?: string | null;
+  schemaVersion?: string;
+  toolVersion?: string | null;
   stats?: {
     files?: number;
     nodes?: number;
@@ -30,6 +33,15 @@ export interface IndexedRepo {
   kuzuPath: string;
   metaPath: string;
   meta: RepoMeta;
+}
+
+function withRepoMetaDefaults(meta: RepoMeta): RepoMeta {
+  return {
+    indexedBranch: null,
+    schemaVersion: 'v1',
+    toolVersion: null,
+    ...meta,
+  };
 }
 
 /**
@@ -74,7 +86,7 @@ export const loadMeta = async (storagePath: string): Promise<RepoMeta | null> =>
   try {
     const metaPath = path.join(storagePath, 'meta.json');
     const raw = await fs.readFile(metaPath, 'utf-8');
-    return JSON.parse(raw) as RepoMeta;
+    return withRepoMetaDefaults(JSON.parse(raw) as RepoMeta);
   } catch {
     return null;
   }
@@ -86,7 +98,7 @@ export const loadMeta = async (storagePath: string): Promise<RepoMeta | null> =>
 export const saveMeta = async (storagePath: string, meta: RepoMeta): Promise<void> => {
   await fs.mkdir(storagePath, { recursive: true });
   const metaPath = path.join(storagePath, 'meta.json');
-  await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+  await fs.writeFile(metaPath, JSON.stringify(withRepoMetaDefaults(meta), null, 2), 'utf-8');
 };
 
 /**
