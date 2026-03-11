@@ -61,4 +61,11 @@ describe('CLI commands', () => {
       expect(typeof setupCommand).toBe('function');
     });
   });
+
+  describe('host adapter factories', () => {
+    it('exports codex adapter factory', async () => {
+      const { createCodexAdapter } = await import('../../src/cli/host-adapters/codex.js');
+      expect(typeof createCodexAdapter).toBe('function');
+    });
+  });
 });
