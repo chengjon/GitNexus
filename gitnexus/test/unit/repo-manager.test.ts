@@ -14,6 +14,7 @@ import {
   readRegistry,
   saveCLIConfig,
   loadCLIConfig,
+  loadCLIConfigSync,
 } from '../../src/storage/repo-manager.js';
 import { createTempDir } from '../helpers/test-db.js';
 
@@ -86,6 +87,30 @@ describe('saveCLIConfig / loadCLIConfig', () => {
     const config = await loadCLIConfig();
     // Returns {} or existing config
     expect(typeof config).toBe('object');
+  });
+
+  it('loadCLIConfigSync can read embeddings settings from config.json', async () => {
+    (os.homedir as any) = () => tmpHandle.dbPath;
+
+    await saveCLIConfig({
+      embeddings: {
+        provider: 'ollama',
+        ollamaBaseUrl: 'http://localhost:11434',
+        ollamaModel: 'qwen3-embedding:0.6b',
+        nodeLimit: 90000,
+        batchSize: 8,
+      },
+    });
+
+    expect(loadCLIConfigSync()).toEqual({
+      embeddings: {
+        provider: 'ollama',
+        ollamaBaseUrl: 'http://localhost:11434',
+        ollamaModel: 'qwen3-embedding:0.6b',
+        nodeLimit: 90000,
+        batchSize: 8,
+      },
+    });
   });
 });
 

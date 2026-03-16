@@ -7,6 +7,7 @@
  */
 
 import fs from 'fs/promises';
+import { readFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
@@ -274,6 +275,17 @@ export interface CLIConfig {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  embeddings?: {
+    provider?: 'huggingface' | 'ollama';
+    remoteHost?: string;
+    cacheDir?: string;
+    localModelPath?: string;
+    localOnly?: boolean;
+    ollamaBaseUrl?: string;
+    ollamaModel?: string;
+    nodeLimit?: number;
+    batchSize?: number;
+  };
 }
 
 /**
@@ -289,6 +301,18 @@ export const getGlobalConfigPath = (): string => {
 export const loadCLIConfig = async (): Promise<CLIConfig> => {
   try {
     const raw = await fs.readFile(getGlobalConfigPath(), 'utf-8');
+    return JSON.parse(raw) as CLIConfig;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Load CLI config synchronously for runtime paths that must remain sync.
+ */
+export const loadCLIConfigSync = (): CLIConfig => {
+  try {
+    const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
     return JSON.parse(raw) as CLIConfig;
   } catch {
     return {};

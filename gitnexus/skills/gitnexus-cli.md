@@ -55,6 +55,22 @@ GITNEXUS_EMBEDDING_BATCH_SIZE=8 \
 gitnexus analyze --force --embeddings
 ```
 
+The same settings can live in `~/.gitnexus/config.json`:
+
+```json
+{
+  "embeddings": {
+    "provider": "ollama",
+    "ollamaBaseUrl": "http://localhost:11434",
+    "ollamaModel": "qwen3-embedding:0.6b",
+    "nodeLimit": 90000,
+    "batchSize": 8
+  }
+}
+```
+
+Priority is: environment variables > `~/.gitnexus/config.json` > built-in defaults.
+
 ### status — Check index freshness
 
 ```bash

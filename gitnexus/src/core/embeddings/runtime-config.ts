@@ -1,3 +1,6 @@
+import type { CLIConfig } from '../../storage/repo-manager.js';
+import { loadCLIConfigSync } from '../../storage/repo-manager.js';
+
 export type EmbeddingProvider = 'huggingface' | 'ollama';
 
 export interface EmbeddingRuntimeConfig {
@@ -15,6 +18,11 @@ type EnvSource = Record<string, string | undefined>;
 const parseTruthy = (value?: string): boolean =>
   value === '1' || value === 'true' || value === 'TRUE' || value === 'yes' || value === 'on';
 
+const readBooleanSetting = (raw: string | undefined, fallback: boolean): boolean => {
+  if (raw === undefined) return fallback;
+  return parseTruthy(raw);
+};
+
 const normalizeRemoteHost = (value?: string): string | undefined => {
   if (!value) return undefined;
   const trimmed = value.trim();
@@ -28,15 +36,27 @@ const normalizeBaseUrl = (value: string): string => {
   return withoutSlash || 'http://localhost:11434';
 };
 
-export const getEmbeddingRuntimeConfig = (env: EnvSource = process.env): EmbeddingRuntimeConfig => ({
-  provider: env.GITNEXUS_EMBEDDING_PROVIDER?.trim().toLowerCase() === 'ollama' ? 'ollama' : 'huggingface',
-  remoteHost: normalizeRemoteHost(env.GITNEXUS_HF_REMOTE_HOST || env.HF_ENDPOINT),
-  cacheDir: env.GITNEXUS_HF_CACHE_DIR?.trim() || undefined,
-  localModelPath: env.GITNEXUS_HF_LOCAL_MODEL_PATH?.trim() || undefined,
-  localOnly: parseTruthy(env.GITNEXUS_HF_LOCAL_ONLY),
-  ollamaBaseUrl: normalizeBaseUrl(env.GITNEXUS_OLLAMA_BASE_URL || 'http://localhost:11434'),
-  ollamaModel: env.GITNEXUS_OLLAMA_MODEL?.trim() || 'qwen3-embedding',
-});
+export const getEmbeddingRuntimeConfig = (
+  env: EnvSource = process.env,
+  cliConfig: CLIConfig = loadCLIConfigSync(),
+): EmbeddingRuntimeConfig => {
+  const embeddingConfig = cliConfig.embeddings || {};
+  const envProvider = env.GITNEXUS_EMBEDDING_PROVIDER?.trim().toLowerCase();
+  const provider: EmbeddingProvider =
+    envProvider === 'ollama' || envProvider === 'huggingface'
+      ? envProvider
+      : (embeddingConfig.provider || 'huggingface');
+
+  return {
+    provider,
+    remoteHost: normalizeRemoteHost(env.GITNEXUS_HF_REMOTE_HOST || env.HF_ENDPOINT || embeddingConfig.remoteHost),
+    cacheDir: env.GITNEXUS_HF_CACHE_DIR?.trim() || embeddingConfig.cacheDir || undefined,
+    localModelPath: env.GITNEXUS_HF_LOCAL_MODEL_PATH?.trim() || embeddingConfig.localModelPath || undefined,
+    localOnly: readBooleanSetting(env.GITNEXUS_HF_LOCAL_ONLY, embeddingConfig.localOnly ?? false),
+    ollamaBaseUrl: normalizeBaseUrl(env.GITNEXUS_OLLAMA_BASE_URL || embeddingConfig.ollamaBaseUrl || 'http://localhost:11434'),
+    ollamaModel: env.GITNEXUS_OLLAMA_MODEL?.trim() || embeddingConfig.ollamaModel || 'qwen3-embedding',
+  };
+};
 
 export const applyEmbeddingRuntimeConfig = (
   target: {
