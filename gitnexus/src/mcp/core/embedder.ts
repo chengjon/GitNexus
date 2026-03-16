@@ -6,22 +6,38 @@
  */
 
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { DEFAULT_EMBEDDING_CONFIG } from '../../core/embeddings/types.js';
+import {
+  applyEmbeddingRuntimeConfig,
+  formatEmbeddingInitError,
+  getEmbeddingRuntimeConfig,
+} from '../../core/embeddings/runtime-config.js';
+import { embedQueryWithOllama } from '../../core/embeddings/ollama-client.js';
 
 // Model config
 const MODEL_ID = 'Snowflake/snowflake-arctic-embed-xs';
-const EMBEDDING_DIMS = 384;
+const EMBEDDING_DIMS = DEFAULT_EMBEDDING_CONFIG.dimensions;
 
 // Module-level state for singleton pattern
 let embedderInstance: FeatureExtractionPipeline | null = null;
 let isInitializing = false;
 let initPromise: Promise<FeatureExtractionPipeline> | null = null;
+let activeProvider: 'huggingface' | 'ollama' | null = null;
 
 /**
  * Initialize the embedding model (lazy, on first search)
  */
 export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
-  if (embedderInstance) {
+  const runtimeConfig = getEmbeddingRuntimeConfig();
+
+  if (embedderInstance && activeProvider === runtimeConfig.provider) {
     return embedderInstance;
+  }
+
+  if (embedderInstance && activeProvider !== runtimeConfig.provider) {
+    embedderInstance = null;
+    initPromise = null;
+    activeProvider = null;
   }
 
   if (isInitializing && initPromise) {
@@ -32,7 +48,16 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
 
   initPromise = (async () => {
     try {
+      if (runtimeConfig.provider === 'ollama') {
+        embedderInstance = {} as FeatureExtractionPipeline;
+        activeProvider = 'ollama';
+        console.error(`GitNexus: Using Ollama embedding model (${runtimeConfig.ollamaModel})`);
+        return embedderInstance;
+      }
+
       env.allowLocalModels = false;
+      applyEmbeddingRuntimeConfig(env as any, runtimeConfig);
+      activeProvider = 'huggingface';
       
       console.error('GitNexus: Loading embedding model (first search may take a moment)...');
 
@@ -75,7 +100,8 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
       isInitializing = false;
       initPromise = null;
       embedderInstance = null;
-      throw error;
+      activeProvider = null;
+      throw formatEmbeddingInitError(error, runtimeConfig);
     } finally {
       isInitializing = false;
     }
@@ -87,13 +113,24 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
 /**
  * Check if embedder is ready
  */
-export const isEmbedderReady = (): boolean => embedderInstance !== null;
+export const isEmbedderReady = (): boolean => embedderInstance !== null && activeProvider !== null;
 
 /**
  * Embed a query text for semantic search
  */
 export const embedQuery = async (query: string): Promise<number[]> => {
-  const embedder = await initEmbedder();
+  const runtimeConfig = getEmbeddingRuntimeConfig();
+  await initEmbedder();
+
+  if (runtimeConfig.provider === 'ollama') {
+    return embedQueryWithOllama(query, {
+      baseUrl: runtimeConfig.ollamaBaseUrl,
+      model: runtimeConfig.ollamaModel,
+      dimensions: EMBEDDING_DIMS,
+    });
+  }
+
+  const embedder = embedderInstance!;
   
   const result = await embedder(query, {
     pooling: 'mean',
@@ -121,4 +158,5 @@ export const disposeEmbedder = async (): Promise<void> => {
     embedderInstance = null;
     initPromise = null;
   }
+  activeProvider = null;
 };

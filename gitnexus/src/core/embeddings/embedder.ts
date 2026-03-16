@@ -24,6 +24,7 @@ import {
   formatEmbeddingInitError,
   getEmbeddingRuntimeConfig,
 } from './runtime-config.js';
+import { embedTextsWithOllama } from './ollama-client.js';
 
 /**
  * Check whether CUDA libraries are actually available on this system.
@@ -62,7 +63,9 @@ function isCudaAvailable(): boolean {
 let embedderInstance: FeatureExtractionPipeline | null = null;
 let isInitializing = false;
 let initPromise: Promise<FeatureExtractionPipeline> | null = null;
+let activeProvider: 'huggingface' | 'ollama' | null = null;
 let currentDevice: 'dml' | 'cuda' | 'cpu' | 'wasm' | null = null;
+let currentDimensions = DEFAULT_EMBEDDING_CONFIG.dimensions;
 
 /**
  * Progress callback type for model loading
@@ -88,9 +91,17 @@ export const initEmbedder = async (
   config: Partial<EmbeddingConfig> = {},
   forceDevice?: 'dml' | 'cuda' | 'cpu' | 'wasm'
 ): Promise<FeatureExtractionPipeline> => {
-  // Return existing instance if available
-  if (embedderInstance) {
+  const runtimeConfig = getEmbeddingRuntimeConfig();
+
+  if (embedderInstance && activeProvider === runtimeConfig.provider) {
     return embedderInstance;
+  }
+
+  if (embedderInstance && activeProvider !== runtimeConfig.provider) {
+    embedderInstance = null;
+    initPromise = null;
+    activeProvider = null;
+    currentDevice = null;
   }
 
   // If already initializing, wait for that promise
@@ -101,6 +112,7 @@ export const initEmbedder = async (
   isInitializing = true;
   
   const finalConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config };
+  currentDimensions = finalConfig.dimensions;
   // On Windows, use DirectML for GPU acceleration (via DirectX12)
   // CUDA is only available on Linux x64 with onnxruntime-node
   // Probe for CUDA first — ONNX Runtime crashes (uncatchable native error)
@@ -111,9 +123,21 @@ export const initEmbedder = async (
 
   initPromise = (async () => {
     try {
+      if (runtimeConfig.provider === 'ollama') {
+        activeProvider = 'ollama';
+        currentDevice = null;
+        embedderInstance = {} as FeatureExtractionPipeline;
+        const isDev = process.env.NODE_ENV === 'development';
+        if (isDev) {
+          console.log(`🧠 Using Ollama embedding model: ${runtimeConfig.ollamaModel} @ ${runtimeConfig.ollamaBaseUrl}`);
+        }
+        return embedderInstance;
+      }
+
       // Configure transformers.js environment
       env.allowLocalModels = false;
-      applyEmbeddingRuntimeConfig(env as any, getEmbeddingRuntimeConfig());
+      applyEmbeddingRuntimeConfig(env as any, runtimeConfig);
+      activeProvider = 'huggingface';
       
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev) {
@@ -201,7 +225,7 @@ export const initEmbedder = async (
  * Check if the embedder is initialized and ready
  */
 export const isEmbedderReady = (): boolean => {
-  return embedderInstance !== null;
+  return embedderInstance !== null && activeProvider !== null;
 };
 
 /**
@@ -221,6 +245,20 @@ export const getEmbedder = (): FeatureExtractionPipeline => {
  * @returns Float32Array of embedding vector (384 dimensions)
  */
 export const embedText = async (text: string): Promise<Float32Array> => {
+  const runtimeConfig = getEmbeddingRuntimeConfig();
+  if (!isEmbedderReady() || activeProvider !== runtimeConfig.provider) {
+    await initEmbedder();
+  }
+
+  if (runtimeConfig.provider === 'ollama') {
+    const [embedding] = await embedTextsWithOllama([text], {
+      baseUrl: runtimeConfig.ollamaBaseUrl,
+      model: runtimeConfig.ollamaModel,
+      dimensions: currentDimensions,
+    });
+    return embedding;
+  }
+
   const embedder = getEmbedder();
   
   const result = await embedder(text, {
@@ -244,6 +282,19 @@ export const embedBatch = async (texts: string[]): Promise<Float32Array[]> => {
     return [];
   }
 
+  const runtimeConfig = getEmbeddingRuntimeConfig();
+  if (!isEmbedderReady() || activeProvider !== runtimeConfig.provider) {
+    await initEmbedder();
+  }
+
+  if (runtimeConfig.provider === 'ollama') {
+    return embedTextsWithOllama(texts, {
+      baseUrl: runtimeConfig.ollamaBaseUrl,
+      model: runtimeConfig.ollamaModel,
+      dimensions: currentDimensions,
+    });
+  }
+
   const embedder = getEmbedder();
   
   // Process batch
@@ -255,7 +306,7 @@ export const embedBatch = async (texts: string[]): Promise<Float32Array[]> => {
   // Result shape is [batch_size, dimensions]
   // Need to split into individual vectors
   const data = result.data as ArrayLike<number>;
-  const dimensions = DEFAULT_EMBEDDING_CONFIG.dimensions;
+  const dimensions = currentDimensions;
   const embeddings: Float32Array[] = [];
   
   for (let i = 0; i < texts.length; i++) {
@@ -291,4 +342,7 @@ export const disposeEmbedder = async (): Promise<void> => {
     embedderInstance = null;
     initPromise = null;
   }
+  activeProvider = null;
+  currentDevice = null;
+  currentDimensions = DEFAULT_EMBEDDING_CONFIG.dimensions;
 };
