@@ -24,6 +24,37 @@ Run from the project root. This parses all source files, builds the knowledge gr
 
 **When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated.
 
+**Embeddings configuration:**
+
+```bash
+# Raise the safety limit / reduce batch size for large repos
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000
+GITNEXUS_EMBEDDING_BATCH_SIZE=8
+
+# Hugging Face mirror / cache / local-only mode
+HF_ENDPOINT=https://hf-mirror.com
+GITNEXUS_HF_REMOTE_HOST=https://hf-mirror.com
+GITNEXUS_HF_CACHE_DIR=/path/to/hf-cache
+GITNEXUS_HF_LOCAL_MODEL_PATH=/path/to/local-models
+GITNEXUS_HF_LOCAL_ONLY=1
+
+# Ollama provider
+GITNEXUS_EMBEDDING_PROVIDER=ollama
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+```
+
+Recommended local Ollama example:
+
+```bash
+GITNEXUS_EMBEDDING_PROVIDER=ollama \
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
+GITNEXUS_EMBEDDING_BATCH_SIZE=8 \
+gitnexus analyze --force --embeddings
+```
+
 ### status — Check index freshness
 
 ```bash
@@ -79,4 +110,4 @@ Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_
 
 - **"Not inside a git repository"**: Run from a directory inside a git repo
 - **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
-- **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding
+- **Embeddings timeout on Hugging Face**: Set `HF_ENDPOINT` / `GITNEXUS_HF_REMOTE_HOST`, configure `GITNEXUS_HF_CACHE_DIR`, or switch to the local Ollama provider via `GITNEXUS_EMBEDDING_PROVIDER=ollama`

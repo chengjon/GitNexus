@@ -141,6 +141,42 @@ npx gitnexus analyze --embeddings
 
 To check whether embeddings exist, inspect \`.gitnexus/meta.json\` — the \`stats.embeddings\` field shows the count (0 means no embeddings). **Running analyze without \`--embeddings\` will delete any previously generated embeddings.**
 
+If embedding generation is enabled, these environment variables control the provider and runtime behavior:
+
+\`\`\`bash
+# Raise the CLI safety limit and reduce batch size for large repos
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000
+GITNEXUS_EMBEDDING_BATCH_SIZE=8
+
+# Use a Hugging Face mirror / custom endpoint
+HF_ENDPOINT=https://hf-mirror.com
+# or
+GITNEXUS_HF_REMOTE_HOST=https://hf-mirror.com
+
+# Persist downloaded model files
+GITNEXUS_HF_CACHE_DIR=/path/to/hf-cache
+
+# Use a predownloaded local Hugging Face model only
+GITNEXUS_HF_LOCAL_MODEL_PATH=/path/to/local-models
+GITNEXUS_HF_LOCAL_ONLY=1
+
+# Use Ollama instead of Hugging Face for both indexing and query embeddings
+GITNEXUS_EMBEDDING_PROVIDER=ollama
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+\`\`\`
+
+Recommended Ollama example:
+
+\`\`\`bash
+GITNEXUS_EMBEDDING_PROVIDER=ollama \\
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \\
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \\
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \\
+GITNEXUS_EMBEDDING_BATCH_SIZE=8 \\
+gitnexus analyze --force --embeddings
+\`\`\`
+
 > Claude Code users: A PostToolUse hook handles this automatically after \`git commit\` and \`git merge\`.
 
 ## CLI
@@ -308,4 +344,3 @@ export async function generateAIContextFiles(
 
   return { files: createdFiles };
 }
-
