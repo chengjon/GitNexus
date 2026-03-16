@@ -18,7 +18,8 @@ import { getStoragePaths, saveMeta, loadMeta, addToGitignore, registerRepo, getG
 import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 import { generateAIContextFiles } from './ai-context.js';
 import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
-import { getIndexFreshness, GITNEXUS_VERSION } from './index-freshness.js';
+import { getIndexFreshness, getGitNexusVersion } from './index-freshness.js';
+import { getCliEmbeddingConfig, getEmbeddingNodeLimit } from './embedding-overrides.js';
 import fs from 'fs/promises';
 
 
@@ -63,9 +64,6 @@ export const shouldSkipAnalyze = (
 
   return getIndexFreshness(existingMeta as any, currentCommit, currentToolVersion).isUpToDate;
 };
-
-/** Threshold: auto-skip embeddings for repos with more nodes than this */
-const EMBEDDING_NODE_LIMIT = 50_000;
 
 const PHASE_LABELS: Record<string, string> = {
   extracting: 'Scanning files',
@@ -117,8 +115,9 @@ export const analyzeCommand = async (
   const { storagePath, kuzuPath } = getStoragePaths(repoPath);
   const currentCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
+  const gitNexusVersion = getGitNexusVersion();
 
-  if (shouldSkipAnalyze(existingMeta, currentCommit, GITNEXUS_VERSION, options)) {
+  if (shouldSkipAnalyze(existingMeta, currentCommit, gitNexusVersion, options)) {
     console.log('  Already up to date\n');
     return;
   }
@@ -264,13 +263,15 @@ export const analyzeCommand = async (
 
   // ── Phase 4: Embeddings (90–98%) ──────────────────────────────────
   const stats = await getKuzuStats();
+  const embeddingNodeLimit = getEmbeddingNodeLimit();
+  const embeddingConfig = getCliEmbeddingConfig();
   let embeddingTime = '0.0';
   let embeddingSkipped = true;
   let embeddingSkipReason = 'off (use --embeddings to enable)';
 
   if (options?.embeddings) {
-    if (stats.nodes > EMBEDDING_NODE_LIMIT) {
-      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${EMBEDDING_NODE_LIMIT.toLocaleString()} limit)`;
+    if (stats.nodes > embeddingNodeLimit) {
+      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${embeddingNodeLimit.toLocaleString()} limit)`;
     } else {
       embeddingSkipped = false;
     }
@@ -288,7 +289,7 @@ export const analyzeCommand = async (
         const label = progress.phase === 'loading-model' ? 'Loading embedding model...' : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
         updateBar(scaled, label);
       },
-      {},
+      embeddingConfig,
       cachedEmbeddingNodeIds.size > 0 ? cachedEmbeddingNodeIds : undefined,
     );
     embeddingTime = ((Date.now() - t0Emb) / 1000).toFixed(1);
@@ -308,7 +309,7 @@ export const analyzeCommand = async (
     repoPath,
     lastCommit: currentCommit,
     indexedAt: new Date().toISOString(),
-    toolVersion: GITNEXUS_VERSION,
+    toolVersion: gitNexusVersion,
     stats: {
       files: pipelineResult.totalFileCount,
       nodes: stats.nodes,

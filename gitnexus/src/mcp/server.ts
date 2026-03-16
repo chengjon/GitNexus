@@ -11,7 +11,6 @@
  * Resources: repos, repo/{name}/context, repo/{name}/clusters, ...
  */
 
-import { createRequire } from 'module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CompatibleStdioServerTransport } from './compatible-stdio-transport.js';
 import {
@@ -26,6 +25,7 @@ import {
 import { GITNEXUS_TOOLS } from './tools.js';
 import type { LocalBackend } from './local/local-backend.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
+import { getGitNexusVersion } from '../cli/index-freshness.js';
 
 /**
  * Next-step hints appended to tool responses.
@@ -81,12 +81,10 @@ function getNextStepHint(toolName: string, args: Record<string, any> | undefined
  * Transport-agnostic — caller connects the desired transport.
  */
 export function createMCPServer(backend: LocalBackend): Server {
-  const require = createRequire(import.meta.url);
-  const pkgVersion: string = require('../../package.json').version;
   const server = new Server(
     {
       name: 'gitnexus',
-      version: pkgVersion,
+      version: getGitNexusVersion(),
     },
     {
       capabilities: {

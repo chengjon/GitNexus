@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { getGitNexusVersion } from '../../src/cli/index-freshness.js';
 
 // Mock all the heavy imports before importing index
 vi.mock('../../src/cli/analyze.js', () => ({
@@ -11,33 +15,44 @@ vi.mock('../../src/cli/setup.js', () => ({
   setupCommand: vi.fn(),
 }));
 
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const packageJsonPath = path.resolve(testDir, '..', '..', 'package.json');
+
+async function readPackageJson() {
+  const raw = await fs.readFile(packageJsonPath, 'utf-8');
+  return JSON.parse(raw) as {
+    version: string;
+    scripts: Record<string, string>;
+    bin: Record<string, string> | string;
+  };
+}
+
 describe('CLI commands', () => {
   describe('version', () => {
-    it('package.json has a valid version string', async () => {
-      const pkg = await import('../../package.json', { with: { type: 'json' } });
-      expect(pkg.default.version).toMatch(/^\d+\.\d+\.\d+/);
+    it('gitnexus exposes a valid version string', () => {
+      expect(getGitNexusVersion()).toMatch(/^\d+\.\d+\.\d+/);
     });
   });
 
   describe('package.json scripts', () => {
     it('has test scripts configured', async () => {
-      const pkg = await import('../../package.json', { with: { type: 'json' } });
-      expect(pkg.default.scripts.test).toBeDefined();
-      expect(pkg.default.scripts['test:integration']).toBeDefined();
-      expect(pkg.default.scripts['test:all']).toBeDefined();
+      const pkg = await readPackageJson();
+      expect(pkg.scripts.test).toBeDefined();
+      expect(pkg.scripts['test:integration']).toBeDefined();
+      expect(pkg.scripts['test:all']).toBeDefined();
     });
 
     it('has build script', async () => {
-      const pkg = await import('../../package.json', { with: { type: 'json' } });
-      expect(pkg.default.scripts.build).toBeDefined();
+      const pkg = await readPackageJson();
+      expect(pkg.scripts.build).toBeDefined();
     });
   });
 
   describe('package.json bin entry', () => {
     it('exposes gitnexus binary', async () => {
-      const pkg = await import('../../package.json', { with: { type: 'json' } });
-      expect(pkg.default.bin).toBeDefined();
-      expect(pkg.default.bin.gitnexus || pkg.default.bin).toBeDefined();
+      const pkg = await readPackageJson();
+      expect(pkg.bin).toBeDefined();
+      expect((pkg.bin as Record<string, string>).gitnexus || pkg.bin).toBeDefined();
     });
   });
 
