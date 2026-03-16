@@ -28,6 +28,12 @@ const isDev = process.env.NODE_ENV === 'development';
  */
 export type EmbeddingProgressCallback = (progress: EmbeddingProgress) => void;
 
+export interface EmbeddingRunStats {
+  embeddableNodeCount: number;
+  totalBatches: number;
+  batchSize: number;
+}
+
 /**
  * Query all embeddable nodes from KuzuDB
  * Uses table-specific queries (File has different schema than code elements)
@@ -80,6 +86,23 @@ const queryEmbeddableNodes = async (
   }
 
   return allNodes;
+};
+
+export const countEmbeddableNodes = async (
+  executeQuery: (cypher: string) => Promise<any[]>,
+): Promise<number> => {
+  let total = 0;
+
+  for (const label of EMBEDDABLE_LABELS) {
+    try {
+      const rows = await executeQuery(`MATCH (n:${label}) RETURN COUNT(*) AS cnt`);
+      total += rows[0]?.cnt ?? rows[0]?.[0] ?? 0;
+    } catch {
+      // table might not exist yet
+    }
+  }
+
+  return total;
 };
 
 /**
@@ -136,7 +159,7 @@ export const runEmbeddingPipeline = async (
   onProgress: EmbeddingProgressCallback,
   config: Partial<EmbeddingConfig> = {},
   skipNodeIds?: Set<string>,
-): Promise<void> => {
+): Promise<EmbeddingRunStats> => {
   const finalConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config };
 
   try {
@@ -191,7 +214,11 @@ export const runEmbeddingPipeline = async (
         nodesProcessed: 0,
         totalNodes: 0,
       });
-      return;
+      return {
+        embeddableNodeCount: 0,
+        totalBatches: 0,
+        batchSize: finalConfig.batchSize,
+      };
     }
 
     // Phase 3: Batch embed nodes
@@ -266,6 +293,12 @@ export const runEmbeddingPipeline = async (
     if (isDev) {
       console.log('✅ Embedding pipeline complete!');
     }
+
+    return {
+      embeddableNodeCount: totalNodes,
+      totalBatches,
+      batchSize,
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
@@ -409,4 +442,3 @@ export const semanticSearchWithContext = async (
     relationType: null,
   }));
 };
-

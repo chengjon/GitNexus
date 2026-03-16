@@ -20,6 +20,12 @@ import { generateAIContextFiles } from './ai-context.js';
 import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
 import { getIndexFreshness, getGitNexusVersion } from './index-freshness.js';
 import { getCliEmbeddingConfig, getEmbeddingNodeLimit } from './embedding-overrides.js';
+import {
+  formatEmbeddingRunDetails,
+  formatEmbeddingSkipReason,
+  shouldSuggestIncrementalEmbeddingRefresh,
+} from './embedding-insights.js';
+import { getEmbeddingRuntimeConfig } from '../core/embeddings/runtime-config.js';
 import fs from 'fs/promises';
 
 
@@ -265,13 +271,18 @@ export const analyzeCommand = async (
   const stats = await getKuzuStats();
   const embeddingNodeLimit = getEmbeddingNodeLimit();
   const embeddingConfig = getCliEmbeddingConfig();
+  const embeddingRuntimeConfig = getEmbeddingRuntimeConfig();
+  const { countEmbeddableNodes } = await import('../core/embeddings/embedding-pipeline.js');
+  const embeddableNodeCount = options?.embeddings ? await countEmbeddableNodes(executeQuery) : 0;
   let embeddingTime = '0.0';
   let embeddingSkipped = true;
   let embeddingSkipReason = 'off (use --embeddings to enable)';
+  let embeddingDetail = '';
 
   if (options?.embeddings) {
-    if (stats.nodes > embeddingNodeLimit) {
-      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${embeddingNodeLimit.toLocaleString()} limit)`;
+    if (embeddableNodeCount > embeddingNodeLimit) {
+      embeddingSkipReason = formatEmbeddingSkipReason(embeddableNodeCount, embeddingNodeLimit);
+      embeddingDetail = `${embeddableNodeCount.toLocaleString()} embeddable | limit ${embeddingNodeLimit.toLocaleString()}`;
     } else {
       embeddingSkipped = false;
     }
@@ -281,18 +292,33 @@ export const analyzeCommand = async (
     updateBar(90, 'Loading embedding model...');
     const t0Emb = Date.now();
     const { runEmbeddingPipeline } = await import('../core/embeddings/embedding-pipeline.js');
-    await runEmbeddingPipeline(
+    const embeddingStats = await runEmbeddingPipeline(
       executeQuery,
       executeWithReusedStatement,
       (progress) => {
         const scaled = 90 + Math.round((progress.percent / 100) * 8);
-        const label = progress.phase === 'loading-model' ? 'Loading embedding model...' : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
+        const label = progress.phase === 'loading-model'
+          ? 'Loading embedding model...'
+          : progress.phase === 'embedding'
+            ? `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'} (batch ${progress.currentBatch || 0}/${progress.totalBatches || '?'})`
+            : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
         updateBar(scaled, label);
       },
       embeddingConfig,
       cachedEmbeddingNodeIds.size > 0 ? cachedEmbeddingNodeIds : undefined,
     );
-    embeddingTime = ((Date.now() - t0Emb) / 1000).toFixed(1);
+    const embeddingSeconds = (Date.now() - t0Emb) / 1000;
+    embeddingTime = embeddingSeconds.toFixed(1);
+    embeddingDetail = formatEmbeddingRunDetails({
+      provider: embeddingRuntimeConfig.provider,
+      model: embeddingRuntimeConfig.provider === 'ollama'
+        ? embeddingRuntimeConfig.ollamaModel
+        : (embeddingConfig.modelId || embeddingRuntimeConfig.localModelPath || 'Snowflake/snowflake-arctic-embed-xs'),
+      embeddableNodeCount: embeddableNodeCount || embeddingStats.embeddableNodeCount,
+      totalBatches: embeddingStats.totalBatches,
+      batchSize: embeddingStats.batchSize,
+      seconds: embeddingSeconds,
+    });
   }
 
   // ── Phase 5: Finalize (98–100%) ───────────────────────────────────
@@ -372,6 +398,9 @@ export const analyzeCommand = async (
   console.log(`\n  Repository indexed successfully (${totalTime}s)${embeddingsCached ? ` [${cachedEmbeddings.length} embeddings cached]` : ''}\n`);
   console.log(`  ${stats.nodes.toLocaleString()} nodes | ${stats.edges.toLocaleString()} edges | ${pipelineResult.communityResult?.stats.totalCommunities || 0} clusters | ${pipelineResult.processResult?.stats.totalProcesses || 0} flows`);
   console.log(`  KuzuDB ${kuzuTime}s | FTS ${ftsTime}s | Embeddings ${embeddingSkipped ? embeddingSkipReason : embeddingTime + 's'}`);
+  if (options?.embeddings && embeddingDetail) {
+    console.log(`  Embeddings detail: ${embeddingDetail}`);
+  }
   console.log(`  ${repoPath}`);
 
   if (aiContext.files.length > 0) {
@@ -385,6 +414,10 @@ export const analyzeCommand = async (
       return sum + (m ? parseInt(m[1]) : 0);
     }, 0);
     console.log(`  Note: ${totalFallback} edges across ${kuzuWarnings.length} types inserted via fallback (schema will be updated in next release)`);
+  }
+
+  if (shouldSuggestIncrementalEmbeddingRefresh(options?.force, options?.embeddings, embeddingCount)) {
+    console.log('  Tip: Future refreshes usually omit `--force` so GitNexus can reuse existing embeddings.');
   }
 
   try {
