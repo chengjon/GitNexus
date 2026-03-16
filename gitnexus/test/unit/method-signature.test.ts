@@ -5,13 +5,16 @@ import TypeScript from 'tree-sitter-typescript';
 import Python from 'tree-sitter-python';
 import Java from 'tree-sitter-java';
 import CSharp from 'tree-sitter-c-sharp';
-import Kotlin from 'tree-sitter-kotlin';
 import CPP from 'tree-sitter-cpp';
 import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
+import { loadOptionalGrammar } from '../helpers/optional-grammars.js';
+
+const Kotlin = loadOptionalGrammar('tree-sitter-kotlin');
 
 describe('extractMethodSignature', () => {
   const parser = new Parser();
+  const describeKotlin = Kotlin ? describe : describe.skip;
 
   it('returns zero params and no return type for null node', () => {
     const sig = extractMethodSignature(null);
@@ -142,7 +145,7 @@ describe('extractMethodSignature', () => {
     });
   });
 
-  describe('Kotlin', () => {
+  describeKotlin('Kotlin', () => {
     it('extracts params from a Kotlin function declaration', () => {
       parser.setLanguage(Kotlin);
       const code = `object OneArg {
@@ -393,7 +396,9 @@ func log(args ...string) int { return 0 }`;
       expect(sig.parameterCount).toBeUndefined();
     });
 
-    it('Kotlin: marks vararg with undefined parameterCount', () => {
+    const itKotlin = Kotlin ? it : it.skip;
+
+    itKotlin('Kotlin: marks vararg with undefined parameterCount', () => {
       parser.setLanguage(Kotlin);
       const code = `object Foo {
   fun log(vararg args: String) {}

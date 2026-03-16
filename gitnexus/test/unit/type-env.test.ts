@@ -8,8 +8,10 @@ import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
 import Python from 'tree-sitter-python';
 import CPP from 'tree-sitter-cpp';
-import Kotlin from 'tree-sitter-kotlin';
 import PHP from 'tree-sitter-php';
+import { loadOptionalGrammar } from '../helpers/optional-grammars.js';
+
+const Kotlin = loadOptionalGrammar('tree-sitter-kotlin');
 
 const parser = new Parser();
 
@@ -271,6 +273,29 @@ describe('buildTypeEnv', () => {
       // PHP parameter type extraction
       expect(flatGet(env, '$user')).toBe('User');
       expect(flatGet(env, '$repo')).toBe('Repository');
+    });
+  });
+
+  const describeKotlin = Kotlin ? describe : describe.skip;
+
+  describeKotlin('Kotlin', () => {
+    it('extracts type from Kotlin local declaration', () => {
+      const tree = parse(`
+        fun run() {
+          val user: User = getUser()
+        }
+      `, Kotlin);
+      const env = buildTypeEnv(tree, 'kotlin');
+      expect(flatGet(env, 'user')).toBe('User');
+    });
+
+    it('extracts type from Kotlin function parameters', () => {
+      const tree = parse(`
+        fun process(user: User, repo: Repository) {}
+      `, Kotlin);
+      const env = buildTypeEnv(tree, 'kotlin');
+      expect(flatGet(env, 'user')).toBe('User');
+      expect(flatGet(env, 'repo')).toBe('Repository');
     });
   });
 

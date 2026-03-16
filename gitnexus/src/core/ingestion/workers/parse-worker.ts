@@ -1,25 +1,9 @@
 import { parentPort } from 'node:worker_threads';
 import Parser from 'tree-sitter';
-import JavaScript from 'tree-sitter-javascript';
-import TypeScript from 'tree-sitter-typescript';
-import Python from 'tree-sitter-python';
-import Java from 'tree-sitter-java';
-import C from 'tree-sitter-c';
-import CPP from 'tree-sitter-cpp';
-import CSharp from 'tree-sitter-c-sharp';
-import Go from 'tree-sitter-go';
-import Rust from 'tree-sitter-rust';
-import Kotlin from 'tree-sitter-kotlin';
-import PHP from 'tree-sitter-php';
-import { createRequire } from 'node:module';
 import { SupportedLanguages } from '../../../config/supported-languages.js';
+import { createLanguageMap, resolveLanguageKey } from '../../tree-sitter/language-registry.js';
 import { LANGUAGE_QUERIES } from '../tree-sitter-queries.js';
 import { getTreeSitterBufferSize, TREE_SITTER_MAX_BUFFER } from '../constants.js';
-
-// tree-sitter-swift is an optionalDependency — may not be installed
-const _require = createRequire(import.meta.url);
-let Swift: any = null;
-try { Swift = _require('tree-sitter-swift'); } catch {}
 import { 
   getLanguageFromFilename,
   FUNCTION_NODE_TYPES,
@@ -142,26 +126,10 @@ export interface ParseWorkerInput {
 
 const parser = new Parser();
 
-const languageMap: Record<string, any> = {
-  [SupportedLanguages.JavaScript]: JavaScript,
-  [SupportedLanguages.TypeScript]: TypeScript.typescript,
-  [`${SupportedLanguages.TypeScript}:tsx`]: TypeScript.tsx,
-  [SupportedLanguages.Python]: Python,
-  [SupportedLanguages.Java]: Java,
-  [SupportedLanguages.C]: C,
-  [SupportedLanguages.CPlusPlus]: CPP,
-  [SupportedLanguages.CSharp]: CSharp,
-  [SupportedLanguages.Go]: Go,
-  [SupportedLanguages.Rust]: Rust,
-  [SupportedLanguages.Kotlin]: Kotlin,
-  [SupportedLanguages.PHP]: PHP.php_only,
-  ...(Swift ? { [SupportedLanguages.Swift]: Swift } : {}),
-};
+const languageMap: Record<string, any> = createLanguageMap();
 
 const setLanguage = (language: SupportedLanguages, filePath: string): void => {
-  const key = language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
-    ? `${language}:tsx`
-    : language;
+  const key = resolveLanguageKey(language, filePath);
   const lang = languageMap[key];
   if (!lang) throw new Error(`Unsupported language: ${language}`);
   parser.setLanguage(lang);

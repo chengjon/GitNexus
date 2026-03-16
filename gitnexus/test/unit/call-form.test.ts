@@ -6,13 +6,16 @@ import TypeScript from 'tree-sitter-typescript';
 import Python from 'tree-sitter-python';
 import Java from 'tree-sitter-java';
 import CSharp from 'tree-sitter-c-sharp';
-import Kotlin from 'tree-sitter-kotlin';
 import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
 import CPP from 'tree-sitter-cpp';
 import PHP from 'tree-sitter-php';
 import { LANGUAGE_QUERIES } from '../../src/core/ingestion/tree-sitter-queries.js';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
+import { loadOptionalGrammar } from '../helpers/optional-grammars.js';
+
+const Kotlin = loadOptionalGrammar('tree-sitter-kotlin');
+const describeKotlin = Kotlin ? describe : describe.skip;
 
 /**
  * Helper: parse code, run the language query, and return all @call captures
@@ -227,7 +230,7 @@ describe('inferCallForm', () => {
     });
   });
 
-  describe('Kotlin', () => {
+  describeKotlin('Kotlin', () => {
     it('detects free call', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { doStuff() }`;
@@ -371,7 +374,7 @@ describe('extractReceiverName', () => {
     });
   });
 
-  describe('Kotlin', () => {
+  describeKotlin('Kotlin', () => {
     it('extracts receiver from navigation_expression', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { user.save() }`;

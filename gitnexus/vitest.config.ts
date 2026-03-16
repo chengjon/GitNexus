@@ -6,6 +6,9 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     testTimeout: 30000,
     pool: 'forks',
+    // Native addons under Node 24 intermittently break forked worker IPC with EPIPE.
+    // Run test files sequentially until the underlying runtime issue is resolved.
+    fileParallelism: false,
     globals: true,
     setupFiles: ['test/setup.ts'],
     teardownTimeout: 3000,
