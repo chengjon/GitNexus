@@ -19,6 +19,11 @@ import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingConfig, type ModelProgress } from './types.js';
+import {
+  applyEmbeddingRuntimeConfig,
+  formatEmbeddingInitError,
+  getEmbeddingRuntimeConfig,
+} from './runtime-config.js';
 
 /**
  * Check whether CUDA libraries are actually available on this system.
@@ -108,6 +113,7 @@ export const initEmbedder = async (
     try {
       // Configure transformers.js environment
       env.allowLocalModels = false;
+      applyEmbeddingRuntimeConfig(env as any, getEmbeddingRuntimeConfig());
       
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev) {
@@ -182,7 +188,7 @@ export const initEmbedder = async (
       isInitializing = false;
       initPromise = null;
       embedderInstance = null;
-      throw error;
+      throw formatEmbeddingInitError(error, getEmbeddingRuntimeConfig());
     } finally {
       isInitializing = false;
     }
@@ -286,4 +292,3 @@ export const disposeEmbedder = async (): Promise<void> => {
     initPromise = null;
   }
 };
-
