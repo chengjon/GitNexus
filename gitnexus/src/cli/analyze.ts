@@ -18,6 +18,7 @@ import { getStoragePaths, saveMeta, loadMeta, addToGitignore, registerRepo, getG
 import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 import { generateAIContextFiles } from './ai-context.js';
 import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
+import { getIndexFreshness, GITNEXUS_VERSION } from './index-freshness.js';
 import fs from 'fs/promises';
 
 
@@ -49,6 +50,19 @@ export interface AnalyzeOptions {
   skills?: boolean;
   verbose?: boolean;
 }
+
+export const shouldSkipAnalyze = (
+  existingMeta: { lastCommit?: string; toolVersion?: string } | null,
+  currentCommit: string,
+  currentToolVersion: string,
+  options?: AnalyzeOptions,
+): boolean => {
+  if (!existingMeta || options?.force || options?.skills) {
+    return false;
+  }
+
+  return getIndexFreshness(existingMeta as any, currentCommit, currentToolVersion).isUpToDate;
+};
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
 const EMBEDDING_NODE_LIMIT = 50_000;
@@ -104,7 +118,7 @@ export const analyzeCommand = async (
   const currentCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
 
-  if (existingMeta && !options?.force && !options?.skills && existingMeta.lastCommit === currentCommit) {
+  if (shouldSkipAnalyze(existingMeta, currentCommit, GITNEXUS_VERSION, options)) {
     console.log('  Already up to date\n');
     return;
   }
@@ -294,6 +308,7 @@ export const analyzeCommand = async (
     repoPath,
     lastCommit: currentCommit,
     indexedAt: new Date().toISOString(),
+    toolVersion: GITNEXUS_VERSION,
     stats: {
       files: pipelineResult.totalFileCount,
       nodes: stats.nodes,

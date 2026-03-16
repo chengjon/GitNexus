@@ -6,6 +6,7 @@
 
 import { findRepo } from '../storage/repo-manager.js';
 import { getCurrentCommit, isGitRepo } from '../storage/git.js';
+import { getIndexFreshness, GITNEXUS_VERSION } from './index-freshness.js';
 
 export const statusCommand = async () => {
   const cwd = process.cwd();
@@ -23,11 +24,13 @@ export const statusCommand = async () => {
   }
 
   const currentCommit = getCurrentCommit(repo.repoPath);
-  const isUpToDate = currentCommit === repo.meta.lastCommit;
+  const freshness = getIndexFreshness(repo.meta, currentCommit, GITNEXUS_VERSION);
 
   console.log(`Repository: ${repo.repoPath}`);
   console.log(`Indexed: ${new Date(repo.meta.indexedAt).toLocaleString()}`);
   console.log(`Indexed commit: ${repo.meta.lastCommit?.slice(0, 7)}`);
   console.log(`Current commit: ${currentCommit?.slice(0, 7)}`);
-  console.log(`Status: ${isUpToDate ? '✅ up-to-date' : '⚠️ stale (re-run gitnexus analyze)'}`);
+  console.log(`Indexed with GitNexus: ${repo.meta.toolVersion || 'unknown'}`);
+  console.log(`Current GitNexus: ${GITNEXUS_VERSION}`);
+  console.log(`Status: ${freshness.isUpToDate ? '✅ up-to-date' : '⚠️ stale (re-run gitnexus analyze)'}`);
 };
