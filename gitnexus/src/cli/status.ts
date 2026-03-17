@@ -7,6 +7,7 @@
 import { findRepo } from '../storage/repo-manager.js';
 import { getCurrentCommit, isGitRepo } from '../storage/git.js';
 import { getIndexFreshness, getGitNexusVersion } from './index-freshness.js';
+import { getIndexHealth } from '../mcp/staleness.js';
 
 export const statusCommand = async () => {
   const cwd = process.cwd();
@@ -26,6 +27,7 @@ export const statusCommand = async () => {
   const currentCommit = getCurrentCommit(repo.repoPath);
   const gitNexusVersion = getGitNexusVersion();
   const freshness = getIndexFreshness(repo.meta, currentCommit, gitNexusVersion);
+  const health = getIndexHealth(repo.repoPath, repo.meta.lastCommit);
 
   console.log(`Repository: ${repo.repoPath}`);
   console.log(`Indexed: ${new Date(repo.meta.indexedAt).toLocaleString()}`);
@@ -33,5 +35,12 @@ export const statusCommand = async () => {
   console.log(`Current commit: ${currentCommit?.slice(0, 7)}`);
   console.log(`Indexed with GitNexus: ${repo.meta.toolVersion || 'unknown'}`);
   console.log(`Current GitNexus: ${gitNexusVersion}`);
+  console.log(`Health: ${health.level}`);
+  if (health.reasons.length > 0) {
+    console.log(`Reasons: ${health.reasons.join(', ')}`);
+  }
   console.log(`Status: ${freshness.isUpToDate ? '✅ up-to-date' : '⚠️ stale (re-run gitnexus analyze)'}`);
+  if (health.level !== 'fresh' || !freshness.isUpToDate) {
+    console.log('Run: gitnexus analyze');
+  }
 };

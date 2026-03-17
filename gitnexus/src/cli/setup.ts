@@ -10,117 +10,94 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { createClaudeCodeAdapter } from './host-adapters/claude-code.js';
+import { createCodexAdapter } from './host-adapters/codex.js';
+import { createCursorAdapter } from './host-adapters/cursor.js';
+import { createGenericStdioAdapter } from './host-adapters/generic-stdio.js';
+import { dirExists, readJsonFile, writeJsonFile } from './host-adapters/shared.js';
 import { getGlobalDir } from '../storage/repo-manager.js';
+import type { HostAdapter } from './host-adapters/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 interface SetupResult {
   configured: string[];
+  manual: Array<{ name: string; steps: string[] }>;
   skipped: string[];
   errors: string[];
 }
 
-/**
- * The MCP server entry for all editors.
- * On Windows, npx must be invoked via cmd /c since it's a .cmd script.
- */
-function getMcpEntry() {
-  if (process.platform === 'win32') {
-    return {
-      command: 'cmd',
-      args: ['/c', 'npx', '-y', 'gitnexus@latest', 'mcp'],
-    };
-  }
-  return {
-    command: 'npx',
-    args: ['-y', 'gitnexus@latest', 'mcp'],
-  };
+export interface HostSetupPlan {
+  adapter: HostAdapter;
+  checkConfigured: () => Promise<boolean>;
+  needsManualConfig: boolean;
 }
 
-/**
- * Merge gitnexus entry into an existing MCP config JSON object.
- * Returns the updated config.
- */
-function mergeMcpConfig(existing: any): any {
-  if (!existing || typeof existing !== 'object') {
-    existing = {};
+async function hasConfiguredServer(configPath: string, segments: string[]): Promise<boolean> {
+  const config = await readJsonFile(configPath);
+  let current: any = config;
+
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object') {
+      return false;
+    }
+    current = current[segment];
   }
-  if (!existing.mcpServers || typeof existing.mcpServers !== 'object') {
-    existing.mcpServers = {};
-  }
-  existing.mcpServers.gitnexus = getMcpEntry();
-  return existing;
+
+  return Boolean(current && typeof current === 'object' && current.gitnexus);
 }
 
-/**
- * Try to read a JSON file, returning null if it doesn't exist or is invalid.
- */
-async function readJsonFile(filePath: string): Promise<any | null> {
+async function hasConfiguredTomlTable(configPath: string, tableName: string): Promise<boolean> {
   try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Write JSON to a file, creating parent directories if needed.
- */
-async function writeJsonFile(filePath: string, data: any): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
-}
-
-/**
- * Check if a directory exists
- */
-async function dirExists(dirPath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(dirPath);
-    return stat.isDirectory();
+    const content = await fs.readFile(configPath, 'utf-8');
+    const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tablePattern = new RegExp(`^\\s*\\[\\s*${escaped}\\s*\\]\\s*$`, 'm');
+    return tablePattern.test(content);
   } catch {
     return false;
   }
 }
 
-// ─── Editor-specific setup ─────────────────────────────────────────
+export function getHostPlans(options?: { homeDir?: string; repoPath?: string }): HostSetupPlan[] {
+  const homeDir = options?.homeDir ?? os.homedir();
+  const repoPath = options?.repoPath ?? process.cwd();
+  const openCodeConfigPath = path.join(homeDir, '.config', 'opencode', 'config.json');
+  const cursorConfigPath = path.join(homeDir, '.cursor', 'mcp.json');
+  const claudeConfigPath = path.join(repoPath, '.mcp.json');
+  const claudeGlobalConfigPath = path.join(homeDir, '.claude.json');
+  const codexConfigPath = path.join(homeDir, '.codex', 'config.toml');
 
-async function setupCursor(result: SetupResult): Promise<void> {
-  const cursorDir = path.join(os.homedir(), '.cursor');
-  if (!(await dirExists(cursorDir))) {
-    result.skipped.push('Cursor (not installed)');
-    return;
-  }
-
-  const mcpPath = path.join(cursorDir, 'mcp.json');
-  try {
-    const existing = await readJsonFile(mcpPath);
-    const updated = mergeMcpConfig(existing);
-    await writeJsonFile(mcpPath, updated);
-    result.configured.push('Cursor');
-  } catch (err: any) {
-    result.errors.push(`Cursor: ${err.message}`);
-  }
-}
-
-async function setupClaudeCode(result: SetupResult): Promise<void> {
-  const claudeDir = path.join(os.homedir(), '.claude');
-  const hasClaude = await dirExists(claudeDir);
-
-  if (!hasClaude) {
-    result.skipped.push('Claude Code (not installed)');
-    return;
-  }
-
-  // Claude Code uses a JSON settings file at ~/.claude.json or claude mcp add
-  console.log('');
-  console.log('  Claude Code detected. Run this command to add GitNexus MCP:');
-  console.log('');
-  console.log('    claude mcp add gitnexus -- npx -y gitnexus mcp');
-  console.log('');
-  result.configured.push('Claude Code (MCP manual step printed)');
+  return [
+    {
+      adapter: createCursorAdapter({ homeDir }),
+      checkConfigured: async () => hasConfiguredServer(cursorConfigPath, ['mcpServers']),
+      needsManualConfig: false,
+    },
+    {
+      adapter: createClaudeCodeAdapter({ homeDir }),
+      checkConfigured: async () =>
+        (await hasConfiguredServer(claudeConfigPath, ['mcpServers']))
+        || (await hasConfiguredServer(claudeGlobalConfigPath, ['mcpServers'])),
+      needsManualConfig: true,
+    },
+    {
+      adapter: createGenericStdioAdapter({
+        id: 'opencode',
+        displayName: 'OpenCode',
+        detectPath: path.join(homeDir, '.config', 'opencode'),
+        configPath: openCodeConfigPath,
+        serverContainerPath: ['mcp'],
+      }),
+      checkConfigured: async () => hasConfiguredServer(openCodeConfigPath, ['mcp']),
+      needsManualConfig: false,
+    },
+    {
+      adapter: createCodexAdapter({ homeDir }),
+      checkConfigured: async () => hasConfiguredTomlTable(codexConfigPath, 'mcp_servers.gitnexus'),
+      needsManualConfig: true,
+    },
+  ];
 }
 
 /**
@@ -215,26 +192,6 @@ async function installClaudeCodeHooks(result: SetupResult): Promise<void> {
     result.configured.push('Claude Code hooks (PreToolUse, PostToolUse)');
   } catch (err: any) {
     result.errors.push(`Claude Code hooks: ${err.message}`);
-  }
-}
-
-async function setupOpenCode(result: SetupResult): Promise<void> {
-  const opencodeDir = path.join(os.homedir(), '.config', 'opencode');
-  if (!(await dirExists(opencodeDir))) {
-    result.skipped.push('OpenCode (not installed)');
-    return;
-  }
-
-  const configPath = path.join(opencodeDir, 'config.json');
-  try {
-    const existing = await readJsonFile(configPath);
-    const config = existing || {};
-    if (!config.mcp) config.mcp = {};
-    config.mcp.gitnexus = getMcpEntry();
-    await writeJsonFile(configPath, config);
-    result.configured.push('OpenCode');
-  } catch (err: any) {
-    result.errors.push(`OpenCode: ${err.message}`);
   }
 }
 
@@ -355,14 +312,28 @@ export const setupCommand = async () => {
 
   const result: SetupResult = {
     configured: [],
+    manual: [],
     skipped: [],
     errors: [],
   };
 
-  // Detect and configure each editor's MCP
-  await setupCursor(result);
-  await setupClaudeCode(result);
-  await setupOpenCode(result);
+  const hostPlans = getHostPlans();
+
+  for (const { adapter } of hostPlans) {
+    const setup = await adapter.configure();
+    if (setup.status === 'configured' && setup.message) {
+      result.configured.push(setup.message);
+    } else if (setup.status === 'manual') {
+      result.manual.push({
+        name: setup.message ?? adapter.displayName,
+        steps: setup.manualSteps ?? adapter.manualInstructions(),
+      });
+    } else if (setup.status === 'skipped' && setup.message) {
+      result.skipped.push(setup.message);
+    } else if (setup.status === 'error' && setup.message) {
+      result.errors.push(setup.message);
+    }
+  }
   
   // Install global skills for platforms that support them
   await installClaudeCodeSkills(result);
@@ -375,6 +346,17 @@ export const setupCommand = async () => {
     console.log('  Configured:');
     for (const name of result.configured) {
       console.log(`    + ${name}`);
+    }
+  }
+
+  if (result.manual.length > 0) {
+    console.log('');
+    console.log('  Manual steps required:');
+    for (const entry of result.manual) {
+      console.log(`    ~ ${entry.name}`);
+      for (const step of entry.steps) {
+        console.log(`      ${step}`);
+      }
     }
   }
 
@@ -396,7 +378,8 @@ export const setupCommand = async () => {
 
   console.log('');
   console.log('  Summary:');
-  console.log(`    MCP configured for: ${result.configured.filter(c => !c.includes('skills')).join(', ') || 'none'}`);
+  console.log(`    MCP configured for: ${result.configured.filter(c => !c.includes('skills') && !c.includes('hooks')).join(', ') || 'none'}`);
+  console.log(`    MCP manual steps: ${result.manual.map(entry => entry.name).join(', ') || 'none'}`);
   console.log(`    Skills installed to: ${result.configured.filter(c => c.includes('skills')).length > 0 ? result.configured.filter(c => c.includes('skills')).join(', ') : 'none'}`);
   console.log('');
   console.log('  Next steps:');

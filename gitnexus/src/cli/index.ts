@@ -20,13 +20,34 @@ program
   .action(createLazyAction(() => import('./setup.js'), 'setupCommand'));
 
 program
+  .command('doctor')
+  .description('Diagnose index, registry, and host MCP readiness')
+  .option('--host <name>', 'Check a specific host configuration')
+  .option('--repo <path>', 'Check a specific repository path')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
+
+program
   .command('analyze [path]')
   .description('Index a repository (full analysis)')
   .option('-f, --force', 'Force full re-index even if up to date')
   .option('--embeddings', 'Enable embedding generation for semantic search (off by default)')
   .option('--skills', 'Generate repo-specific skill files from detected communities')
-   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
-   .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
+  .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
+  .option('--no-context', 'Skip AGENTS.md / CLAUDE.md context refresh after indexing')
+  .option('--no-gitignore', 'Skip ensuring .gitnexus is listed in .gitignore')
+  .option('--no-register', 'Skip updating the global indexed repository registry')
+  .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
+
+program
+  .command('init-project [path]')
+  .description('Initialize .gitignore and AI context files for a repository')
+  .action(createLazyAction(() => import('./init-project.js'), 'initProjectCommand'));
+
+program
+  .command('refresh-context [path]')
+  .description('Refresh AGENTS.md / CLAUDE.md context files and repo skills')
+  .action(createLazyAction(() => import('./refresh-context.js'), 'refreshContextCommand'));
 
 program
   .command('serve')

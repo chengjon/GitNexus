@@ -47,6 +47,7 @@ coverage/
 
 # Claude Code worktrees
 .claude/worktrees/
+.worktrees/
 
 # Claude code skills
 .claude/skills/generated/

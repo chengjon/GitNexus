@@ -8,7 +8,11 @@
  * - Error handling for invalid URIs
  * - Resource handlers with mocked backend
  */
-import { describe, it, expect, vi } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { execFileSync } from 'child_process';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   getResourceDefinitions,
   getResourceTemplates,
@@ -33,6 +37,37 @@ function createMockBackend(overrides: Partial<Record<string, any>> = {}): any {
     ...overrides,
   };
 }
+
+const tempDirs: string[] = [];
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+async function createTempGitRepo(prefix: string): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+
+  git(dir, ['init']);
+  git(dir, ['config', 'user.email', 'test@example.com']);
+  git(dir, ['config', 'user.name', 'GitNexus Test']);
+
+  await fs.writeFile(path.join(dir, 'file.txt'), 'v1\n', 'utf-8');
+  git(dir, ['add', 'file.txt']);
+  git(dir, ['commit', '-m', 'init']);
+
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
+});
 
 // ─── Static definitions ─────────────────────────────────────────────
 
@@ -91,6 +126,16 @@ describe('getResourceTemplates', () => {
       expect(tmpl.mimeType).toBeTruthy();
     }
   });
+
+  it('describes repo context in health terminology', () => {
+    const contextTemplate = getResourceTemplates().find(
+      (template) => template.uriTemplate === 'gitnexus://repo/{name}/context',
+    );
+
+    expect(contextTemplate).toBeDefined();
+    expect(contextTemplate!.description).toContain('health');
+    expect(contextTemplate!.description).not.toContain('staleness');
+  });
 });
 
 // ─── readResource URI parsing ────────────────────────────────────────
@@ -123,6 +168,8 @@ describe('readResource', () => {
     const result = await readResource('gitnexus://setup', backend);
     expect(result).toContain('GitNexus MCP');
     expect(result).toContain('proj');
+    expect(result).toContain('Index health');
+    expect(result).not.toContain('staleness check');
   });
 
   it('returns fallback when setup has no repos', async () => {
@@ -132,7 +179,15 @@ describe('readResource', () => {
   });
 
   it('routes gitnexus://repo/{name}/context correctly', async () => {
+    const repoDir = await createTempGitRepo('gitnexus-resources-context-');
+    const headCommit = git(repoDir, ['rev-parse', 'HEAD']);
+
     const backend = createMockBackend({
+      resolvedRepo: {
+        name: 'test-project',
+        repoPath: repoDir,
+        lastCommit: headCommit,
+      },
       context: {
         projectName: 'test-project',
         stats: { fileCount: 10, functionCount: 50, communityCount: 3, processCount: 5 },
@@ -143,6 +198,9 @@ describe('readResource', () => {
     expect(backend.resolveRepo).toHaveBeenCalledWith('test-project');
     expect(result).toContain('test-project');
     expect(result).toContain('files: 10');
+    expect(result).toContain('health:');
+    expect(result).toContain('level: "fresh"');
+    expect(result).toContain('dirty: false');
   });
 
   it('returns error when context has no codebase loaded', async () => {

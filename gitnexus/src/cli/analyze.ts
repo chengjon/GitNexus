@@ -56,6 +56,37 @@ export interface AnalyzeOptions {
   embeddings?: boolean;
   skills?: boolean;
   verbose?: boolean;
+  context?: boolean;
+  gitignore?: boolean;
+  register?: boolean;
+  noContext?: boolean;
+  noGitignore?: boolean;
+  noRegister?: boolean;
+}
+
+export interface AnalyzeScopeOptions {
+  registerRepo: boolean;
+  updateGitignore: boolean;
+  refreshContext: boolean;
+}
+
+function isEnabledOption(
+  enabledValue: boolean | undefined,
+  legacyDisabledValue: boolean | undefined,
+): boolean {
+  if (typeof enabledValue === 'boolean') {
+    return enabledValue;
+  }
+
+  return legacyDisabledValue !== true;
+}
+
+export function resolveAnalyzeScopeOptions(options: AnalyzeOptions = {}): AnalyzeScopeOptions {
+  return {
+    registerRepo: isEnabledOption(options.register, options.noRegister),
+    updateGitignore: isEnabledOption(options.gitignore, options.noGitignore),
+    refreshContext: isEnabledOption(options.context, options.noContext),
+  };
 }
 
 export const shouldSkipAnalyze = (
@@ -122,6 +153,7 @@ export const analyzeCommand = async (
   const currentCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
   const gitNexusVersion = getGitNexusVersion();
+  const scope = resolveAnalyzeScopeOptions(options);
 
   if (shouldSkipAnalyze(existingMeta, currentCommit, gitNexusVersion, options)) {
     console.log('  Already up to date\n');
@@ -346,8 +378,14 @@ export const analyzeCommand = async (
     },
   };
   await saveMeta(storagePath, meta);
-  await registerRepo(repoPath, meta);
-  await addToGitignore(repoPath);
+
+  if (scope.registerRepo) {
+    await registerRepo(repoPath, meta);
+  }
+
+  if (scope.updateGitignore) {
+    await addToGitignore(repoPath);
+  }
 
   const projectName = path.basename(repoPath);
   let aggregatedClusterCount = 0;
@@ -367,14 +405,17 @@ export const analyzeCommand = async (
     generatedSkills = skillResult.skills;
   }
 
-  const aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
-    files: pipelineResult.totalFileCount,
-    nodes: stats.nodes,
-    edges: stats.edges,
-    communities: pipelineResult.communityResult?.stats.totalCommunities,
-    clusters: aggregatedClusterCount,
-    processes: pipelineResult.processResult?.stats.totalProcesses,
-  }, generatedSkills);
+  let aiContext = { files: [] as string[] };
+  if (scope.refreshContext) {
+    aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
+      files: pipelineResult.totalFileCount,
+      nodes: stats.nodes,
+      edges: stats.edges,
+      communities: pipelineResult.communityResult?.stats.totalCommunities,
+      clusters: aggregatedClusterCount,
+      processes: pipelineResult.processResult?.stats.totalProcesses,
+    }, generatedSkills);
+  }
 
   await closeKuzu();
   // Note: we intentionally do NOT call disposeEmbedder() here.
