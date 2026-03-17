@@ -9,6 +9,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getStoragePath, loadMeta } from '../storage/repo-manager.js';
 
 // ESM equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -294,3 +295,34 @@ export async function generateAIContextFiles(
   return { files: createdFiles };
 }
 
+function toRepoStats(metaStats?: {
+  files?: number;
+  nodes?: number;
+  edges?: number;
+  communities?: number;
+  processes?: number;
+  embeddings?: number;
+}): RepoStats {
+  return {
+    files: metaStats?.files,
+    nodes: metaStats?.nodes,
+    edges: metaStats?.edges,
+    communities: metaStats?.communities,
+    processes: metaStats?.processes,
+  };
+}
+
+export async function refreshAIContextFiles(
+  repoPath: string,
+  stats?: RepoStats,
+): Promise<{ files: string[]; stats: RepoStats }> {
+  const storagePath = getStoragePath(repoPath);
+  const projectName = path.basename(repoPath);
+  const resolvedStats = stats ?? toRepoStats((await loadMeta(storagePath))?.stats);
+  const result = await generateAIContextFiles(repoPath, storagePath, projectName, resolvedStats);
+
+  return {
+    files: result.files,
+    stats: resolvedStats,
+  };
+}

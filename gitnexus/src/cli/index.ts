@@ -34,7 +34,20 @@ program
   .description('Index a repository (full analysis)')
   .option('-f, --force', 'Force full re-index even if up to date')
   .option('--embeddings', 'Enable embedding generation for semantic search (off by default)')
+  .option('--no-context', 'Skip AGENTS.md / CLAUDE.md context refresh after indexing')
+  .option('--no-gitignore', 'Skip ensuring .gitnexus is listed in .gitignore')
+  .option('--no-register', 'Skip updating the global indexed repository registry')
   .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
+
+program
+  .command('init-project [path]')
+  .description('Initialize .gitignore and AI context files for a repository')
+  .action(createLazyAction(() => import('./init-project.js'), 'initProjectCommand'));
+
+program
+  .command('refresh-context [path]')
+  .description('Refresh AGENTS.md / CLAUDE.md context files and repo skills')
+  .action(createLazyAction(() => import('./refresh-context.js'), 'refreshContextCommand'));
 
 program
   .command('serve')

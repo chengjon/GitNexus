@@ -45,6 +45,37 @@ function ensureHeap(): boolean {
 export interface AnalyzeOptions {
   force?: boolean;
   embeddings?: boolean;
+  context?: boolean;
+  gitignore?: boolean;
+  register?: boolean;
+  noContext?: boolean;
+  noGitignore?: boolean;
+  noRegister?: boolean;
+}
+
+export interface AnalyzeScopeOptions {
+  registerRepo: boolean;
+  updateGitignore: boolean;
+  refreshContext: boolean;
+}
+
+function isEnabledOption(
+  enabledValue: boolean | undefined,
+  legacyDisabledValue: boolean | undefined,
+): boolean {
+  if (typeof enabledValue === 'boolean') {
+    return enabledValue;
+  }
+
+  return legacyDisabledValue !== true;
+}
+
+export function resolveAnalyzeScopeOptions(options: AnalyzeOptions = {}): AnalyzeScopeOptions {
+  return {
+    registerRepo: isEnabledOption(options.register, options.noRegister),
+    updateGitignore: isEnabledOption(options.gitignore, options.noGitignore),
+    refreshContext: isEnabledOption(options.context, options.noContext),
+  };
 }
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
@@ -96,6 +127,7 @@ export const analyzeCommand = async (
   const { storagePath, kuzuPath } = getStoragePaths(repoPath);
   const currentCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
+  const scope = resolveAnalyzeScopeOptions(options);
 
   if (existingMeta && !options?.force && existingMeta.lastCommit === currentCommit) {
     console.log('  Already up to date\n');
@@ -297,28 +329,37 @@ export const analyzeCommand = async (
     },
   };
   await saveMeta(storagePath, meta);
-  await registerRepo(repoPath, meta);
-  await addToGitignore(repoPath);
 
-  const projectName = path.basename(repoPath);
-  let aggregatedClusterCount = 0;
-  if (pipelineResult.communityResult?.communities) {
-    const groups = new Map<string, number>();
-    for (const c of pipelineResult.communityResult.communities) {
-      const label = c.heuristicLabel || c.label || 'Unknown';
-      groups.set(label, (groups.get(label) || 0) + c.symbolCount);
-    }
-    aggregatedClusterCount = Array.from(groups.values()).filter(count => count >= 5).length;
+  if (scope.registerRepo) {
+    await registerRepo(repoPath, meta);
   }
 
-  const aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
-    files: pipelineResult.totalFileCount,
-    nodes: stats.nodes,
-    edges: stats.edges,
-    communities: pipelineResult.communityResult?.stats.totalCommunities,
-    clusters: aggregatedClusterCount,
-    processes: pipelineResult.processResult?.stats.totalProcesses,
-  });
+  if (scope.updateGitignore) {
+    await addToGitignore(repoPath);
+  }
+
+  let aiContext = { files: [] as string[] };
+  if (scope.refreshContext) {
+    const projectName = path.basename(repoPath);
+    let aggregatedClusterCount = 0;
+    if (pipelineResult.communityResult?.communities) {
+      const groups = new Map<string, number>();
+      for (const c of pipelineResult.communityResult.communities) {
+        const label = c.heuristicLabel || c.label || 'Unknown';
+        groups.set(label, (groups.get(label) || 0) + c.symbolCount);
+      }
+      aggregatedClusterCount = Array.from(groups.values()).filter(count => count >= 5).length;
+    }
+
+    aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
+      files: pipelineResult.totalFileCount,
+      nodes: stats.nodes,
+      edges: stats.edges,
+      communities: pipelineResult.communityResult?.stats.totalCommunities,
+      clusters: aggregatedClusterCount,
+      processes: pipelineResult.processResult?.stats.totalProcesses,
+    });
+  }
 
   await closeKuzu();
   // Note: we intentionally do NOT call disposeEmbedder() here.

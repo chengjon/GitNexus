@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock all the heavy imports before importing index
 vi.mock('../../src/cli/analyze.js', () => ({
@@ -12,6 +12,12 @@ vi.mock('../../src/cli/setup.js', () => ({
 }));
 vi.mock('../../src/cli/doctor.js', () => ({
   doctorCommand: vi.fn(),
+}));
+vi.mock('../../src/cli/init-project.js', () => ({
+  initProjectCommand: vi.fn(),
+}));
+vi.mock('../../src/cli/refresh-context.js', () => ({
+  refreshContextCommand: vi.fn(),
 }));
 
 describe('CLI commands', () => {
@@ -69,6 +75,20 @@ describe('CLI commands', () => {
     it('is a function', async () => {
       const { doctorCommand } = await import('../../src/cli/doctor.js');
       expect(typeof doctorCommand).toBe('function');
+    });
+  });
+
+  describe('initProjectCommand', () => {
+    it('is a function', async () => {
+      const { initProjectCommand } = await import('../../src/cli/init-project.js');
+      expect(typeof initProjectCommand).toBe('function');
+    });
+  });
+
+  describe('refreshContextCommand', () => {
+    it('is a function', async () => {
+      const { refreshContextCommand } = await import('../../src/cli/refresh-context.js');
+      expect(typeof refreshContextCommand).toBe('function');
     });
   });
 

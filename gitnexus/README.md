@@ -22,11 +22,13 @@ AI coding tools don't understand your codebase structure. They edit a function w
 npx gitnexus analyze
 ```
 
-That's it. This indexes the codebase, installs agent skills, registers Claude Code hooks, and creates `AGENTS.md` / `CLAUDE.md` context files — all in one command.
+That remains the main indexing command. By default it also refreshes `AGENTS.md` / `CLAUDE.md`, installs repo-local skills, updates `.gitignore`, and registers the repo for multi-repo MCP discovery.
 
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
 `gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
+
+Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host <name>` checks whether host config, registry entries, and repo indexing are all ready.
 
 ### Editor Support
 
@@ -137,9 +139,15 @@ Your AI agent gets these tools automatically:
 
 ```bash
 gitnexus setup                    # Configure MCP for your editors (one-time)
-gitnexus analyze [path]           # Index a repository (or update stale index)
+gitnexus doctor --host codex      # Verify host MCP readiness and repo/index state
+gitnexus analyze [path]           # Index a repository (default: also register + gitignore + context refresh)
 gitnexus analyze --force          # Force full re-index
-gitnexus analyze --skip-embeddings  # Skip embedding generation (faster)
+gitnexus analyze --no-context     # Index only, skip AGENTS.md / CLAUDE.md refresh
+gitnexus analyze --no-gitignore   # Index only, skip .gitignore update
+gitnexus analyze --no-register    # Index only, skip global registry update
+gitnexus analyze --embeddings     # Enable embedding generation for semantic search
+gitnexus init-project [path]      # Initialize .gitignore, AGENTS.md / CLAUDE.md, and repo skills
+gitnexus refresh-context [path]   # Regenerate AGENTS.md / CLAUDE.md and repo skills only
 gitnexus mcp                     # Start MCP server (stdio) — serves all indexed repos
 gitnexus serve                   # Start local HTTP server (multi-repo) for web UI
 gitnexus list                    # List all indexed repositories
@@ -154,6 +162,8 @@ gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-m
 
 GitNexus supports indexing multiple repositories. Each `gitnexus analyze` registers the repo in a global registry (`~/.gitnexus/registry.json`). The MCP server serves all indexed repos automatically.
 
+`gitnexus setup` and the host adapters own global editor/MCP configuration. `gitnexus doctor` is the matching diagnostics layer for that global setup. `gitnexus init-project` and `gitnexus refresh-context` only touch project-local files inside the target repository.
+
 ## Supported Languages
 
 TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Swift
@@ -167,7 +177,7 @@ GitNexus ships with skill files that teach AI agents how to use the tools effect
 - **Impact Analysis** — Analyze blast radius before changes
 - **Refactoring** — Plan safe refactors using dependency mapping
 
-Installed automatically by both `gitnexus analyze` (per-repo) and `gitnexus setup` (global).
+Installed automatically by `gitnexus analyze`, `gitnexus init-project`, and `gitnexus refresh-context` for repo-local usage, plus `gitnexus setup` for supported global integrations.
 
 ## Requirements
 
