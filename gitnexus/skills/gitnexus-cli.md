@@ -71,6 +71,14 @@ The same settings can live in `~/.gitnexus/config.json`:
 
 Priority is: environment variables > `~/.gitnexus/config.json` > built-in defaults.
 
+You can inspect or update this without editing JSON manually:
+
+```bash
+gitnexus config embeddings show
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 8
+gitnexus config embeddings clear
+```
+
 ### status — Check index freshness
 
 ```bash

@@ -49,6 +49,39 @@ program
   .description('Refresh AGENTS.md / CLAUDE.md context files and repo skills')
   .action(createLazyAction(() => import('./refresh-context.js'), 'refreshContextCommand'));
 
+const configProgram = program
+  .command('config')
+  .description('View or update global GitNexus config');
+
+const embeddingsConfigProgram = configProgram
+  .command('embeddings')
+  .description('Manage embeddings configuration');
+
+embeddingsConfigProgram
+  .command('show')
+  .description('Show stored and effective embeddings configuration')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigShowCommand'));
+
+embeddingsConfigProgram
+  .command('set')
+  .description('Persist embeddings configuration to ~/.gitnexus/config.json')
+  .option('--provider <provider>', 'Embedding provider: huggingface or ollama')
+  .option('--ollama-base-url <url>', 'Ollama base URL')
+  .option('--ollama-model <model>', 'Ollama embedding model name')
+  .option('--node-limit <n>', 'Maximum embeddable node count before skipping embeddings')
+  .option('--batch-size <n>', 'Embedding batch size')
+  .option('--hf-remote-host <url>', 'Custom Hugging Face remote host / mirror')
+  .option('--hf-cache-dir <path>', 'Directory to cache Hugging Face model files')
+  .option('--hf-local-model-path <path>', 'Path to predownloaded local Hugging Face model files')
+  .option('--local-only <true|false>', 'Use only local Hugging Face model files')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigSetCommand'));
+
+embeddingsConfigProgram
+  .command('clear')
+  .description('Remove only embeddings settings from ~/.gitnexus/config.json')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigClearCommand'));
+
 program
   .command('serve')
   .description('Start local HTTP server for web UI connection')

@@ -7,8 +7,9 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '../..');
 const cliEntry = path.join(repoRoot, 'src/cli/index.ts');
 
-function runHelp(command: string) {
-  return spawnSync(process.execPath, ['--import', 'tsx', cliEntry, command, '--help'], {
+function runHelp(command: string | string[]) {
+  const commandArgs = Array.isArray(command) ? command : [command];
+  return spawnSync(process.execPath, ['--import', 'tsx', cliEntry, ...commandArgs, '--help'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
@@ -41,5 +42,18 @@ describe('CLI help surface', () => {
     expect(result.stdout).toContain('--depth <n>');
     expect(result.stdout).toContain('--include-tests');
     expect(result.stdout).toContain('--repo <name>');
+  });
+
+  it('config embeddings help exposes show/set/clear commands', () => {
+    const result = runHelp('config');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('embeddings');
+
+    const embeddingsResult = runHelp(['config', 'embeddings']);
+    expect(embeddingsResult.status).toBe(0);
+    expect(embeddingsResult.stdout).toContain('show');
+    expect(embeddingsResult.stdout).toContain('set');
+    expect(embeddingsResult.stdout).toContain('clear');
   });
 });

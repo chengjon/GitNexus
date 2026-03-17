@@ -23,6 +23,11 @@ vi.mock('../../src/cli/init-project.js', () => ({
 vi.mock('../../src/cli/refresh-context.js', () => ({
   refreshContextCommand: vi.fn(),
 }));
+vi.mock('../../src/cli/config.js', () => ({
+  embeddingsConfigShowCommand: vi.fn(),
+  embeddingsConfigSetCommand: vi.fn(),
+  embeddingsConfigClearCommand: vi.fn(),
+}));
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = path.resolve(testDir, '..', '..', 'package.json');
@@ -111,6 +116,23 @@ describe('CLI commands', () => {
     it('exports codex adapter factory', async () => {
       const { createCodexAdapter } = await import('../../src/cli/host-adapters/codex.js');
       expect(typeof createCodexAdapter).toBe('function');
+    });
+  });
+
+  describe('embeddings config commands', () => {
+    it('exports embeddingsConfigShowCommand', async () => {
+      const { embeddingsConfigShowCommand } = await import('../../src/cli/config.js');
+      expect(typeof embeddingsConfigShowCommand).toBe('function');
+    });
+
+    it('exports embeddingsConfigSetCommand', async () => {
+      const { embeddingsConfigSetCommand } = await import('../../src/cli/config.js');
+      expect(typeof embeddingsConfigSetCommand).toBe('function');
+    });
+
+    it('exports embeddingsConfigClearCommand', async () => {
+      const { embeddingsConfigClearCommand } = await import('../../src/cli/config.js');
+      expect(typeof embeddingsConfigClearCommand).toBe('function');
     });
   });
 });
