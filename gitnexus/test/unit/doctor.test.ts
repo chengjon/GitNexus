@@ -36,6 +36,8 @@ describe('runDoctor', () => {
             lastCommit: 'abc123',
           },
         ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => [
           {
             adapter: {
@@ -71,6 +73,8 @@ describe('runDoctor', () => {
         getGitRoot: () => '/repo',
         hasIndex: async () => false,
         readRegistry: async () => [],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => [],
       },
     );
@@ -103,6 +107,8 @@ describe('runDoctor', () => {
             lastCommit: 'abc123',
           },
         ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => [],
       },
     );
@@ -140,6 +146,8 @@ describe('runDoctor', () => {
             lastCommit: 'abc123',
           },
         ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -183,6 +191,8 @@ describe('runDoctor', () => {
             lastCommit: 'abc123',
           },
         ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -226,6 +236,8 @@ describe('runDoctor', () => {
             lastCommit: 'abc123',
           },
         ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ models: [] }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -233,6 +245,78 @@ describe('runDoctor', () => {
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'host-config', status: 'pass' }),
+      ]),
+    );
+  });
+
+  it('reports ollama embeddings config and model availability', async () => {
+    const result = await runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://localhost:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+            nodeLimit: 90000,
+            batchSize: 8,
+          },
+        }),
+        fetchJson: async () => ({
+          models: [
+            { name: 'qwen3-embedding:0.6b' },
+          ],
+        }),
+        getHostPlans: () => [],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'embeddings-config',
+          status: 'pass',
+          detail: expect.stringContaining('provider=ollama'),
+        }),
+      ]),
+    );
+  });
+
+  it('warns when ollama model is missing from the configured server', async () => {
+    const result = await runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://localhost:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+          },
+        }),
+        fetchJson: async () => ({
+          models: [
+            { name: 'embeddinggemma:latest' },
+          ],
+        }),
+        getHostPlans: () => [],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'embeddings-config',
+          status: 'warn',
+          detail: expect.stringContaining('qwen3-embedding:0.6b'),
+        }),
       ]),
     );
   });

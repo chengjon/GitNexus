@@ -1,5 +1,7 @@
-import { hasIndex, readRegistry, type RegistryEntry } from '../storage/repo-manager.js';
+import { hasIndex, loadCLIConfig, readRegistry, type CLIConfig, type RegistryEntry } from '../storage/repo-manager.js';
 import { getGitRoot, isGitRepo } from '../storage/git.js';
+import { getEmbeddingRuntimeConfig } from '../core/embeddings/runtime-config.js';
+import { getCliEmbeddingConfig, getEmbeddingNodeLimit } from './embedding-overrides.js';
 import { getHostPlans } from './setup.js';
 
 export interface DoctorOptions {
@@ -24,6 +26,8 @@ interface DoctorDeps {
   getGitRoot: (fromPath: string) => string | null;
   hasIndex: (repoPath: string) => Promise<boolean>;
   readRegistry: () => Promise<RegistryEntry[]>;
+  loadCLIConfig: () => Promise<CLIConfig>;
+  fetchJson: (url: string) => Promise<any>;
   getHostPlans: typeof getHostPlans;
 }
 
@@ -32,6 +36,14 @@ const DEFAULT_DEPS: DoctorDeps = {
   getGitRoot,
   hasIndex,
   readRegistry,
+  loadCLIConfig,
+  fetchJson: async (url: string) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  },
   getHostPlans,
 };
 
@@ -84,6 +96,49 @@ export async function runDoctor(
       ? `Index found at ${repoRoot}/.gitnexus`
       : 'Repository not indexed. Run: gitnexus analyze',
   });
+
+  const cliConfig = await deps.loadCLIConfig();
+  const embeddingRuntime = getEmbeddingRuntimeConfig(process.env, cliConfig);
+  const embeddingConfig = getCliEmbeddingConfig(cliConfig);
+  const embeddingDetail = [
+    `provider=${embeddingRuntime.provider}`,
+    embeddingRuntime.provider === 'ollama'
+      ? `model=${embeddingRuntime.ollamaModel}`
+      : `model=${embeddingConfig.modelId || 'Snowflake/snowflake-arctic-embed-xs'}`,
+    `nodeLimit=${getEmbeddingNodeLimit(cliConfig)}`,
+    `batchSize=${embeddingConfig.batchSize ?? 16}`,
+  ].join(', ');
+
+  if (embeddingRuntime.provider === 'ollama') {
+    try {
+      const payload = await deps.fetchJson(`${embeddingRuntime.ollamaBaseUrl}/api/tags`);
+      const models = Array.isArray(payload?.models) ? payload.models : [];
+      const hasModel = models.some((model) => {
+        const name = typeof model?.name === 'string' ? model.name : '';
+        return name === embeddingRuntime.ollamaModel;
+      });
+
+      checks.push({
+        name: 'embeddings-config',
+        status: hasModel ? 'pass' : 'warn',
+        detail: hasModel
+          ? `${embeddingDetail}, source=ollama, reachable=${embeddingRuntime.ollamaBaseUrl}`
+          : `${embeddingDetail}, Ollama reachable but model "${embeddingRuntime.ollamaModel}" not found`,
+      });
+    } catch (error: any) {
+      checks.push({
+        name: 'embeddings-config',
+        status: 'warn',
+        detail: `${embeddingDetail}, Ollama check failed: ${error?.message || 'unknown error'}`,
+      });
+    }
+  } else {
+    checks.push({
+      name: 'embeddings-config',
+      status: 'pass',
+      detail: `${embeddingDetail}, source=huggingface`,
+    });
+  }
 
   const registry = await deps.readRegistry();
   const registryEntry = registry.find((entry) => samePath(entry.path, repoRoot));
