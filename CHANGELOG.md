@@ -2,6 +2,23 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Embeddings configuration can now be stored in `~/.gitnexus/config.json` under an `embeddings` block instead of requiring shell env vars for every run.
+- New `gitnexus config embeddings` CLI commands:
+  - `gitnexus config embeddings show`
+  - `gitnexus config embeddings set`
+  - `gitnexus config embeddings clear`
+- Ollama embeddings support for both indexing and MCP query embeddings, with verified local workflow using `qwen3-embedding:0.6b`.
+- Embedding progress reporting now includes embeddable node count, batch count, throughput, provider, and model.
+
+### Changed
+
+- Embedding gating now uses embeddable node count instead of total graph node count.
+- `analyze --force --embeddings` now prints a follow-up hint recommending incremental refreshes without `--force` when embeddings already exist.
+
 ## [1.4.0] - 2026-03-13
 
 ### Added

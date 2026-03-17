@@ -144,6 +144,9 @@ gitnexus analyze --no-gitignore   # Index only, skip .gitignore update
 gitnexus analyze --no-register    # Index only, skip global registry update
 gitnexus analyze --embeddings     # Enable embedding generation for semantic search
 gitnexus analyze --verbose        # Log skipped files when parsers are unavailable
+gitnexus config embeddings show   # Show stored/effective embeddings config
+gitnexus config embeddings set    # Persist embeddings config to ~/.gitnexus/config.json
+gitnexus config embeddings clear  # Remove only embeddings settings from ~/.gitnexus/config.json
 gitnexus init-project [path]      # Initialize .gitignore, AGENTS.md / CLAUDE.md, and repo skills
 gitnexus refresh-context [path]   # Regenerate AGENTS.md / CLAUDE.md and repo skills only
 gitnexus mcp                     # Start MCP server (stdio) — serves all indexed repos
@@ -156,6 +159,32 @@ gitnexus wiki [path]             # Generate repository wiki from knowledge graph
 gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-mini)
 gitnexus wiki --base-url <url>   # Wiki with custom LLM API base URL
 ```
+
+### Embeddings Configuration
+
+You can configure embeddings once in `~/.gitnexus/config.json` instead of exporting shell variables every run:
+
+```json
+{
+  "embeddings": {
+    "provider": "ollama",
+    "ollamaBaseUrl": "http://localhost:11434",
+    "ollamaModel": "qwen3-embedding:0.6b",
+    "nodeLimit": 90000,
+    "batchSize": 8
+  }
+}
+```
+
+CLI helpers:
+
+```bash
+gitnexus config embeddings show
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 8
+gitnexus config embeddings clear
+```
+
+Environment variables still take precedence over `~/.gitnexus/config.json`.
 
 ### What Your AI Agent Gets
 
