@@ -76,6 +76,44 @@ To configure MCP for your editor, run `npx gitnexus setup` once — or set it up
 
 Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host <name>` checks whether host config, registry entries, and repo indexing are all ready.
 
+### AI-Readable Quick Start
+
+For AI CLIs or local agents on this machine, prefer the linked local command instead of `npx`:
+
+```bash
+# 0. Optional: verify that the local fork is active
+which gitnexus
+gitnexus --version
+
+# 1. In the target repository root
+gitnexus analyze
+
+# Expected outputs:
+# - .gitnexus/
+# - AGENTS.md
+# - CLAUDE.md
+# - .claude/skills/gitnexus/
+
+# 2. Verify host wiring
+gitnexus doctor --host codex
+gitnexus doctor --host claude
+
+# 3. Context-only workflows
+gitnexus init-project
+gitnexus refresh-context
+
+# 4. Start MCP manually if a host needs a direct stdio command
+gitnexus mcp
+```
+
+If `gitnexus` is not on `PATH`, use the local build directly:
+
+```bash
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js analyze
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host codex
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
+```
+
 ### MCP Setup
 
 `gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
