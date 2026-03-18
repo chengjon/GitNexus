@@ -1,7 +1,9 @@
 import { hasIndex, loadCLIConfig, readRegistry, type CLIConfig, type RegistryEntry } from '../storage/repo-manager.js';
 import { getGitRoot, isGitRepo } from '../storage/git.js';
 import { getEmbeddingsConfigSnapshot } from './config.js';
+import { DEFAULT_EMBEDDING_CONFIG } from '../core/embeddings/types.js';
 import { getHostPlans } from './setup.js';
+import { execFileSync } from 'node:child_process';
 
 export interface DoctorOptions {
   host?: string;
@@ -26,8 +28,77 @@ interface DoctorDeps {
   hasIndex: (repoPath: string) => Promise<boolean>;
   readRegistry: () => Promise<RegistryEntry[]>;
   loadCLIConfig: () => Promise<CLIConfig>;
-  fetchJson: (url: string) => Promise<any>;
+  fetchJson: (url: string, init?: RequestInit) => Promise<any>;
+  probeOllama: (baseUrl: string, model: string) => Promise<{ status: 'pass' | 'warn'; detail: string }>;
   getHostPlans: typeof getHostPlans;
+}
+
+function validateOllamaEmbedPayload(payload: any): boolean {
+  const embeddings = Array.isArray(payload?.embeddings) ? payload.embeddings : [];
+  const first = embeddings[0];
+  return Array.isArray(first) && first.length === DEFAULT_EMBEDDING_CONFIG.dimensions;
+}
+
+async function defaultProbeOllama(
+  fetchJson: DoctorDeps['fetchJson'],
+  baseUrl: string,
+  model: string,
+): Promise<{ status: 'pass' | 'warn'; detail: string }> {
+  const endpoint = `${baseUrl}/api/embed`;
+  const requestInit: RequestInit = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      input: 'gitnexus doctor',
+      dimensions: DEFAULT_EMBEDDING_CONFIG.dimensions,
+    }),
+  };
+
+  try {
+    const payload = await fetchJson(endpoint, requestInit);
+    return validateOllamaEmbedPayload(payload)
+      ? { status: 'pass', detail: `source=ollama, embedProbe=${endpoint}` }
+      : { status: 'warn', detail: 'Ollama responded but embedding payload was invalid' };
+  } catch (fetchError: any) {
+    const fetchMessage = fetchError?.message || 'unknown fetch error';
+
+    try {
+      const curlOutput = execFileSync(
+        'curl',
+        [
+          '-fsS',
+          endpoint,
+          '-H',
+          'Content-Type: application/json',
+          '-d',
+          JSON.stringify({
+            model,
+            input: 'gitnexus doctor',
+            dimensions: DEFAULT_EMBEDDING_CONFIG.dimensions,
+          }),
+        ],
+        {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      );
+
+      const payload = JSON.parse(curlOutput);
+      return validateOllamaEmbedPayload(payload)
+        ? { status: 'pass', detail: `source=ollama, embedProbe=${endpoint}, probeTransport=curl` }
+        : { status: 'warn', detail: 'Ollama responded via curl fallback but embedding payload was invalid' };
+    } catch (curlError: any) {
+      const curlMessage = curlError?.stderr || curlError?.message || 'unknown curl error';
+      return {
+        status: 'warn',
+        detail: `Ollama check failed at ${baseUrl}: fetch=${fetchMessage}; curl=${String(curlMessage).trim()}`,
+      };
+    }
+  }
 }
 
 const DEFAULT_DEPS: DoctorDeps = {
@@ -36,13 +107,14 @@ const DEFAULT_DEPS: DoctorDeps = {
   hasIndex,
   readRegistry,
   loadCLIConfig,
-  fetchJson: async (url: string) => {
-    const response = await fetch(url);
+  fetchJson: async (url: string, init?: RequestInit) => {
+    const response = await fetch(url, init);
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);
     }
     return response.json();
   },
+  probeOllama: async (baseUrl: string, model: string) => defaultProbeOllama(DEFAULT_DEPS.fetchJson, baseUrl, model),
   getHostPlans,
 };
 
@@ -109,28 +181,12 @@ export async function runDoctor(
   ].join(', ');
 
   if (embeddingRuntime.provider === 'ollama') {
-    try {
-      const payload = await deps.fetchJson(`${embeddingRuntime.ollamaBaseUrl}/api/tags`);
-      const models = Array.isArray(payload?.models) ? payload.models : [];
-      const hasModel = models.some((model) => {
-        const name = typeof model?.name === 'string' ? model.name : '';
-        return name === embeddingRuntime.ollamaModel;
-      });
-
-      checks.push({
-        name: 'embeddings-config',
-        status: hasModel ? 'pass' : 'warn',
-        detail: hasModel
-          ? `${embeddingDetail}, source=ollama, reachable=${embeddingRuntime.ollamaBaseUrl}`
-          : `${embeddingDetail}, Ollama reachable but model "${embeddingRuntime.ollamaModel}" not found`,
-      });
-    } catch (error: any) {
-      checks.push({
-        name: 'embeddings-config',
-        status: 'warn',
-        detail: `${embeddingDetail}, Ollama check failed at ${embeddingRuntime.ollamaBaseUrl}: ${error?.message || 'unknown error'}`,
-      });
-    }
+    const probe = await deps.probeOllama(embeddingRuntime.ollamaBaseUrl, embeddingRuntime.ollamaModel);
+    checks.push({
+      name: 'embeddings-config',
+      status: probe.status,
+      detail: `${embeddingDetail}, ${probe.detail}`,
+    });
   } else {
     checks.push({
       name: 'embeddings-config',

@@ -37,7 +37,8 @@ describe('runDoctor', () => {
           },
         ],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => [
           {
             adapter: {
@@ -74,7 +75,8 @@ describe('runDoctor', () => {
         hasIndex: async () => false,
         readRegistry: async () => [],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => [],
       },
     );
@@ -108,7 +110,8 @@ describe('runDoctor', () => {
           },
         ],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => [],
       },
     );
@@ -147,7 +150,8 @@ describe('runDoctor', () => {
           },
         ],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -192,7 +196,8 @@ describe('runDoctor', () => {
           },
         ],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -237,7 +242,8 @@ describe('runDoctor', () => {
           },
         ],
         loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ models: [] }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
         getHostPlans: () => getHostPlans({ homeDir, repoPath: repoDir }),
       },
     );
@@ -249,7 +255,7 @@ describe('runDoctor', () => {
     );
   });
 
-  it('reports ollama embeddings config and model availability', async () => {
+  it('reports ollama embeddings config when embed probe succeeds', async () => {
     const result = await runDoctor(
       { repo: '/repo', json: true },
       {
@@ -266,11 +272,8 @@ describe('runDoctor', () => {
             batchSize: 8,
           },
         }),
-        fetchJson: async () => ({
-          models: [
-            { name: 'qwen3-embedding:0.6b' },
-          ],
-        }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'pass', detail: 'source=ollama, embedProbe=http://localhost:11434/api/embed' }),
         getHostPlans: () => [],
       },
     );
@@ -286,7 +289,7 @@ describe('runDoctor', () => {
     );
   });
 
-  it('warns when ollama model is missing from the configured server', async () => {
+  it('warns when ollama embed probe returns an invalid payload', async () => {
     const result = await runDoctor(
       { repo: '/repo', json: true },
       {
@@ -301,11 +304,8 @@ describe('runDoctor', () => {
             ollamaModel: 'qwen3-embedding:0.6b',
           },
         }),
-        fetchJson: async () => ({
-          models: [
-            { name: 'embeddinggemma:latest' },
-          ],
-        }),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'Ollama responded but embedding payload was invalid' }),
         getHostPlans: () => [],
       },
     );
@@ -315,7 +315,7 @@ describe('runDoctor', () => {
         expect.objectContaining({
           name: 'embeddings-config',
           status: 'warn',
-          detail: expect.stringContaining('model=qwen3-embedding:0.6b (config)'),
+          detail: expect.stringContaining('embedding payload was invalid'),
         }),
       ]),
     );
@@ -336,9 +336,11 @@ describe('runDoctor', () => {
             ollamaModel: 'qwen3-embedding:0.6b',
           },
         }),
-        fetchJson: async () => {
-          throw new Error('ECONNREFUSED connect ECONNREFUSED 127.0.0.1:11434');
-        },
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({
+          status: 'warn',
+          detail: 'Ollama check failed at http://127.0.0.1:11434: fetch=ECONNREFUSED connect ECONNREFUSED 127.0.0.1:11434; curl=curl: (7) Failed to connect',
+        }),
         getHostPlans: () => [],
       },
     );
