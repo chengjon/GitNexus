@@ -19,7 +19,34 @@ interface EmbeddingsConfigSetOptions {
   localOnly?: string;
 }
 
-type SettingSource = 'env' | 'config' | 'default';
+export type SettingSource = 'env' | 'config' | 'default';
+
+export interface EmbeddingsConfigSnapshot {
+  stored: NonNullable<CLIConfig['embeddings']>;
+  effective: {
+    provider: string;
+    remoteHost?: string;
+    cacheDir?: string;
+    localModelPath?: string;
+    localOnly: boolean;
+    ollamaBaseUrl: string;
+    ollamaModel: string;
+    nodeLimit: number;
+    batchSize: number;
+  };
+  sources: {
+    provider: SettingSource;
+    ollamaBaseUrl: SettingSource;
+    ollamaModel: SettingSource;
+    remoteHost: SettingSource;
+    cacheDir: SettingSource;
+    localModelPath: SettingSource;
+    localOnly: SettingSource;
+    nodeLimit: SettingSource;
+    batchSize: SettingSource;
+  };
+  precedence: string;
+}
 
 function parsePositiveIntegerOption(label: string, raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
@@ -56,10 +83,12 @@ function determineSource(
   return 'default';
 }
 
-export async function embeddingsConfigShowCommand(options: EmbeddingsConfigShowOptions = {}): Promise<void> {
-  const storedConfig = await loadCLIConfig();
+export function getEmbeddingsConfigSnapshot(
+  storedConfig: CLIConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): EmbeddingsConfigSnapshot {
   const storedEmbeddings = storedConfig.embeddings || {};
-  const effectiveRuntime = getEmbeddingRuntimeConfig(process.env, storedConfig);
+  const effectiveRuntime = getEmbeddingRuntimeConfig(env, storedConfig);
   const effectiveNodeLimit = getEmbeddingNodeLimit(storedConfig);
   const effectiveBatchConfig = getCliEmbeddingConfig(storedConfig);
 
@@ -70,23 +99,28 @@ export async function embeddingsConfigShowCommand(options: EmbeddingsConfigShowO
   };
 
   const sources = {
-    provider: determineSource(process.env.GITNEXUS_EMBEDDING_PROVIDER, storedEmbeddings.provider),
-    ollamaBaseUrl: determineSource(process.env.GITNEXUS_OLLAMA_BASE_URL, storedEmbeddings.ollamaBaseUrl),
-    ollamaModel: determineSource(process.env.GITNEXUS_OLLAMA_MODEL, storedEmbeddings.ollamaModel),
-    remoteHost: determineSource(process.env.GITNEXUS_HF_REMOTE_HOST || process.env.HF_ENDPOINT, storedEmbeddings.remoteHost),
-    cacheDir: determineSource(process.env.GITNEXUS_HF_CACHE_DIR, storedEmbeddings.cacheDir),
-    localModelPath: determineSource(process.env.GITNEXUS_HF_LOCAL_MODEL_PATH, storedEmbeddings.localModelPath),
-    localOnly: determineSource(process.env.GITNEXUS_HF_LOCAL_ONLY, storedEmbeddings.localOnly),
-    nodeLimit: determineSource(process.env.GITNEXUS_EMBEDDING_NODE_LIMIT, storedEmbeddings.nodeLimit),
-    batchSize: determineSource(process.env.GITNEXUS_EMBEDDING_BATCH_SIZE, storedEmbeddings.batchSize),
+    provider: determineSource(env.GITNEXUS_EMBEDDING_PROVIDER, storedEmbeddings.provider),
+    ollamaBaseUrl: determineSource(env.GITNEXUS_OLLAMA_BASE_URL, storedEmbeddings.ollamaBaseUrl),
+    ollamaModel: determineSource(env.GITNEXUS_OLLAMA_MODEL, storedEmbeddings.ollamaModel),
+    remoteHost: determineSource(env.GITNEXUS_HF_REMOTE_HOST || env.HF_ENDPOINT, storedEmbeddings.remoteHost),
+    cacheDir: determineSource(env.GITNEXUS_HF_CACHE_DIR, storedEmbeddings.cacheDir),
+    localModelPath: determineSource(env.GITNEXUS_HF_LOCAL_MODEL_PATH, storedEmbeddings.localModelPath),
+    localOnly: determineSource(env.GITNEXUS_HF_LOCAL_ONLY, storedEmbeddings.localOnly),
+    nodeLimit: determineSource(env.GITNEXUS_EMBEDDING_NODE_LIMIT, storedEmbeddings.nodeLimit),
+    batchSize: determineSource(env.GITNEXUS_EMBEDDING_BATCH_SIZE, storedEmbeddings.batchSize),
   };
 
-  const payload = {
+  return {
     stored: storedEmbeddings,
     effective,
     sources,
     precedence: 'environment variables > ~/.gitnexus/config.json > built-in defaults',
   };
+}
+
+export async function embeddingsConfigShowCommand(options: EmbeddingsConfigShowOptions = {}): Promise<void> {
+  const storedConfig = await loadCLIConfig();
+  const payload = getEmbeddingsConfigSnapshot(storedConfig);
 
   if (options.json) {
     console.log(JSON.stringify(payload, null, 2));
@@ -94,13 +128,13 @@ export async function embeddingsConfigShowCommand(options: EmbeddingsConfigShowO
   }
 
   console.log('Stored embeddings config:');
-  console.log(JSON.stringify(storedEmbeddings, null, 2));
+  console.log(JSON.stringify(payload.stored, null, 2));
   console.log('');
   console.log('Effective embeddings config:');
-  console.log(JSON.stringify(effective, null, 2));
+  console.log(JSON.stringify(payload.effective, null, 2));
   console.log('');
   console.log('Sources:');
-  console.log(JSON.stringify(sources, null, 2));
+  console.log(JSON.stringify(payload.sources, null, 2));
   console.log('');
   console.log(`Precedence: ${payload.precedence}`);
 }

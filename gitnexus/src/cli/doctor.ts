@@ -1,7 +1,6 @@
 import { hasIndex, loadCLIConfig, readRegistry, type CLIConfig, type RegistryEntry } from '../storage/repo-manager.js';
 import { getGitRoot, isGitRepo } from '../storage/git.js';
-import { getEmbeddingRuntimeConfig } from '../core/embeddings/runtime-config.js';
-import { getCliEmbeddingConfig, getEmbeddingNodeLimit } from './embedding-overrides.js';
+import { getEmbeddingsConfigSnapshot } from './config.js';
 import { getHostPlans } from './setup.js';
 
 export interface DoctorOptions {
@@ -98,15 +97,15 @@ export async function runDoctor(
   });
 
   const cliConfig = await deps.loadCLIConfig();
-  const embeddingRuntime = getEmbeddingRuntimeConfig(process.env, cliConfig);
-  const embeddingConfig = getCliEmbeddingConfig(cliConfig);
+  const embeddingSnapshot = getEmbeddingsConfigSnapshot(cliConfig, process.env);
+  const embeddingRuntime = embeddingSnapshot.effective;
   const embeddingDetail = [
-    `provider=${embeddingRuntime.provider}`,
+    `provider=${embeddingRuntime.provider} (${embeddingSnapshot.sources.provider})`,
     embeddingRuntime.provider === 'ollama'
-      ? `model=${embeddingRuntime.ollamaModel}`
-      : `model=${embeddingConfig.modelId || 'Snowflake/snowflake-arctic-embed-xs'}`,
-    `nodeLimit=${getEmbeddingNodeLimit(cliConfig)}`,
-    `batchSize=${embeddingConfig.batchSize ?? 16}`,
+      ? `model=${embeddingRuntime.ollamaModel} (${embeddingSnapshot.sources.ollamaModel})`
+      : `model=Snowflake/snowflake-arctic-embed-xs (default)`,
+    `nodeLimit=${embeddingRuntime.nodeLimit} (${embeddingSnapshot.sources.nodeLimit})`,
+    `batchSize=${embeddingRuntime.batchSize} (${embeddingSnapshot.sources.batchSize})`,
   ].join(', ');
 
   if (embeddingRuntime.provider === 'ollama') {

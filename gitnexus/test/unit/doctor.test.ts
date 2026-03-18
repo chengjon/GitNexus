@@ -280,7 +280,7 @@ describe('runDoctor', () => {
         expect.objectContaining({
           name: 'embeddings-config',
           status: 'pass',
-          detail: expect.stringContaining('provider=ollama'),
+          detail: expect.stringContaining('provider=ollama (config)'),
         }),
       ]),
     );
@@ -315,7 +315,7 @@ describe('runDoctor', () => {
         expect.objectContaining({
           name: 'embeddings-config',
           status: 'warn',
-          detail: expect.stringContaining('qwen3-embedding:0.6b'),
+          detail: expect.stringContaining('model=qwen3-embedding:0.6b (config)'),
         }),
       ]),
     );
