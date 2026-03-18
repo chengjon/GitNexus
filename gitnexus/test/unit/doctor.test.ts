@@ -320,4 +320,37 @@ describe('runDoctor', () => {
       ]),
     );
   });
+
+  it('includes connection details when ollama is unreachable', async () => {
+    const result = await runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://127.0.0.1:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+          },
+        }),
+        fetchJson: async () => {
+          throw new Error('ECONNREFUSED connect ECONNREFUSED 127.0.0.1:11434');
+        },
+        getHostPlans: () => [],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'embeddings-config',
+          status: 'warn',
+          detail: expect.stringContaining('http://127.0.0.1:11434'),
+        }),
+      ]),
+    );
+  });
 });

@@ -129,7 +129,7 @@ export async function runDoctor(
       checks.push({
         name: 'embeddings-config',
         status: 'warn',
-        detail: `${embeddingDetail}, Ollama check failed: ${error?.message || 'unknown error'}`,
+        detail: `${embeddingDetail}, Ollama check failed at ${embeddingRuntime.ollamaBaseUrl}: ${error?.message || 'unknown error'}`,
       });
     }
   } else {
