@@ -80,6 +80,9 @@ Use `npx gitnexus init-project` when you only want project-local scaffolding (`.
 
 For AI CLIs or local agents on this machine, prefer the linked local command instead of `npx`:
 
+Canonical single-file reference:
+[`docs/ai-cli-local-quick-start.md`](/opt/claude/GitNexus/docs/ai-cli-local-quick-start.md)
+
 ```bash
 # 0. Optional: verify that the local fork is active
 which gitnexus
