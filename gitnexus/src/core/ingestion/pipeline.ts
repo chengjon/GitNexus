@@ -36,6 +36,17 @@ const CHUNK_BYTE_BUDGET = 20 * 1024 * 1024; // 20MB
 /** Max AST trees to keep in LRU cache */
 const AST_CACHE_CAP = 50;
 
+/**
+ * Vitest fork workers and the real ingestion worker pool both spin up native
+ * add-ons. Repeated pipeline runs inside a single Vitest file can trigger
+ * `Napi::Error` crashes during worker teardown, while the sequential fallback
+ * remains stable. Keep real worker-pool coverage in worker-pool.test.ts, but
+ * disable it for pipeline tests.
+ */
+export function shouldUseWorkerPool(): boolean {
+  return process.env.VITEST !== 'true';
+}
+
 export const runPipelineFromRepo = async (
   repoPath: string,
   onProgress: (progress: PipelineProgress) => void
@@ -161,20 +172,24 @@ export const runPipelineFromRepo = async (
 
     // Create worker pool once, reuse across chunks
     let workerPool: WorkerPool | undefined;
-    try {
-      let workerUrl = new URL('./workers/parse-worker.js', import.meta.url);
-      // When running under vitest, import.meta.url points to src/ where no .js exists.
-      // Fall back to the compiled dist/ worker so the pool can spawn real worker threads.
-      const thisDir = fileURLToPath(new URL('.', import.meta.url));
-      if (!fs.existsSync(fileURLToPath(workerUrl))) {
-        const distWorker = path.resolve(thisDir, '..', '..', '..', 'dist', 'core', 'ingestion', 'workers', 'parse-worker.js');
-        if (fs.existsSync(distWorker)) {
-          workerUrl = pathToFileURL(distWorker) as URL;
+    if (shouldUseWorkerPool()) {
+      try {
+        let workerUrl = new URL('./workers/parse-worker.js', import.meta.url);
+        // When running under vitest, import.meta.url points to src/ where no .js exists.
+        // Fall back to the compiled dist/ worker so the pool can spawn real worker threads.
+        const thisDir = fileURLToPath(new URL('.', import.meta.url));
+        if (!fs.existsSync(fileURLToPath(workerUrl))) {
+          const distWorker = path.resolve(thisDir, '..', '..', '..', 'dist', 'core', 'ingestion', 'workers', 'parse-worker.js');
+          if (fs.existsSync(distWorker)) {
+            workerUrl = pathToFileURL(distWorker) as URL;
+          }
         }
+        workerPool = createWorkerPool(workerUrl);
+      } catch (err) {
+        if (isDev) console.warn('Worker pool creation failed, using sequential fallback:', (err as Error).message);
       }
-      workerPool = createWorkerPool(workerUrl);
-    } catch (err) {
-      if (isDev) console.warn('Worker pool creation failed, using sequential fallback:', (err as Error).message);
+    } else if (isDev) {
+      console.warn('Worker pool disabled under Vitest; using sequential fallback.');
     }
 
     let filesParsedSoFar = 0;
