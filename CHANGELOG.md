@@ -18,6 +18,7 @@ All notable changes to GitNexus will be documented in this file.
 
 - Embedding gating now uses embeddable node count instead of total graph node count.
 - `analyze --force --embeddings` now prints a follow-up hint recommending incremental refreshes without `--force` when embeddings already exist.
+- README, CLI skills, and generated AI context now document incremental embedding refreshes, local Ollama GPU setup guidance, and a `batchSize=64` starting point for local GPU workflows.
 
 ## [1.4.0] - 2026-03-13
 
