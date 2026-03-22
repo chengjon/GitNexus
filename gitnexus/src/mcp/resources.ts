@@ -164,6 +164,12 @@ async function getReposResource(backend: LocalBackend): Promise<string> {
   for (const repo of repos) {
     lines.push(`  - name: "${repo.name}"`);
     lines.push(`    path: "${repo.path}"`);
+    lines.push(`    storagePath: "${repo.storagePath}"`);
+    lines.push(`    kuzuPath: "${repo.kuzuPath}"`);
+    lines.push(`    indexState: "${repo.indexState || 'ready'}"`);
+    if (repo.suggestedFix) {
+      lines.push(`    suggestedFix: "${repo.suggestedFix}"`);
+    }
     lines.push(`    indexed: "${repo.indexedAt}"`);
     lines.push(`    commit: "${repo.lastCommit?.slice(0, 7) || 'unknown'}"`);
     if (repo.stats) {

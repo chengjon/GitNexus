@@ -153,6 +153,31 @@ describe('readResource', () => {
     expect(result).toContain('my-project');
   });
 
+  it('includes repo index diagnostics in gitnexus://repos output', async () => {
+    const backend = createMockBackend({
+      repos: [
+        {
+          name: 'broken-project',
+          path: '/tmp/broken-project',
+          storagePath: '/tmp/broken-project/.gitnexus',
+          kuzuPath: '/tmp/broken-project/.gitnexus/kuzu',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc1234',
+          indexState: 'missing_kuzu',
+          suggestedFix: 'Run: gitnexus analyze',
+          stats: { files: 10, nodes: 50, processes: 5 },
+        },
+      ],
+    });
+
+    const result = await readResource('gitnexus://repos', backend);
+
+    expect(result).toContain('indexState: "missing_kuzu"');
+    expect(result).toContain('storagePath: "/tmp/broken-project/.gitnexus"');
+    expect(result).toContain('kuzuPath: "/tmp/broken-project/.gitnexus/kuzu"');
+    expect(result).toContain('suggestedFix: "Run: gitnexus analyze"');
+  });
+
   it('returns empty message when no repos', async () => {
     const backend = createMockBackend({ repos: [] });
     const result = await readResource('gitnexus://repos', backend);

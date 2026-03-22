@@ -440,6 +440,19 @@ describe('ensureInitialized', () => {
     await expect(backend.callTool('query', { query: 'test' }))
       .rejects.toThrow('DB locked');
   });
+
+  it.each([
+    ['query', { query: 'test' }],
+    ['context', { name: 'main' }],
+    ['impact', { target: 'main', direction: 'upstream' }],
+  ])('returns actionable missing-kuzu guidance for %s', async (method, params) => {
+    (initKuzu as any).mockRejectedValueOnce(
+      new Error('KuzuDB not found at /tmp/.gitnexus/test-project/kuzu. Run: gitnexus analyze'),
+    );
+
+    await expect(backend.callTool(method as string, params))
+      .rejects.toThrow('Run: gitnexus analyze');
+  });
 });
 
 // ─── Cypher write blocking through callTool ──────────────────────────
@@ -511,6 +524,28 @@ describe('LocalBackend.listRepos', () => {
       path: '/tmp/test-project',
       indexedAt: expect.any(String),
       lastCommit: expect.any(String),
+    }));
+  });
+
+  it('returns index diagnostics for incomplete indexes', async () => {
+    (listRegisteredRepos as any).mockResolvedValue([
+      {
+        ...MOCK_REPO_ENTRY,
+        kuzuPath: '/tmp/.gitnexus/test-project/kuzu',
+        indexState: 'missing_kuzu',
+        suggestedFix: 'Run: gitnexus analyze',
+      },
+    ]);
+
+    await backend.init();
+    const repos = await backend.callTool('list_repos', {});
+
+    expect(repos[0]).toEqual(expect.objectContaining({
+      name: 'test-project',
+      storagePath: '/tmp/.gitnexus/test-project',
+      kuzuPath: '/tmp/.gitnexus/test-project/kuzu',
+      indexState: 'missing_kuzu',
+      suggestedFix: expect.stringContaining('gitnexus analyze'),
     }));
   });
 

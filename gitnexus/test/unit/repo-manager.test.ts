@@ -11,6 +11,8 @@ import fs from 'fs/promises';
 import {
   getStoragePath,
   getStoragePaths,
+  hasIndex,
+  listRegisteredRepos,
   readRegistry,
   loadMeta,
   saveMeta,
@@ -222,5 +224,81 @@ describe('RepoMeta persistence', () => {
 
     const reloaded = await loadMeta(storagePath);
     expect(reloaded).toEqual(raw);
+  });
+});
+
+describe('index artifact health', () => {
+  let tmpHandle: Awaited<ReturnType<typeof createTempDir>>;
+  let originalHomedir: typeof os.homedir;
+
+  beforeEach(async () => {
+    tmpHandle = await createTempDir('gitnexus-index-health-');
+    originalHomedir = os.homedir;
+    (os.homedir as any) = () => tmpHandle.dbPath;
+  });
+
+  afterEach(async () => {
+    os.homedir = originalHomedir;
+    await tmpHandle.cleanup();
+  });
+
+  it('hasIndex returns false when meta exists but kuzu is missing', async () => {
+    const repoRoot = path.join(tmpHandle.dbPath, 'repo-a');
+    const storagePath = path.join(repoRoot, '.gitnexus');
+    await fs.mkdir(storagePath, { recursive: true });
+    await fs.writeFile(
+      path.join(storagePath, 'meta.json'),
+      JSON.stringify({
+        repoPath: repoRoot,
+        lastCommit: 'abc1234',
+        indexedAt: '2026-03-22T00:00:00.000Z',
+      }, null, 2),
+      'utf-8',
+    );
+
+    await expect(hasIndex(repoRoot)).resolves.toBe(false);
+  });
+
+  it('listRegisteredRepos surfaces missing_kuzu diagnostics', async () => {
+    const repoRoot = path.join(tmpHandle.dbPath, 'repo-b');
+    const storagePath = path.join(repoRoot, '.gitnexus');
+    await fs.mkdir(storagePath, { recursive: true });
+    await fs.writeFile(
+      path.join(storagePath, 'meta.json'),
+      JSON.stringify({
+        repoPath: repoRoot,
+        lastCommit: 'def5678',
+        indexedAt: '2026-03-22T01:00:00.000Z',
+      }, null, 2),
+      'utf-8',
+    );
+
+    const registryDir = path.join(tmpHandle.dbPath, '.gitnexus');
+    await fs.mkdir(registryDir, { recursive: true });
+    await fs.writeFile(
+      path.join(registryDir, 'registry.json'),
+      JSON.stringify([
+        {
+          name: 'repo-b',
+          path: repoRoot,
+          storagePath,
+          indexedAt: '2026-03-22T01:00:00.000Z',
+          lastCommit: 'def5678',
+          stats: { files: 1, nodes: 2, edges: 3, communities: 1, processes: 1 },
+        },
+      ], null, 2),
+      'utf-8',
+    );
+
+    const entries = await listRegisteredRepos({ validate: true });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual(expect.objectContaining({
+      name: 'repo-b',
+      storagePath,
+      kuzuPath: path.join(storagePath, 'kuzu'),
+      indexState: 'missing_kuzu',
+      suggestedFix: expect.stringContaining('gitnexus analyze'),
+    }));
   });
 });

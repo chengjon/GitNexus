@@ -36,6 +36,8 @@ export interface IndexedRepo {
   meta: RepoMeta;
 }
 
+export type IndexState = 'ready' | 'missing_kuzu' | 'missing_meta';
+
 function withRepoMetaDefaults(meta: RepoMeta): RepoMeta {
   return {
     indexedBranch: null,
@@ -55,6 +57,9 @@ export interface RegistryEntry {
   indexedAt: string;
   lastCommit: string;
   stats?: RepoMeta['stats'];
+  kuzuPath?: string;
+  indexState?: IndexState;
+  suggestedFix?: string;
 }
 
 const GITNEXUS_DIR = '.gitnexus';
@@ -77,6 +82,55 @@ export const getStoragePaths = (repoPath: string) => {
     storagePath,
     kuzuPath: path.join(storagePath, 'kuzu'),
     metaPath: path.join(storagePath, 'meta.json'),
+  };
+};
+
+const pathExists = async (targetPath: string): Promise<boolean> => {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const stripRegistryDiagnostics = (entry: RegistryEntry): RegistryEntry => {
+  const {
+    kuzuPath: _kuzuPath,
+    indexState: _indexState,
+    suggestedFix: _suggestedFix,
+    ...baseEntry
+  } = entry;
+  return baseEntry;
+};
+
+export const getIndexDiagnostics = async (
+  storagePath: string,
+): Promise<{
+  kuzuPath: string;
+  indexState: IndexState;
+  suggestedFix?: string;
+} | null> => {
+  const storageExists = await pathExists(storagePath);
+  if (!storageExists) return null;
+
+  const { metaPath, kuzuPath } = getStoragePaths(path.dirname(storagePath));
+  const metaExists = await pathExists(metaPath);
+  const kuzuExists = await pathExists(kuzuPath);
+
+  let indexState: IndexState;
+  if (metaExists && kuzuExists) {
+    indexState = 'ready';
+  } else if (metaExists) {
+    indexState = 'missing_kuzu';
+  } else {
+    indexState = 'missing_meta';
+  }
+
+  return {
+    kuzuPath,
+    indexState,
+    suggestedFix: indexState === 'ready' ? undefined : 'Run: gitnexus analyze',
   };
 };
 
@@ -106,13 +160,8 @@ export const saveMeta = async (storagePath: string, meta: RepoMeta): Promise<voi
  * Check if a path has a GitNexus index
  */
 export const hasIndex = async (repoPath: string): Promise<boolean> => {
-  const { metaPath } = getStoragePaths(repoPath);
-  try {
-    await fs.access(metaPath);
-    return true;
-  } catch {
-    return false;
-  }
+  const diagnostics = await getIndexDiagnostics(getStoragePath(repoPath));
+  return diagnostics?.indexState === 'ready';
 };
 
 /**
@@ -201,7 +250,11 @@ export const readRegistry = async (): Promise<RegistryEntry[]> => {
 const writeRegistry = async (entries: RegistryEntry[]): Promise<void> => {
   const dir = getGlobalDir();
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(getGlobalRegistryPath(), JSON.stringify(entries, null, 2), 'utf-8');
+  await fs.writeFile(
+    getGlobalRegistryPath(),
+    JSON.stringify(entries.map(stripRegistryDiagnostics), null, 2),
+    'utf-8',
+  );
 };
 
 /**
@@ -261,15 +314,17 @@ export const listRegisteredRepos = async (opts?: { validate?: boolean }): Promis
   const entries = await readRegistry();
   if (!opts?.validate) return entries;
 
-  // Validate each entry still has a .gitnexus/ directory
+  // Validate each entry still has a .gitnexus/ directory and annotate index health.
   const valid: RegistryEntry[] = [];
   for (const entry of entries) {
-    try {
-      await fs.access(path.join(entry.storagePath, 'meta.json'));
-      valid.push(entry);
-    } catch {
-      // Index no longer exists — skip
-    }
+    const diagnostics = await getIndexDiagnostics(entry.storagePath);
+    if (!diagnostics) continue;
+    valid.push({
+      ...entry,
+      kuzuPath: diagnostics.kuzuPath,
+      indexState: diagnostics.indexState,
+      suggestedFix: diagnostics.suggestedFix,
+    });
   }
 
   // If we pruned any entries, save the cleaned registry

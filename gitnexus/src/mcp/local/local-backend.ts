@@ -77,6 +77,8 @@ interface RepoHandle {
   repoPath: string;
   storagePath: string;
   kuzuPath: string;
+  indexState?: RegistryEntry['indexState'];
+  suggestedFix?: string;
   indexedAt: string;
   lastCommit: string;
   stats?: RegistryEntry['stats'];
@@ -119,7 +121,9 @@ export class LocalBackend {
         name: entry.name,
         repoPath: entry.path,
         storagePath,
-        kuzuPath,
+        kuzuPath: entry.kuzuPath || kuzuPath,
+        indexState: entry.indexState,
+        suggestedFix: entry.suggestedFix,
         indexedAt: entry.indexedAt,
         lastCommit: entry.lastCommit,
         stats: entry.stats,
@@ -209,18 +213,14 @@ export class LocalBackend {
 
     if (repoParam) {
       const paramLower = repoParam.toLowerCase();
-      // Match by id
       if (this.repos.has(paramLower)) return this.repos.get(paramLower)!;
-      // Match by name (case-insensitive)
       for (const handle of this.repos.values()) {
         if (handle.name.toLowerCase() === paramLower) return handle;
       }
-      // Match by path (substring)
       const resolved = path.resolve(repoParam);
       for (const handle of this.repos.values()) {
         if (handle.repoPath === resolved) return handle;
       }
-      // Match by partial name
       for (const handle of this.repos.values()) {
         if (handle.name.toLowerCase().includes(paramLower)) return handle;
       }
@@ -273,11 +273,25 @@ export class LocalBackend {
    * Re-reads the global registry so newly indexed repos are discovered
    * without restarting the MCP server.
    */
-  async listRepos(): Promise<Array<{ name: string; path: string; indexedAt: string; lastCommit: string; stats?: any }>> {
+  async listRepos(): Promise<Array<{
+    name: string;
+    path: string;
+    storagePath: string;
+    kuzuPath: string;
+    indexState: RegistryEntry['indexState'] | 'ready';
+    suggestedFix?: string;
+    indexedAt: string;
+    lastCommit: string;
+    stats?: any;
+  }>> {
     await this.refreshRepos();
     return [...this.repos.values()].map(h => ({
       name: h.name,
       path: h.repoPath,
+      storagePath: h.storagePath,
+      kuzuPath: h.kuzuPath,
+      indexState: h.indexState || 'ready',
+      suggestedFix: h.suggestedFix,
       indexedAt: h.indexedAt,
       lastCommit: h.lastCommit,
       stats: h.stats,
