@@ -208,6 +208,18 @@ gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-m
 
 ### Embeddings Configuration
 
+Use plain `gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+
+Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
+
+Use `gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.
+
+This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
+
+For normal refreshes, prefer `gitnexus analyze --embeddings` without `--force` so GitNexus can reuse existing embeddings.
+
+For a local Ollama GPU setup, start with `batchSize=64`; if you want a more conservative baseline, try `32`.
+
 You can configure embeddings once in `~/.gitnexus/config.json` instead of exporting shell variables every time:
 
 ```json
@@ -217,7 +229,7 @@ You can configure embeddings once in `~/.gitnexus/config.json` instead of export
     "ollamaBaseUrl": "http://localhost:11434",
     "ollamaModel": "qwen3-embedding:0.6b",
     "nodeLimit": 90000,
-    "batchSize": 8
+    "batchSize": 64
   }
 }
 ```
@@ -226,7 +238,7 @@ Use the CLI helpers to inspect or update it:
 
 ```bash
 gitnexus config embeddings show
-gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 8
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 64
 gitnexus config embeddings clear
 ```
 

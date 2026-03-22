@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **GitNexus** (1747 symbols, 4569 relationships, 130 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **GitNexus** (2057 symbols, 4456 relationships, 153 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -69,6 +69,95 @@ Before completing any code modification task, verify:
 3. `gitnexus_detect_changes()` confirms changes match expected scope
 4. All d=1 (WILL BREAK) dependents were updated
 
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+npx gitnexus analyze
+```
+
+Use plain `npx gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+
+Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
+
+Use `npx gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.
+
+This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+npx gitnexus analyze --embeddings
+```
+
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
+
+If embedding generation is enabled, these environment variables control the provider and runtime behavior:
+
+```bash
+# Raise the CLI safety limit for large repos.
+# Start with 64 on a local Ollama GPU setup; use 32 as a conservative fallback.
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000
+GITNEXUS_EMBEDDING_BATCH_SIZE=64
+
+# Use a Hugging Face mirror / custom endpoint
+HF_ENDPOINT=https://hf-mirror.com
+# or
+GITNEXUS_HF_REMOTE_HOST=https://hf-mirror.com
+
+# Persist downloaded model files
+GITNEXUS_HF_CACHE_DIR=/path/to/hf-cache
+
+# Use a predownloaded local Hugging Face model only
+GITNEXUS_HF_LOCAL_MODEL_PATH=/path/to/local-models
+GITNEXUS_HF_LOCAL_ONLY=1
+
+# Use Ollama instead of Hugging Face for both indexing and query embeddings
+GITNEXUS_EMBEDDING_PROVIDER=ollama
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+```
+
+Recommended Ollama example:
+
+```bash
+GITNEXUS_EMBEDDING_PROVIDER=ollama \
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
+GITNEXUS_EMBEDDING_BATCH_SIZE=64 \
+gitnexus analyze --embeddings
+```
+
+Use `--force` only for intentional full rebuilds or corrupted indexes.
+
+The same settings can also be stored in `~/.gitnexus/config.json`:
+
+```json
+{
+  "embeddings": {
+    "provider": "ollama",
+    "ollamaBaseUrl": "http://localhost:11434",
+    "ollamaModel": "qwen3-embedding:0.6b",
+    "nodeLimit": 90000,
+    "batchSize": 64
+  }
+}
+```
+
+Priority is: environment variables > `~/.gitnexus/config.json` > built-in defaults.
+
+You can inspect or update this without editing JSON manually:
+
+```bash
+gitnexus config embeddings show
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 64
+gitnexus config embeddings clear
+```
+
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
+
 ## CLI
 
 | Task | Read this skill file |
@@ -79,25 +168,5 @@ Before completing any code modification task, verify:
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Ingestion area (135 symbols) | `.claude/skills/generated/ingestion/SKILL.md` |
-| Work in the Workers area (70 symbols) | `.claude/skills/generated/workers/SKILL.md` |
-| Work in the Cli area (63 symbols) | `.claude/skills/generated/cli/SKILL.md` |
-| Work in the Kuzu area (52 symbols) | `.claude/skills/generated/kuzu/SKILL.md` |
-| Work in the Wiki area (52 symbols) | `.claude/skills/generated/wiki/SKILL.md` |
-| Work in the Embeddings area (48 symbols) | `.claude/skills/generated/embeddings/SKILL.md` |
-| Work in the Components area (42 symbols) | `.claude/skills/generated/components/SKILL.md` |
-| Work in the Local area (36 symbols) | `.claude/skills/generated/local/SKILL.md` |
-| Work in the Storage area (36 symbols) | `.claude/skills/generated/storage/SKILL.md` |
-| Work in the Services area (35 symbols) | `.claude/skills/generated/services/SKILL.md` |
-| Work in the Mcp area (32 symbols) | `.claude/skills/generated/mcp/SKILL.md` |
-| Work in the Llm area (30 symbols) | `.claude/skills/generated/llm/SKILL.md` |
-| Work in the Eval area (18 symbols) | `.claude/skills/generated/eval/SKILL.md` |
-| Work in the Bridge area (15 symbols) | `.claude/skills/generated/bridge/SKILL.md` |
-| Work in the Hooks area (14 symbols) | `.claude/skills/generated/hooks/SKILL.md` |
-| Work in the Search area (11 symbols) | `.claude/skills/generated/search/SKILL.md` |
-| Work in the Environments area (11 symbols) | `.claude/skills/generated/environments/SKILL.md` |
-| Work in the Analysis area (10 symbols) | `.claude/skills/generated/analysis/SKILL.md` |
-| Work in the Agents area (9 symbols) | `.claude/skills/generated/agents/SKILL.md` |
-| Work in the Graph area (6 symbols) | `.claude/skills/generated/graph/SKILL.md` |
 
 <!-- gitnexus:end -->

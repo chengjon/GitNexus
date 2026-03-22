@@ -134,6 +134,14 @@ After committing code changes, the GitNexus index becomes stale. Re-run analyze 
 npx gitnexus analyze
 \`\`\`
 
+Use plain \`npx gitnexus analyze\` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+
+Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
+
+Use \`npx gitnexus analyze --embeddings\` when natural-language, concept, or fuzzy code search matters.
+
+This enables hybrid retrieval (\`BM25 + semantic + RRF\`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
+
 If the index previously included embeddings, preserve them by adding \`--embeddings\`:
 
 \`\`\`bash
@@ -145,9 +153,10 @@ To check whether embeddings exist, inspect \`.gitnexus/meta.json\` — the \`sta
 If embedding generation is enabled, these environment variables control the provider and runtime behavior:
 
 \`\`\`bash
-# Raise the CLI safety limit and reduce batch size for large repos
+# Raise the CLI safety limit for large repos.
+# Start with 64 on a local Ollama GPU setup; use 32 as a conservative fallback.
 GITNEXUS_EMBEDDING_NODE_LIMIT=90000
-GITNEXUS_EMBEDDING_BATCH_SIZE=8
+GITNEXUS_EMBEDDING_BATCH_SIZE=64
 
 # Use a Hugging Face mirror / custom endpoint
 HF_ENDPOINT=https://hf-mirror.com
@@ -174,9 +183,11 @@ GITNEXUS_EMBEDDING_PROVIDER=ollama \\
 GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \\
 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \\
 GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \\
-GITNEXUS_EMBEDDING_BATCH_SIZE=8 \\
-gitnexus analyze --force --embeddings
+GITNEXUS_EMBEDDING_BATCH_SIZE=64 \\
+gitnexus analyze --embeddings
 \`\`\`
+
+Use \`--force\` only for intentional full rebuilds or corrupted indexes.
 
 The same settings can also be stored in \`~/.gitnexus/config.json\`:
 
@@ -187,7 +198,7 @@ The same settings can also be stored in \`~/.gitnexus/config.json\`:
     "ollamaBaseUrl": "http://localhost:11434",
     "ollamaModel": "qwen3-embedding:0.6b",
     "nodeLimit": 90000,
-    "batchSize": 8
+    "batchSize": 64
   }
 }
 \`\`\`
@@ -198,7 +209,7 @@ You can inspect or update this without editing JSON manually:
 
 \`\`\`bash
 gitnexus config embeddings show
-gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 8
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 64
 gitnexus config embeddings clear
 \`\`\`
 
