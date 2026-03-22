@@ -89,6 +89,38 @@ export class LocalBackend {
   private contextCache: Map<string, CodebaseContext> = new Map();
   private initializedRepos: Set<string> = new Set();
 
+  private samePath(left: string, right: string): boolean {
+    return process.platform === 'win32'
+      ? left.toLowerCase() === right.toLowerCase()
+      : left === right;
+  }
+
+  private ambiguousRepoError(repoParam: string, candidates: RepoHandle[]): Error {
+    const formatted = candidates
+      .map((candidate) => `${candidate.name} (${candidate.repoPath})`)
+      .join(', ');
+    const nameCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+      nameCounts.set(candidate.name, (nameCounts.get(candidate.name) || 0) + 1);
+    }
+    const suggestedParams = candidates.map((candidate) => {
+      const value = nameCounts.get(candidate.name) === 1 ? candidate.name : candidate.repoPath;
+      return `repo: "${value}"`;
+    }).join(', ');
+    return new Error(
+      `Repository "${repoParam}" is ambiguous. Candidates: ${formatted}. Use one of: ${suggestedParams}`,
+    );
+  }
+
+  private resolveUniqueRepo(
+    repoParam: string,
+    candidates: RepoHandle[],
+  ): RepoHandle | null {
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+    throw this.ambiguousRepoError(repoParam, candidates);
+  }
+
   // ─── Initialization ──────────────────────────────────────────────
 
   /**
@@ -212,18 +244,36 @@ export class LocalBackend {
     if (this.repos.size === 0) return null;
 
     if (repoParam) {
+      const handles = [...this.repos.values()];
       const paramLower = repoParam.toLowerCase();
-      if (this.repos.has(paramLower)) return this.repos.get(paramLower)!;
-      for (const handle of this.repos.values()) {
-        if (handle.name.toLowerCase() === paramLower) return handle;
-      }
       const resolved = path.resolve(repoParam);
-      for (const handle of this.repos.values()) {
-        if (handle.repoPath === resolved) return handle;
-      }
-      for (const handle of this.repos.values()) {
-        if (handle.name.toLowerCase().includes(paramLower)) return handle;
-      }
+
+      const exactPathMatch = this.resolveUniqueRepo(
+        repoParam,
+        handles.filter((handle) => this.samePath(handle.repoPath, resolved)),
+      );
+      if (exactPathMatch) return exactPathMatch;
+
+      const exactNameMatch = this.resolveUniqueRepo(
+        repoParam,
+        handles.filter((handle) => handle.name === repoParam),
+      );
+      if (exactNameMatch) return exactNameMatch;
+
+      const caseInsensitiveNameMatch = this.resolveUniqueRepo(
+        repoParam,
+        handles.filter((handle) => handle.name.toLowerCase() === paramLower),
+      );
+      if (caseInsensitiveNameMatch) return caseInsensitiveNameMatch;
+
+      if (this.repos.has(paramLower)) return this.repos.get(paramLower)!;
+
+      const partialNameMatch = this.resolveUniqueRepo(
+        repoParam,
+        handles.filter((handle) => handle.name.toLowerCase().includes(paramLower)),
+      );
+      if (partialNameMatch) return partialNameMatch;
+
       return null;
     }
 

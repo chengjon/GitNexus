@@ -67,6 +67,23 @@ function setupNoRepos() {
   (listRegisteredRepos as any).mockResolvedValue([]);
 }
 
+function setupCaseCollisionRepos() {
+  (listRegisteredRepos as any).mockResolvedValue([
+    {
+      ...MOCK_REPO_ENTRY,
+      name: 'gitnexus',
+      path: '/tmp/gitnexus-lower',
+      storagePath: '/tmp/.gitnexus/gitnexus-lower',
+    },
+    {
+      ...MOCK_REPO_ENTRY,
+      name: 'GitNexus',
+      path: '/tmp/GitNexus-upper',
+      storagePath: '/tmp/.gitnexus/GitNexus-upper',
+    },
+  ]);
+}
+
 // ─── LocalBackend lifecycle ──────────────────────────────────────────
 
 describe('LocalBackend.init', () => {
@@ -365,6 +382,34 @@ describe('LocalBackend.resolveRepo', () => {
     expect(result).toHaveProperty('processes');
     // listRegisteredRepos should have been called again
     expect(listRegisteredRepos).toHaveBeenCalledTimes(2); // once in init, once in refreshRepos
+  });
+
+  it('prefers exact case-sensitive repo names before internal id matches', async () => {
+    setupCaseCollisionRepos();
+    await backend.init();
+
+    const repo = await backend.resolveRepo('GitNexus');
+
+    expect(repo.repoPath).toBe('/tmp/GitNexus-upper');
+    expect(repo.name).toBe('GitNexus');
+  });
+
+  it('prefers exact repo paths before name or id fallbacks', async () => {
+    setupCaseCollisionRepos();
+    await backend.init();
+
+    const repo = await backend.resolveRepo('/tmp/gitnexus-lower');
+
+    expect(repo.repoPath).toBe('/tmp/gitnexus-lower');
+    expect(repo.name).toBe('gitnexus');
+  });
+
+  it('throws when a repo parameter is ambiguous after case-insensitive matching', async () => {
+    setupCaseCollisionRepos();
+    await backend.init();
+
+    await expect(backend.resolveRepo('GITNEXUS'))
+      .rejects.toThrow(/Use one of:/i);
   });
 });
 
