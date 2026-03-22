@@ -71,10 +71,11 @@ describe('generateAIContextFiles', () => {
     const claudeMdPath = path.join(tmpDir, 'CLAUDE.md');
     const content = await fs.readFile(claudeMdPath, 'utf-8');
 
-    expect(content).toContain('Use plain `npx gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.');
+    expect(content).toContain('Use plain `gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.');
     expect(content).toContain('Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.');
-    expect(content).toContain('Use `npx gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.');
+    expect(content).toContain('Use `gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.');
     expect(content).toContain('This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.');
+    expect(content).toContain('npm run build');
     expect(content).toContain('GITNEXUS_EMBEDDING_BATCH_SIZE=64');
     expect(content).toContain('gitnexus analyze --embeddings');
     expect(content).toContain('Use `--force` only for intentional full rebuilds or corrupted indexes.');

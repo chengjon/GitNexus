@@ -219,6 +219,27 @@ describe('LocalBackend.callTool', () => {
     expect(result.target).toBeDefined();
   });
 
+  it('dispatches impact tool for file path targets', async () => {
+    (executeParameterized as any)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'file:view', name: 'Tdx.vue', type: 'File', filePath: 'web/frontend/src/views/market/Tdx.vue' },
+      ]);
+    (executeQuery as any).mockResolvedValue([]);
+
+    const result = await backend.callTool('impact', {
+      target: 'web/frontend/src/views/market/Tdx.vue',
+      direction: 'upstream',
+    });
+
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
+    expect(result.target).toMatchObject({
+      name: 'Tdx.vue',
+      filePath: 'web/frontend/src/views/market/Tdx.vue',
+    });
+  });
+
   it('dispatches detect_changes tool', async () => {
     // detect_changes calls execFileSync which we haven't mocked at module level,
     // so it will throw a git error — that's fine, we test the error path

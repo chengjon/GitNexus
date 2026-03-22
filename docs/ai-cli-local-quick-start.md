@@ -29,8 +29,13 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js --version
 In the target repository root:
 
 ```bash
+cd /opt/claude/GitNexus/gitnexus
+npm run build   # Required after local GitNexus source changes
+cd /path/to/target-repo
 gitnexus analyze
 ```
+
+If you did not change the local GitNexus source code, skip the rebuild and just run `gitnexus analyze` in the target repo root.
 
 Expected outputs:
 

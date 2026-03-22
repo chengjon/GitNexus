@@ -1335,12 +1335,27 @@ export class LocalBackend {
     const relTypeFilter = relationTypes.map(t => `'${t}'`).join(', ');
     const confidenceFilter = minConfidence > 0 ? ` AND r.confidence >= ${minConfidence}` : '';
 
-    const targets = await executeParameterized(repo.id, `
+    let targets = await executeParameterized(repo.id, `
       MATCH (n)
       WHERE n.name = $targetName
       RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
       LIMIT 1
     `, { targetName: target });
+
+    if (targets.length === 0 && /[\\/]/.test(target)) {
+      let targetPath = target.replace(/\\/g, '/');
+      if (path.isAbsolute(target)) {
+        targetPath = path.relative(repo.repoPath, target).replace(/\\/g, '/');
+      }
+
+      targets = await executeParameterized(repo.id, `
+        MATCH (n:File)
+        WHERE n.filePath = $targetPath
+        RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
+        LIMIT 1
+      `, { targetPath });
+    }
+
     if (targets.length === 0) return { error: `Target '${target}' not found` };
     
     const sym = targets[0];

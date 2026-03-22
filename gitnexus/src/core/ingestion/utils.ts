@@ -441,6 +441,7 @@ export const getLanguageFromFilename = (filename: string): SupportedLanguages | 
   // TypeScript (including TSX)
   if (filename.endsWith('.tsx')) return SupportedLanguages.TypeScript;
   if (filename.endsWith('.ts')) return SupportedLanguages.TypeScript;
+  if (filename.endsWith('.vue')) return SupportedLanguages.TypeScript;
   // JavaScript (including JSX)
   if (filename.endsWith('.jsx')) return SupportedLanguages.JavaScript;
   if (filename.endsWith('.js')) return SupportedLanguages.JavaScript;
@@ -803,7 +804,6 @@ export const isVerboseIngestionEnabled = (): boolean => {
   const value = raw.toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
 };
-
 
 
 

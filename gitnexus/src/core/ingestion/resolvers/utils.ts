@@ -7,7 +7,7 @@
 export const EXTENSIONS = [
   '',
   // TypeScript/JavaScript
-  '.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js',
+  '.tsx', '.ts', '.jsx', '.js', '.vue', '/index.tsx', '/index.ts', '/index.jsx', '/index.js', '/index.vue',
   // Python
   '.py', '/__init__.py',
   // Java

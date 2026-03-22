@@ -11,6 +11,7 @@ import { detectFrameworkFromAST } from './framework-detection.js';
 import { WorkerPool } from './workers/worker-pool.js';
 import type { ParseWorkerResult, ParseWorkerInput, ExtractedImport, ExtractedCall, ExtractedHeritage, ExtractedRoute } from './workers/parse-worker.js';
 import { getTreeSitterBufferSize, TREE_SITTER_MAX_BUFFER } from './constants.js';
+import { normalizeContentForParsing } from './vue-sfc.js';
 
 export type FileProgressCallback = (current: number, total: number, filePath: string) => void;
 
@@ -108,6 +109,7 @@ const processParsingSequential = async (
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    const normalizedContent = normalizeContentForParsing(file.path, file.content);
 
     onFileProgress?.(i + 1, total, file.path);
 
@@ -118,7 +120,7 @@ const processParsingSequential = async (
     if (!language) continue;
 
     // Skip files larger than the max tree-sitter buffer (32 MB)
-    if (file.content.length > TREE_SITTER_MAX_BUFFER) continue;
+    if (normalizedContent.length > TREE_SITTER_MAX_BUFFER) continue;
 
     try {
       await loadLanguage(language, file.path);
@@ -128,7 +130,11 @@ const processParsingSequential = async (
 
     let tree;
     try {
-      tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
+      tree = parser.parse(
+        normalizedContent,
+        undefined,
+        { bufferSize: getTreeSitterBufferSize(normalizedContent.length) },
+      );
     } catch (parseError) {
       console.warn(`Skipping unparseable file: ${file.path}`);
       continue;

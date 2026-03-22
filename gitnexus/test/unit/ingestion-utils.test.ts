@@ -21,6 +21,10 @@ describe('getLanguageFromFilename', () => {
     it('detects .ts files in paths', () => {
       expect(getLanguageFromFilename('src/core/utils.ts')).toBe(SupportedLanguages.TypeScript);
     });
+
+    it('detects .vue files as TypeScript-backed sources', () => {
+      expect(getLanguageFromFilename('src/components/App.vue')).toBe(SupportedLanguages.TypeScript);
+    });
   });
 
   describe('JavaScript', () => {

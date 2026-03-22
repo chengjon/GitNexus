@@ -22,6 +22,7 @@ import { detectFrameworkFromAST } from '../framework-detection.js';
 import { generateId } from '../../../lib/utils.js';
 import { extractNamedBindings } from '../named-binding-extraction.js';
 import { appendKotlinWildcard } from '../resolvers/index.js';
+import { normalizeContentForParsing } from '../vue-sfc.js';
 
 // ============================================================================
 // Types for serializable results
@@ -775,12 +776,18 @@ const processFileGroup = (
   }
 
   for (const file of files) {
+    const normalizedContent = normalizeContentForParsing(file.path, file.content);
+
     // Skip files larger than the max tree-sitter buffer (32 MB)
-    if (file.content.length > TREE_SITTER_MAX_BUFFER) continue;
+    if (normalizedContent.length > TREE_SITTER_MAX_BUFFER) continue;
 
     let tree;
     try {
-      tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
+      tree = parser.parse(
+        normalizedContent,
+        undefined,
+        { bufferSize: getTreeSitterBufferSize(normalizedContent.length) },
+      );
     } catch (err) {
       console.warn(`Failed to parse file ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
       continue;

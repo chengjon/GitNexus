@@ -42,7 +42,12 @@ Canonical single-file reference:
 which gitnexus
 gitnexus --version
 
-# 1. In the target repository root
+# 1. Build first if you changed local GitNexus source under gitnexus/src
+cd /opt/claude/GitNexus/gitnexus
+npm run build
+
+# 2. In the target repository root
+cd /path/to/repo
 gitnexus analyze
 
 # Expected outputs:
@@ -51,11 +56,11 @@ gitnexus analyze
 # - CLAUDE.md
 # - .claude/skills/gitnexus/
 
-# 2. Verify MCP readiness for the host you are using
+# 3. Verify MCP readiness for the host you are using
 gitnexus doctor --host codex
 gitnexus doctor --host claude
 
-# 3. Only initialize project-local files
+# 4. Only initialize project-local files
 gitnexus init-project
 
 # 4. Only refresh AI context files

@@ -27,6 +27,7 @@ import { getTreeSitterBufferSize } from './constants.js';
 import type { ExtractedHeritage } from './workers/parse-worker.js';
 import { resolveSymbol } from './symbol-resolver.js';
 import type { ImportMap, PackageMap } from './import-processor.js';
+import { normalizeContentForParsing } from './vue-sfc.js';
 
 /** C#/Java convention: interfaces start with I followed by an uppercase letter */
 const INTERFACE_NAME_RE = /^I[A-Z]/;
@@ -81,6 +82,7 @@ export const processHeritage = async (
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    const normalizedContent = normalizeContentForParsing(file.path, file.content);
     onProgress?.(i + 1, files.length);
     if (i % 20 === 0) await yieldToEventLoop();
 
@@ -107,7 +109,11 @@ export const processHeritage = async (
     if (!tree) {
       // Use larger bufferSize for files > 32KB
       try {
-        tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
+        tree = parser.parse(
+          normalizedContent,
+          undefined,
+          { bufferSize: getTreeSitterBufferSize(normalizedContent.length) },
+        );
       } catch (parseError) {
         // Skip files that can't be parsed
         continue;

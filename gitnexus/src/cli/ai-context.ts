@@ -60,7 +60,7 @@ function generateGitNexusContent(projectName: string, stats: RepoStats, generate
 
 This project is indexed by GitNexus as **${projectName}** (${stats.nodes || 0} symbols, ${stats.edges || 0} relationships, ${stats.processes || 0} execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run \`npx gitnexus analyze\` in terminal first.
+> If any GitNexus tool warns the index is stale, run \`gitnexus analyze\` in terminal first.
 
 ## Always Do
 
@@ -131,21 +131,29 @@ Before completing any code modification task, verify:
 After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
 
 \`\`\`bash
-npx gitnexus analyze
+gitnexus analyze
 \`\`\`
 
-Use plain \`npx gitnexus analyze\` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+If you have modified the local GitNexus source code under \`/opt/claude/GitNexus/gitnexus/src\`, rebuild first so the CLI picks up the updated \`dist\` files:
+
+\`\`\`bash
+cd /opt/claude/GitNexus/gitnexus
+npm run build
+gitnexus analyze
+\`\`\`
+
+Use plain \`gitnexus analyze\` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
 
 Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
 
-Use \`npx gitnexus analyze --embeddings\` when natural-language, concept, or fuzzy code search matters.
+Use \`gitnexus analyze --embeddings\` when natural-language, concept, or fuzzy code search matters.
 
 This enables hybrid retrieval (\`BM25 + semantic + RRF\`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
 
 If the index previously included embeddings, preserve them by adding \`--embeddings\`:
 
 \`\`\`bash
-npx gitnexus analyze --embeddings
+gitnexus analyze --embeddings
 \`\`\`
 
 To check whether embeddings exist, inspect \`.gitnexus/meta.json\` — the \`stats.embeddings\` field shows the count (0 means no embeddings). **Running analyze without \`--embeddings\` will delete any previously generated embeddings.**

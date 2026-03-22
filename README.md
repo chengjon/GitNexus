@@ -88,7 +88,12 @@ Canonical single-file reference:
 which gitnexus
 gitnexus --version
 
-# 1. In the target repository root
+# 1. Build first if you changed local GitNexus source under gitnexus/src
+cd /opt/claude/GitNexus/gitnexus
+npm run build
+
+# 2. In the target repository root
+cd /path/to/repo
 gitnexus analyze
 
 # Expected outputs:
@@ -97,15 +102,15 @@ gitnexus analyze
 # - CLAUDE.md
 # - .claude/skills/gitnexus/
 
-# 2. Verify host wiring
+# 3. Verify host wiring
 gitnexus doctor --host codex
 gitnexus doctor --host claude
 
-# 3. Context-only workflows
+# 4. Context-only workflows
 gitnexus init-project
 gitnexus refresh-context
 
-# 4. Start MCP manually if a host needs a direct stdio command
+# 5. Start MCP manually if a host needs a direct stdio command
 gitnexus mcp
 ```
 

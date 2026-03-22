@@ -38,6 +38,7 @@ import type {
   CSharpProjectConfig,
   ComposerConfig
 } from './resolvers/index.js';
+import { normalizeContentForParsing } from './vue-sfc.js';
 
 // Re-export resolver types for consumers
 export type {
@@ -365,6 +366,7 @@ export const processImports = async (
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    const normalizedContent = normalizeContentForParsing(file.path, file.content);
     onProgress?.(i + 1, files.length);
     if (i % 20 === 0) await yieldToEventLoop();
 
@@ -390,7 +392,11 @@ export const processImports = async (
 
     if (!tree) {
       try {
-        tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
+        tree = parser.parse(
+          normalizedContent,
+          undefined,
+          { bufferSize: getTreeSitterBufferSize(normalizedContent.length) },
+        );
       } catch (parseError) {
         continue;
       }

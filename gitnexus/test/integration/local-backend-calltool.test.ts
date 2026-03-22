@@ -84,6 +84,18 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(depNames).toContain('login');
     });
 
+    it('impact tool resolves file path targets', async () => {
+      const result = await backend.callTool('impact', {
+        target: 'src/auth.ts',
+        direction: 'upstream',
+      });
+
+      expect(result).not.toHaveProperty('error');
+      expect(result.target).toBeDefined();
+      expect(result.target.name).toBe('auth.ts');
+      expect(result.target.filePath).toBe('src/auth.ts');
+    });
+
     it('query tool returns results for keyword search', async () => {
       const result = await backend.callTool('query', { query: 'login' });
       expect(result).not.toHaveProperty('error');

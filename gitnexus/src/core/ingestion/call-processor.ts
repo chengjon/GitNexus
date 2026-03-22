@@ -22,6 +22,7 @@ import {
 import { buildTypeEnv, lookupTypeEnv } from './type-env.js';
 import { getTreeSitterBufferSize } from './constants.js';
 import type { ExtractedCall, ExtractedRoute } from './workers/parse-worker.js';
+import { normalizeContentForParsing } from './vue-sfc.js';
 
 /**
  * Walk up the AST from a node to find the enclosing function/method.
@@ -67,6 +68,7 @@ export const processCalls = async (
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    const normalizedContent = normalizeContentForParsing(file.path, file.content);
     onProgress?.(i + 1, files.length);
     if (i % 20 === 0) await yieldToEventLoop();
 
@@ -94,7 +96,11 @@ export const processCalls = async (
       // Cache Miss: Re-parse
       // Use larger bufferSize for files > 32KB
       try {
-        tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
+        tree = parser.parse(
+          normalizedContent,
+          undefined,
+          { bufferSize: getTreeSitterBufferSize(normalizedContent.length) },
+        );
       } catch (parseError) {
         // Skip files that can't be parsed
         continue;
