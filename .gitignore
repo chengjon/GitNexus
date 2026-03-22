@@ -52,6 +52,9 @@ coverage/
 # Claude code skills
 .claude/skills/generated/
 
+# Local OpenCode/OMC state
+.omc/
+
 # Assets (screenshots, images)
 assets/
 
