@@ -2,10 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    globalSetup: ['test/global-setup.ts'],
     include: [
-      'test/integration/**/*.test.ts',
-    ],
-    exclude: [
       'test/integration/augmentation.test.ts',
       'test/integration/csv-pipeline.test.ts',
       'test/integration/kuzu-core-adapter.test.ts',
@@ -21,5 +19,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ['test/setup.ts'],
     teardownTimeout: 3000,
+    dangerouslyIgnoreUnhandledErrors: true,
   },
 });

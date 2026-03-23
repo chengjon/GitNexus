@@ -15,8 +15,15 @@ describe('vitest configuration split', () => {
     expect(unitConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
   });
 
-  it('integration config keeps native Kuzu setup and explicit ignore policy', async () => {
+  it('default integration config does not force native Kuzu setup', async () => {
     const integrationConfig = await fs.readFile(path.join(repoRoot, 'vitest.integration.config.ts'), 'utf8');
+
+    expect(integrationConfig).not.toContain("globalSetup: ['test/global-setup.ts']");
+    expect(integrationConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
+  });
+
+  it('native integration config keeps Kuzu setup and explicit ignore policy', async () => {
+    const integrationConfig = await fs.readFile(path.join(repoRoot, 'vitest.integration.native.config.ts'), 'utf8');
 
     expect(integrationConfig).toContain("globalSetup: ['test/global-setup.ts']");
     expect(integrationConfig).toContain('dangerouslyIgnoreUnhandledErrors: true');
