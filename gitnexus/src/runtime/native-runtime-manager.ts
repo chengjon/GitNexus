@@ -8,6 +8,11 @@ export interface ReindexLockPayload {
   createdAt: string;
 }
 
+export interface NativeRuntimeSnapshot {
+  activeKuzuRepos: number;
+  activeRepoIds: string[];
+}
+
 interface SignalTarget {
   on(event: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
   removeListener(event: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
@@ -103,6 +108,13 @@ export class NativeRuntimeManager {
 
   isKuzuRepoActive(repoId: string): boolean {
     return this.activeKuzuRepos.has(repoId);
+  }
+
+  getSnapshot(): NativeRuntimeSnapshot {
+    return {
+      activeKuzuRepos: this.activeKuzuRepos.size,
+      activeRepoIds: [...this.activeKuzuRepos].sort(),
+    };
   }
 
   registerShutdownHandlers(

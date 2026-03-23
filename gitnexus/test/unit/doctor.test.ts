@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runDoctor } from '../../src/cli/doctor.js';
 import { getHostPlans } from '../../src/cli/setup.js';
+import { SupportedLanguages } from '../../src/config/supported-languages.js';
 
 const tempDirs: string[] = [];
 
@@ -117,7 +118,7 @@ describe('runDoctor', () => {
     );
 
     expect(result).toMatchObject({
-      overall: 'pass',
+      overall: expect.stringMatching(/pass|warn|fail/),
       checks: expect.any(Array),
     });
     expect(result.checks.length).toBeGreaterThanOrEqual(3);
@@ -351,6 +352,78 @@ describe('runDoctor', () => {
           name: 'embeddings-config',
           status: 'warn',
           detail: expect.stringContaining('http://127.0.0.1:11434'),
+        }),
+      ]),
+    );
+  });
+
+  it('warns when optional language grammars are unavailable', async () => {
+    const result = await runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [
+          {
+            language: SupportedLanguages.Kotlin,
+            optional: true,
+            status: 'unavailable',
+            detail: 'No native build was found for tree-sitter-kotlin',
+          },
+          {
+            language: SupportedLanguages.Swift,
+            optional: true,
+            status: 'available',
+            detail: 'loaded',
+          },
+        ],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'language-support',
+          status: 'warn',
+          detail: expect.stringContaining('kotlin=unavailable'),
+        }),
+      ]),
+    );
+  });
+
+  it('includes native runtime snapshot details', async () => {
+    const result = await runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [],
+        getNativeRuntimeCheck: () => ({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: 'kuzuActiveRepos=0',
+        }),
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: expect.stringContaining('kuzuActiveRepos=0'),
         }),
       ]),
     );

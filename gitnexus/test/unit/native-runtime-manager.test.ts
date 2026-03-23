@@ -52,6 +52,10 @@ describe('NativeRuntimeManager', () => {
     expect(manager.isKuzuRepoActive('repo-a')).toBe(true);
     manager.markKuzuRepoInactive('repo-a');
     expect(manager.isKuzuRepoActive('repo-a')).toBe(false);
+    expect(manager.getSnapshot()).toEqual({
+      activeKuzuRepos: 0,
+      activeRepoIds: [],
+    });
   });
 
   it('registers and unregisters shutdown handlers', () => {
@@ -98,5 +102,17 @@ describe('NativeRuntimeManager', () => {
     expect(scheduled[0].delayMs).toBe(25);
     scheduled[0].fn();
     expect(exitCalls).toEqual([143]);
+  });
+
+  it('returns a runtime snapshot for diagnostics', () => {
+    const manager = new NativeRuntimeManager();
+
+    manager.markKuzuRepoActive('repo-a');
+    manager.markKuzuRepoActive('repo-b');
+
+    expect(manager.getSnapshot()).toEqual({
+      activeKuzuRepos: 2,
+      activeRepoIds: ['repo-a', 'repo-b'],
+    });
   });
 });
