@@ -6,6 +6,8 @@
  * waiter queue timeout, idle eviction guards, stdout silencing race
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import path from 'path';
 import {
   initKuzu,
   executeQuery,
@@ -113,6 +115,18 @@ withTestKuzuDB('kuzu-pool', (handle) => {
     it('throws when db path does not exist', async () => {
       await expect(initKuzu('bad-repo', '/nonexistent/path/kuzu'))
         .rejects.toThrow();
+    });
+
+    it('rejects new MCP opens while analyze is rebuilding the index', async () => {
+      const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ reason: 'test' }), 'utf8');
+
+      try {
+        await expect(initKuzu('blocked-repo', handle.dbPath))
+          .rejects.toThrow(/rebuilding the index/i);
+      } finally {
+        await fs.rm(reindexLockPath, { force: true });
+      }
     });
 
     it('read-only mode: write query throws', async () => {

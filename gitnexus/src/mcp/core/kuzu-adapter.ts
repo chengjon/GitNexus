@@ -14,6 +14,7 @@
  */
 
 import fs from 'fs/promises';
+import path from 'path';
 import kuzu from 'kuzu';
 
 /** Per-repo pool: one Database, many Connections */
@@ -128,6 +129,21 @@ const WAITER_TIMEOUT_MS = 15_000;
 
 const LOCK_RETRY_ATTEMPTS = 3;
 const LOCK_RETRY_DELAY_MS = 2000;
+const REINDEX_LOCK_FILENAME = 'reindexing.lock';
+
+async function ensureRepoIsNotReindexing(repoId: string, dbPath: string): Promise<void> {
+  const reindexLockPath = path.join(path.dirname(dbPath), REINDEX_LOCK_FILENAME);
+  try {
+    await fs.access(reindexLockPath);
+    throw new Error(
+      `KuzuDB unavailable for ${repoId}. GitNexus is rebuilding the index. ` +
+      `Retry after analyze completes. (${reindexLockPath})`,
+    );
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return;
+    throw err;
+  }
+}
 
 /**
  * Initialize (or reuse) a Database + connection pool for a specific repo.
@@ -139,6 +155,8 @@ export const initKuzu = async (repoId: string, dbPath: string): Promise<void> =>
     existing.lastUsed = Date.now();
     return;
   }
+
+  await ensureRepoIsNotReindexing(repoId, dbPath);
 
   // Check if database exists
   try {
