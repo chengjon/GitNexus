@@ -13,6 +13,12 @@ interface SignalTarget {
   removeListener(event: 'SIGINT' | 'SIGTERM', listener: () => void): unknown;
 }
 
+interface ScheduleExitOptions {
+  delayMs?: number;
+  exit?: (code: number) => void;
+  schedule?: (fn: () => void, delayMs: number) => unknown;
+}
+
 export class NativeRuntimeManager {
   private activeKuzuRepos = new Set<string>();
 
@@ -110,6 +116,16 @@ export class NativeRuntimeManager {
       target.removeListener('SIGINT', onSigInt);
       target.removeListener('SIGTERM', onSigTerm);
     };
+  }
+
+  scheduleExit(
+    exitCode: number,
+    options: ScheduleExitOptions = {},
+  ): unknown {
+    const delayMs = options.delayMs ?? 0;
+    const exit = options.exit ?? ((code: number) => process.exit(code));
+    const schedule = options.schedule ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+    return schedule(() => exit(exitCode), delayMs);
   }
 }
 

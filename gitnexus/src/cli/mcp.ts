@@ -8,6 +8,7 @@
 
 import { startMCPServer } from '../mcp/server.js';
 import { LocalBackend } from '../mcp/local/local-backend.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 export const mcpCommand = async () => {
   // Prevent unhandled errors from crashing the MCP server process.
@@ -15,7 +16,7 @@ export const mcpCommand = async () => {
   process.on('uncaughtException', (err) => {
     console.error(`GitNexus MCP: uncaught exception — ${err.message}`);
     // Process is in an undefined state after uncaughtException — exit after flushing
-    setTimeout(() => process.exit(1), 100);
+    nativeRuntimeManager.scheduleExit(1, { delayMs: 100 });
   });
   process.on('unhandledRejection', (reason) => {
     const msg = reason instanceof Error ? reason.message : String(reason);

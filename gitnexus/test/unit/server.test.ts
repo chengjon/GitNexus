@@ -13,6 +13,7 @@
  * directly through the MCP Server's handler dispatch.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { nativeRuntimeManager } from '../../src/runtime/native-runtime-manager.js';
 import { createMCPServer } from '../../src/mcp/server.js';
 
 // ─── Mock backend ──────────────────────────────────────────────────
@@ -49,6 +50,19 @@ describe('createMCPServer', () => {
     const server = createMCPServer(backend);
     // The server has registered handlers — verify it was created without errors
     expect(server).toBeTruthy();
+  });
+});
+
+describe('startMCPServer', () => {
+  it('registers SIGINT and SIGTERM through NativeRuntimeManager', async () => {
+    const { startMCPServer } = await import('../../src/mcp/server.js');
+    const backend = createMockBackend();
+    const registerSpy = vi.spyOn(nativeRuntimeManager, 'registerShutdownHandlers');
+
+    await startMCPServer(backend);
+
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+    expect(registerSpy).toHaveBeenCalledWith(process, expect.any(Function), expect.any(Function));
   });
 });
 

@@ -79,4 +79,24 @@ describe('NativeRuntimeManager', () => {
     expect(sigintCalls).toBe(1);
     expect(sigtermCalls).toBe(1);
   });
+
+  it('schedules delayed process exits through an injectable timer', () => {
+    const manager = new NativeRuntimeManager();
+    const exitCalls: number[] = [];
+    const scheduled: Array<{ delayMs: number; fn: () => void }> = [];
+
+    manager.scheduleExit(143, {
+      delayMs: 25,
+      exit: (code) => { exitCalls.push(code); },
+      schedule: (fn, delayMs) => {
+        scheduled.push({ fn, delayMs });
+        return { delayMs };
+      },
+    });
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].delayMs).toBe(25);
+    scheduled[0].fn();
+    expect(exitCalls).toEqual([143]);
+  });
 });

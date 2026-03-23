@@ -26,6 +26,7 @@ import { GITNEXUS_TOOLS } from './tools.js';
 import type { LocalBackend } from './local/local-backend.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
 import { getGitNexusVersion } from '../cli/index-freshness.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 /**
  * Next-step hints appended to tool responses.
@@ -289,8 +290,7 @@ export async function startMCPServer(backend: LocalBackend): Promise<void> {
   };
 
   // Handle graceful shutdown
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);
 
   // Handle stdio errors — stdin close means the parent process is gone
   process.stdin.on('end', shutdown);
