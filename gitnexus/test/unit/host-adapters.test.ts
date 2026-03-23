@@ -9,6 +9,10 @@ import { createGenericStdioAdapter } from '../../src/cli/host-adapters/generic-s
 import { setupCommand } from '../../src/cli/setup.js';
 
 const tempDirs: string[] = [];
+const expectedDefaultCommand = process.platform === 'win32' ? 'cmd' : 'npx';
+const expectedDefaultArgs = process.platform === 'win32'
+  ? ['/c', 'npx', '-y', 'gitnexus@latest', 'mcp']
+  : ['-y', 'gitnexus@latest', 'mcp'];
 
 async function createTempHome(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -35,7 +39,8 @@ describe('host adapters', () => {
     expect(adapter.id).toBe('claude-code');
     expect(detection.detected).toBe(true);
     expect(result.status).toBe('manual');
-    expect(adapter.getMcpEntry().command).toBe('npx');
+    expect(adapter.getMcpEntry().command).toBe(expectedDefaultCommand);
+    expect(adapter.getMcpEntry().args).toEqual(expectedDefaultArgs);
     expect(adapter.manualInstructions().join('\n')).toContain('claude mcp add gitnexus');
   });
 
@@ -50,7 +55,8 @@ describe('host adapters', () => {
     expect(adapter.id).toBe('codex');
     expect(detection.detected).toBe(true);
     expect(result.status).toBe('manual');
-    expect(adapter.getMcpEntry().command).toBe('npx');
+    expect(adapter.getMcpEntry().command).toBe(expectedDefaultCommand);
+    expect(adapter.getMcpEntry().args).toEqual(expectedDefaultArgs);
     expect(adapter.manualInstructions().join('\n')).toContain(
       'codex mcp add gitnexus -- npx -y gitnexus@latest mcp',
     );
@@ -118,9 +124,10 @@ describe('host adapters', () => {
 
     expect(result.status).toBe('configured');
     expect(adapter.id).toBe('example');
-    expect(adapter.getMcpEntry().command).toBe('npx');
-    expect(config.mcp.gitnexus.command).toBe('npx');
-    expect(config.mcp.gitnexus.args).toEqual(['-y', 'gitnexus@latest', 'mcp']);
+    expect(adapter.getMcpEntry().command).toBe(expectedDefaultCommand);
+    expect(adapter.getMcpEntry().args).toEqual(expectedDefaultArgs);
+    expect(config.mcp.gitnexus.command).toBe(expectedDefaultCommand);
+    expect(config.mcp.gitnexus.args).toEqual(expectedDefaultArgs);
   });
 
   it('generic stdio adapter merge preserves existing mcp entries and top-level fields', async () => {
