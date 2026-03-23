@@ -16,6 +16,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import kuzu from 'kuzu';
+import { nativeRuntimeManager } from '../../runtime/native-runtime-manager.js';
 
 /** Per-repo pool: one Database, many Connections */
 interface PoolEntry {
@@ -94,6 +95,7 @@ function evictLRU(): void {
  */
 function closeOne(repoId: string): void {
   pool.delete(repoId);
+  nativeRuntimeManager.markKuzuRepoInactive(repoId);
 }
 
 /**
@@ -129,41 +131,8 @@ const WAITER_TIMEOUT_MS = 15_000;
 
 const LOCK_RETRY_ATTEMPTS = 3;
 const LOCK_RETRY_DELAY_MS = 2000;
-const REINDEX_LOCK_FILENAME = 'reindexing.lock';
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err: any) {
-    if (err?.code === 'ESRCH') return false;
-    if (err?.code === 'EPERM') return true;
-    return true;
-  }
-}
-
 async function ensureRepoIsNotReindexing(repoId: string, dbPath: string): Promise<void> {
-  const reindexLockPath = path.join(path.dirname(dbPath), REINDEX_LOCK_FILENAME);
-  try {
-    await fs.access(reindexLockPath);
-    try {
-      const rawLock = await fs.readFile(reindexLockPath, 'utf8');
-      const lock = JSON.parse(rawLock) as { pid?: number };
-      if (typeof lock.pid === 'number' && Number.isInteger(lock.pid) && !isPidAlive(lock.pid)) {
-        await fs.rm(reindexLockPath, { force: true });
-        return;
-      }
-    } catch {
-      // If the lock exists but cannot be parsed, keep the safer behavior and block.
-    }
-    throw new Error(
-      `KuzuDB unavailable for ${repoId}. GitNexus is rebuilding the index. ` +
-      `Retry after analyze completes. (${reindexLockPath})`,
-    );
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') return;
-    throw err;
-  }
+  await nativeRuntimeManager.assertNoActiveReindexLock(path.dirname(dbPath), repoId);
 }
 
 /**
@@ -174,6 +143,7 @@ export const initKuzu = async (repoId: string, dbPath: string): Promise<void> =>
   const existing = pool.get(repoId);
   if (existing) {
     existing.lastUsed = Date.now();
+    nativeRuntimeManager.markKuzuRepoActive(repoId);
     return;
   }
 
@@ -210,6 +180,7 @@ export const initKuzu = async (repoId: string, dbPath: string): Promise<void> =>
       }
 
       pool.set(repoId, { db, available, checkedOut: 0, waiters: [], lastUsed: Date.now(), dbPath });
+      nativeRuntimeManager.markKuzuRepoActive(repoId);
       ensureIdleTimer();
       return;
     } catch (err: any) {
@@ -367,4 +338,4 @@ export const closeKuzu = async (repoId?: string): Promise<void> => {
 /**
  * Check if a specific repo's pool is active
  */
-export const isKuzuReady = (repoId: string): boolean => pool.has(repoId);
+export const isKuzuReady = (repoId: string): boolean => nativeRuntimeManager.isKuzuRepoActive(repoId);

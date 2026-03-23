@@ -26,6 +26,7 @@ import {
   shouldSuggestIncrementalEmbeddingRefresh,
 } from './embedding-insights.js';
 import { getEmbeddingRuntimeConfig } from '../core/embeddings/runtime-config.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 import fs from 'fs/promises';
 
 
@@ -118,7 +119,6 @@ const PHASE_LABELS: Record<string, string> = {
   done: 'Done',
 };
 
-const REINDEX_LOCK_FILENAME = 'reindexing.lock';
 const DEFAULT_MCP_QUIESCE_TIMEOUT_MS = 15_000;
 const DEFAULT_MCP_POLL_INTERVAL_MS = 250;
 
@@ -136,27 +136,6 @@ interface QuiesceGitNexusMcpHoldersOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
 }
-
-export const getReindexLockPath = (storagePath: string): string =>
-  path.join(storagePath, REINDEX_LOCK_FILENAME);
-
-export const writeReindexLock = async (storagePath: string): Promise<string> => {
-  const lockPath = getReindexLockPath(storagePath);
-  await fs.mkdir(storagePath, { recursive: true });
-  await fs.writeFile(lockPath, JSON.stringify({
-    pid: process.pid,
-    createdAt: new Date().toISOString(),
-  }, null, 2), 'utf8');
-  return lockPath;
-};
-
-export const removeReindexLock = async (lockPath: string): Promise<void> => {
-  try {
-    await fs.rm(lockPath, { force: true });
-  } catch {
-    // best-effort cleanup only
-  }
-};
 
 const parseProcCmdline = (raw: string): string[] =>
   raw.split('\0').filter(Boolean);
@@ -364,7 +343,7 @@ export const analyzeCommand = async (
   const origLog = console.log.bind(console);
   const origWarn = console.warn.bind(console);
   const origError = console.error.bind(console);
-  const reindexLockPath = await writeReindexLock(storagePath);
+  const reindexLockPath = await nativeRuntimeManager.writeReindexLock(storagePath);
   let bar: cliProgress.SingleBar | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
   let forceExitCode: number | null = null;
@@ -381,13 +360,12 @@ export const analyzeCommand = async (
     console.log('\n  Interrupted — cleaning up...');
     closeKuzu()
       .catch(() => {})
-      .then(() => removeReindexLock(reindexLockPath))
+      .then(() => nativeRuntimeManager.removeReindexLock(reindexLockPath))
       .finally(() => process.exit(exitCode));
   };
   const onSigInt = () => shutdownHandler(130);
   const onSigTerm = () => shutdownHandler(143);
-  process.on('SIGINT', onSigInt);
-  process.on('SIGTERM', onSigTerm);
+  const unregisterShutdownHandlers = nativeRuntimeManager.registerShutdownHandlers(process, onSigInt, onSigTerm);
 
   try {
     const quiesceResult = await quiesceGitNexusMcpHolders(kuzuPath);
@@ -696,13 +674,12 @@ export const analyzeCommand = async (
     if (elapsedTimer) {
       clearInterval(elapsedTimer);
     }
-    process.removeListener('SIGINT', onSigInt);
-    process.removeListener('SIGTERM', onSigTerm);
+    unregisterShutdownHandlers();
     try { await closeKuzu(); } catch {}
     console.log = origLog;
     console.warn = origWarn;
     console.error = origError;
-    await removeReindexLock(reindexLockPath);
+    await nativeRuntimeManager.removeReindexLock(reindexLockPath);
   }
 
   if (forceExitCode !== null) {
