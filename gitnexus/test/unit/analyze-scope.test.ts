@@ -112,6 +112,29 @@ describe('analyze MCP lock-holder helpers', () => {
     });
   });
 
+  it('falls back to lsof on non-linux platforms and keeps only gitnexus mcp holders', async () => {
+    const lsofOutput = [
+      'p101',
+      'n/tmp/example/.gitnexus/kuzu',
+      'p202',
+      'n/tmp/example/.gitnexus/kuzu',
+      'p303',
+      'n/tmp/example/.gitnexus/kuzu',
+    ].join('\n');
+
+    const pidArgv = new Map<string, string[]>([
+      ['101', ['node', '/usr/bin/gitnexus', 'mcp']],
+      ['202', ['node', '/usr/bin/gitnexus', 'status']],
+      ['303', ['node', '/app/server.js']],
+    ]);
+
+    await expect(listGitNexusMcpPidsHoldingPath('/tmp/example/.gitnexus/kuzu', {
+      platform: 'darwin',
+      runLsof: async () => lsofOutput,
+      readPidArgv: async (pid) => pidArgv.get(pid) ?? [],
+    })).resolves.toEqual(['101']);
+  });
+
   it('is a no-op when no MCP holders exist', async () => {
     const result = await quiesceGitNexusMcpHolders('/tmp/example/.gitnexus/kuzu', {
       findHolders: async () => [],

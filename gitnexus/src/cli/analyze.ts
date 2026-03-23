@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import v8 from 'v8';
 import cliProgress from 'cli-progress';
 import { runPipelineFromRepo } from '../core/ingestion/pipeline.js';
@@ -124,6 +124,9 @@ const DEFAULT_MCP_POLL_INTERVAL_MS = 250;
 
 interface ProcScanOptions {
   procRoot?: string;
+  platform?: NodeJS.Platform;
+  runLsof?: (targetPath: string) => Promise<string>;
+  readPidArgv?: (pid: string) => Promise<string[]>;
 }
 
 interface QuiesceGitNexusMcpHoldersOptions {
@@ -161,13 +164,65 @@ const parseProcCmdline = (raw: string): string[] =>
 const isGitNexusMcpCommand = (argv: string[]): boolean =>
   argv.includes('mcp') && argv.some(arg => arg.includes('gitnexus'));
 
+const execFileText = (command: string, args: string[]): Promise<string> =>
+  new Promise((resolve, reject) => {
+    execFile(command, args, { encoding: 'utf8' }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+
+const defaultRunLsof = (targetPath: string): Promise<string> =>
+  execFileText('lsof', ['-Fpn', '--', targetPath]);
+
+const defaultReadPidArgv = async (pid: string): Promise<string[]> => {
+  const output = await execFileText('ps', ['-p', pid, '-o', 'command=']);
+  return output.trim().split(/\s+/).filter(Boolean);
+};
+
+const parseLsofPidOutput = (raw: string): string[] => {
+  const holderPids = new Set<string>();
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith('p')) continue;
+    const pid = line.slice(1).trim();
+    if (/^\d+$/.test(pid)) {
+      holderPids.add(pid);
+    }
+  }
+  return [...holderPids].sort((left, right) => Number(left) - Number(right));
+};
+
 export const listGitNexusMcpPidsHoldingPath = async (
   targetPath: string,
   options: ProcScanOptions = {},
 ): Promise<string[]> => {
+  const platform = options.platform ?? process.platform;
   const procRoot = options.procRoot ?? '/proc';
-  if (!options.procRoot && process.platform !== 'linux') {
-    return [];
+  if (!options.procRoot && platform !== 'linux') {
+    try {
+      const runLsof = options.runLsof ?? defaultRunLsof;
+      const readPidArgv = options.readPidArgv ?? defaultReadPidArgv;
+      const output = await runLsof(targetPath);
+      const pids = parseLsofPidOutput(output);
+      const holderPids: string[] = [];
+      for (const pid of pids) {
+        try {
+          const argv = await readPidArgv(pid);
+          if (isGitNexusMcpCommand(argv)) {
+            holderPids.push(pid);
+          }
+        } catch {
+          // process may disappear while scanning; ignore
+        }
+      }
+      holderPids.sort((left, right) => Number(left) - Number(right));
+      return holderPids;
+    } catch {
+      return [];
+    }
   }
 
   const normalizedTarget = path.resolve(targetPath);
