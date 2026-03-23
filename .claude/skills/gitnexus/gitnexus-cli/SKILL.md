@@ -32,6 +32,8 @@ Use `npx gitnexus analyze --embeddings` when natural-language, concept, or fuzzy
 
 This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
 
+During `npx gitnexus analyze`, GitNexus automatically detects and stops local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This prevents the usual KuzuDB lock conflict when you have multiple Codex / Claude Code / editor sessions running.
+
 **Embeddings configuration:**
 
 ```bash
@@ -145,4 +147,5 @@ Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_
 
 - **"Not inside a git repository"**: Run from a directory inside a git repo
 - **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
+- **`analyze` times out waiting for Kuzu lock release**: Check which process still holds `.gitnexus/kuzu` with `lsof +D .gitnexus` or `lsof .gitnexus/kuzu`, then stop the remaining holder and retry
 - **Embeddings timeout on Hugging Face**: Set `HF_ENDPOINT` / `GITNEXUS_HF_REMOTE_HOST`, configure `GITNEXUS_HF_CACHE_DIR`, or switch to the local Ollama provider via `GITNEXUS_EMBEDDING_PROVIDER=ollama`

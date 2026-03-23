@@ -150,6 +150,8 @@ Use \`gitnexus analyze --embeddings\` when natural-language, concept, or fuzzy c
 
 This enables hybrid retrieval (\`BM25 + semantic + RRF\`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
 
+During \`gitnexus analyze\`, GitNexus automatically detects and stops local \`gitnexus mcp\` processes that are holding the target repo's \`.gitnexus/kuzu\` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI or editor sessions open.
+
 If the index previously included embeddings, preserve them by adding \`--embeddings\`:
 
 \`\`\`bash
