@@ -12,6 +12,7 @@ describe('vitest configuration split', () => {
     const unitConfig = await fs.readFile(path.join(repoRoot, 'vitest.config.ts'), 'utf8');
 
     expect(unitConfig).not.toContain("globalSetup: ['test/global-setup.ts']");
+    expect(unitConfig).not.toContain("setupFiles: ['test/setup.ts']");
     expect(unitConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
   });
 

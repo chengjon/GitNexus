@@ -7,7 +7,6 @@ export default defineConfig({
     pool: 'forks',
     fileParallelism: false,
     globals: true,
-    setupFiles: ['test/setup.ts'],
     teardownTimeout: 3000,
     coverage: {
       provider: 'v8',
