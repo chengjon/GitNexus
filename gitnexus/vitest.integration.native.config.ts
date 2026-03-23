@@ -19,6 +19,5 @@ export default defineConfig({
     globals: true,
     setupFiles: ['test/setup.ts'],
     teardownTimeout: 3000,
-    dangerouslyIgnoreUnhandledErrors: true,
   },
 });
