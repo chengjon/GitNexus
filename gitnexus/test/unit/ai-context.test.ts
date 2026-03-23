@@ -79,6 +79,9 @@ describe('generateAIContextFiles', () => {
     expect(content).toContain('GITNEXUS_EMBEDDING_BATCH_SIZE=64');
     expect(content).toContain('gitnexus analyze --embeddings');
     expect(content).toContain('Use `--force` only for intentional full rebuilds or corrupted indexes.');
+    expect(content).toContain('gitnexus doctor --json');
+    expect(content).toContain('native-runtime');
+    expect(content).toContain('language-support');
   });
 
   it('installs skills files', async () => {
