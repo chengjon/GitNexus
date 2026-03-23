@@ -26,6 +26,7 @@
 
 import http from 'http';
 import { LocalBackend } from '../mcp/local/local-backend.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 export interface EvalServerOptions {
   port?: string;
@@ -416,8 +417,7 @@ export async function evalServerCommand(options?: EvalServerOptions): Promise<vo
     process.exit(0);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);
 }
 
 export const MAX_BODY_SIZE = 1024 * 1024; // 1MB
