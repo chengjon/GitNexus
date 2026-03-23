@@ -131,10 +131,31 @@ const LOCK_RETRY_ATTEMPTS = 3;
 const LOCK_RETRY_DELAY_MS = 2000;
 const REINDEX_LOCK_FILENAME = 'reindexing.lock';
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'ESRCH') return false;
+    if (err?.code === 'EPERM') return true;
+    return true;
+  }
+}
+
 async function ensureRepoIsNotReindexing(repoId: string, dbPath: string): Promise<void> {
   const reindexLockPath = path.join(path.dirname(dbPath), REINDEX_LOCK_FILENAME);
   try {
     await fs.access(reindexLockPath);
+    try {
+      const rawLock = await fs.readFile(reindexLockPath, 'utf8');
+      const lock = JSON.parse(rawLock) as { pid?: number };
+      if (typeof lock.pid === 'number' && Number.isInteger(lock.pid) && !isPidAlive(lock.pid)) {
+        await fs.rm(reindexLockPath, { force: true });
+        return;
+      }
+    } catch {
+      // If the lock exists but cannot be parsed, keep the safer behavior and block.
+    }
     throw new Error(
       `KuzuDB unavailable for ${repoId}. GitNexus is rebuilding the index. ` +
       `Retry after analyze completes. (${reindexLockPath})`,

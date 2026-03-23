@@ -119,7 +119,7 @@ withTestKuzuDB('kuzu-pool', (handle) => {
 
     it('rejects new MCP opens while analyze is rebuilding the index', async () => {
       const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
-      await fs.writeFile(reindexLockPath, JSON.stringify({ reason: 'test' }), 'utf8');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ pid: process.pid, reason: 'test' }), 'utf8');
 
       try {
         await expect(initKuzu('blocked-repo', handle.dbPath))
@@ -127,6 +127,15 @@ withTestKuzuDB('kuzu-pool', (handle) => {
       } finally {
         await fs.rm(reindexLockPath, { force: true });
       }
+    });
+
+    it('removes stale reindex lock files left by dead analyze processes', async () => {
+      const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ pid: 999999999, reason: 'stale-test' }), 'utf8');
+
+      await expect(initKuzu('stale-lock-repo', handle.dbPath)).resolves.toBeUndefined();
+      await expect(fs.access(reindexLockPath)).rejects.toThrow();
+      await closeKuzu('stale-lock-repo');
     });
 
     it('read-only mode: write query throws', async () => {
