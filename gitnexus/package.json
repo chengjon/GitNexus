@@ -39,9 +39,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",
-    "test": "vitest run test/unit",
-    "test:integration": "vitest run test/integration",
-    "test:all": "vitest run",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:all": "npm test && npm run test:integration",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
