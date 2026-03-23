@@ -216,6 +216,8 @@ Use `gitnexus analyze --embeddings` when natural-language, concept, or fuzzy cod
 
 This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
 
+During `gitnexus analyze`, GitNexus will automatically detect and stop local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI/editor sessions open.
+
 For normal refreshes, prefer `gitnexus analyze --embeddings` without `--force` so GitNexus can reuse existing embeddings.
 
 For a local Ollama GPU setup, start with `batchSize=64`; if you want a more conservative baseline, try `32`.
@@ -338,7 +340,7 @@ flowchart TD
     ConnB -->|"queries"| RepoB
 ```
 
-**How it works:** Each `gitnexus analyze` stores the index in `.gitnexus/` inside the repo (portable, gitignored) and registers a pointer in `~/.gitnexus/registry.json`. When an AI agent starts, the MCP server reads the registry and can serve any indexed repo. KuzuDB connections are opened lazily on first query and evicted after 5 minutes of inactivity (max 5 concurrent). If only one repo is indexed, the `repo` parameter is optional on all tools — agents don't need to change anything.
+**How it works:** Each `gitnexus analyze` stores the index in `.gitnexus/` inside the repo (portable, gitignored) and registers a pointer in `~/.gitnexus/registry.json`. When an AI agent starts, the MCP server reads the registry and can serve any indexed repo. KuzuDB connections are opened lazily on first query and evicted after 5 minutes of inactivity (max 5 concurrent). During re-indexing, `gitnexus analyze` writes a short-lived `reindexing.lock` file and proactively quiesces local `gitnexus mcp` holders for that repo before reopening Kuzu in write mode. If only one repo is indexed, the `repo` parameter is optional on all tools — agents don't need to change anything.
 
 `gitnexus setup` and the host adapters own global editor/MCP configuration. `gitnexus doctor` is the matching diagnostics layer for that global setup. `gitnexus init-project` and `gitnexus refresh-context` only touch project-local files inside the target repository.
 

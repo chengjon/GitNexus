@@ -6,6 +6,8 @@
  * waiter queue timeout, idle eviction guards, stdout silencing race
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import path from 'path';
 import {
   initKuzu,
   executeQuery,
@@ -113,6 +115,27 @@ withTestKuzuDB('kuzu-pool', (handle) => {
     it('throws when db path does not exist', async () => {
       await expect(initKuzu('bad-repo', '/nonexistent/path/kuzu'))
         .rejects.toThrow();
+    });
+
+    it('rejects new MCP opens while analyze is rebuilding the index', async () => {
+      const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ pid: process.pid, reason: 'test' }), 'utf8');
+
+      try {
+        await expect(initKuzu('blocked-repo', handle.dbPath))
+          .rejects.toThrow(/rebuilding the index/i);
+      } finally {
+        await fs.rm(reindexLockPath, { force: true });
+      }
+    });
+
+    it('removes stale reindex lock files left by dead analyze processes', async () => {
+      const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ pid: 999999999, reason: 'stale-test' }), 'utf8');
+
+      await expect(initKuzu('stale-lock-repo', handle.dbPath)).resolves.toBeUndefined();
+      await expect(fs.access(reindexLockPath)).rejects.toThrow();
+      await closeKuzu('stale-lock-repo');
     });
 
     it('read-only mode: write query throws', async () => {

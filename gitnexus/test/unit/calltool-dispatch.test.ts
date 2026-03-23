@@ -8,6 +8,7 @@
  * the dispatch and error handling logic in isolation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'path';
 
 // We need to mock the KuzuDB adapter and repo-manager BEFORE importing LocalBackend
 vi.mock('../../src/mcp/core/kuzu-adapter.js', () => ({
@@ -72,13 +73,13 @@ function setupCaseCollisionRepos() {
     {
       ...MOCK_REPO_ENTRY,
       name: 'gitnexus',
-      path: '/tmp/gitnexus-lower',
+      path: path.resolve('/tmp/gitnexus-lower'),
       storagePath: '/tmp/.gitnexus/gitnexus-lower',
     },
     {
       ...MOCK_REPO_ENTRY,
       name: 'GitNexus',
-      path: '/tmp/GitNexus-upper',
+      path: path.resolve('/tmp/GitNexus-upper'),
       storagePath: '/tmp/.gitnexus/GitNexus-upper',
     },
   ]);
@@ -390,7 +391,7 @@ describe('LocalBackend.resolveRepo', () => {
 
     const repo = await backend.resolveRepo('GitNexus');
 
-    expect(repo.repoPath).toBe('/tmp/GitNexus-upper');
+    expect(repo.repoPath).toBe(path.resolve('/tmp/GitNexus-upper'));
     expect(repo.name).toBe('GitNexus');
   });
 
@@ -398,9 +399,9 @@ describe('LocalBackend.resolveRepo', () => {
     setupCaseCollisionRepos();
     await backend.init();
 
-    const repo = await backend.resolveRepo('/tmp/gitnexus-lower');
+    const repo = await backend.resolveRepo(path.resolve('/tmp/gitnexus-lower'));
 
-    expect(repo.repoPath).toBe('/tmp/gitnexus-lower');
+    expect(repo.repoPath).toBe(path.resolve('/tmp/gitnexus-lower'));
     expect(repo.name).toBe('gitnexus');
   });
 

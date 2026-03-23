@@ -105,8 +105,14 @@ const extractKotlinParameter: ParameterExtractor = (node: SyntaxNode, env: Map<s
     typeNode = node.childForFieldName('type');
     nameNode = node.childForFieldName('name');
   } else {
-    nameNode = node.childForFieldName('name') ?? node.childForFieldName('pattern');
-    typeNode = node.childForFieldName('type');
+    // tree-sitter-kotlin exposes parameters as `parameter(simple_identifier, user_type)`
+    // without stable `name` / `type` fields across all builds.
+    nameNode = node.childForFieldName('name')
+      ?? node.childForFieldName('pattern')
+      ?? findChildByType(node, 'simple_identifier');
+    typeNode = node.childForFieldName('type')
+      ?? findChildByType(node, 'user_type')
+      ?? findChildByType(node, 'type_identifier');
   }
 
   if (!nameNode || !typeNode) return;
