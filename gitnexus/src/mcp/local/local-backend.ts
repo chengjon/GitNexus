@@ -9,6 +9,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { initKuzu, executeQuery, executeParameterized, closeKuzu, isKuzuReady } from '../core/kuzu-adapter.js';
+import { nativeRuntimeManager } from '../../runtime/native-runtime-manager.js';
 // Embedding imports are lazy (dynamic import) to avoid loading onnxruntime-node
 // at MCP server startup — crashes on unsupported Node ABI versions (#89)
 // git utilities available if needed
@@ -1700,12 +1701,7 @@ export class LocalBackend {
   }
 
   async disconnect(): Promise<void> {
-    await closeKuzu(); // close all connections
-    // Note: we intentionally do NOT call disposeEmbedder() here.
-    // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs,
-    // and importing the embedder module on Node v24+ crashes if onnxruntime
-    // was never loaded during the session. Since process.exit(0) follows
-    // immediately after disconnect(), the OS reclaims everything. See #38, #89.
+    await nativeRuntimeManager.cleanupMcpRuntime(closeKuzu);
     this.repos.clear();
     this.contextCache.clear();
     this.initializedRepos.clear();

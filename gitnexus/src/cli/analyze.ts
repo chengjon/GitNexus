@@ -622,10 +622,7 @@ export const analyzeCommand = async (
       }, generatedSkills);
     }
 
-    await closeKuzu();
-    // Note: we intentionally do NOT call disposeEmbedder() here.
-    // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs.
-    // Since the process exits immediately after, Node.js reclaims everything.
+    await nativeRuntimeManager.cleanupCoreRuntime(closeKuzu);
 
     const totalTime = ((Date.now() - t0Global) / 1000).toFixed(1);
 
@@ -680,7 +677,7 @@ export const analyzeCommand = async (
       clearInterval(elapsedTimer);
     }
     unregisterShutdownHandlers();
-    try { await closeKuzu(); } catch {}
+    try { await nativeRuntimeManager.cleanupCoreRuntime(closeKuzu); } catch {}
     console.log = origLog;
     console.warn = origWarn;
     console.error = origError;

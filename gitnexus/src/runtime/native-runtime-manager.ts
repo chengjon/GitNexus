@@ -175,6 +175,19 @@ export class NativeRuntimeManager {
     }
     this.scheduleExit(exitCode);
   }
+
+  async cleanupMcpRuntime(closeKuzu: () => Promise<void>): Promise<void> {
+    await closeKuzu();
+    // Intentionally do not dispose the MCP embedder here.
+    // The current ONNX / transformers native cleanup path is not considered
+    // safe enough to make implicit during shutdown, so runtime policy keeps
+    // the embedder loaded until process exit.
+  }
+
+  async cleanupCoreRuntime(closeKuzu: () => Promise<void>): Promise<void> {
+    await closeKuzu();
+    // Intentionally do not dispose the core embedder here for the same reason.
+  }
 }
 
 export const nativeRuntimeManager = new NativeRuntimeManager();

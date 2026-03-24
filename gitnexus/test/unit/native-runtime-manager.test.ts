@@ -157,4 +157,32 @@ describe('NativeRuntimeManager', () => {
 
     expect(calls).toEqual(['cleanup', 'exit:130']);
   });
+
+  it('cleans up MCP runtime without disposing the embedder state', async () => {
+    const manager = new NativeRuntimeManager();
+    const calls: string[] = [];
+
+    manager.markEmbedderActive('mcp');
+
+    await manager.cleanupMcpRuntime(async () => {
+      calls.push('close-kuzu');
+    });
+
+    expect(calls).toEqual(['close-kuzu']);
+    expect(manager.getSnapshot().mcpEmbedderActive).toBe(true);
+  });
+
+  it('cleans up core runtime without disposing the embedder state', async () => {
+    const manager = new NativeRuntimeManager();
+    const calls: string[] = [];
+
+    manager.markEmbedderActive('core');
+
+    await manager.cleanupCoreRuntime(async () => {
+      calls.push('close-kuzu');
+    });
+
+    expect(calls).toEqual(['close-kuzu']);
+    expect(manager.getSnapshot().coreEmbedderActive).toBe(true);
+  });
 });
