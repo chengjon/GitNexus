@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
-import { createLanguageMap } from '../../src/core/tree-sitter/language-registry.js';
+import { createLanguageMap, getOptionalLanguageSupportSummary } from '../../src/core/tree-sitter/language-registry.js';
 
 describe('language-registry', () => {
   it('omits optional languages when their native bindings are unavailable', () => {
@@ -43,5 +43,34 @@ describe('language-registry', () => {
 
       throw new Error(`Unexpected optional module request: ${moduleName}`);
     })).toThrow('Unexpected parse error inside optional loader');
+  });
+
+  it('reports optional language availability and unavailability with details', () => {
+    const support = getOptionalLanguageSupportSummary((moduleName) => {
+      if (moduleName === 'tree-sitter-kotlin') {
+        throw new Error('No native build was found for tree-sitter-kotlin');
+      }
+
+      if (moduleName === 'tree-sitter-swift') {
+        return { grammar: 'swift' };
+      }
+
+      throw new Error(`Unexpected optional module request: ${moduleName}`);
+    });
+
+    expect(support).toEqual([
+      {
+        language: SupportedLanguages.Kotlin,
+        optional: true,
+        status: 'unavailable',
+        detail: 'No native build was found for tree-sitter-kotlin',
+      },
+      {
+        language: SupportedLanguages.Swift,
+        optional: true,
+        status: 'available',
+        detail: 'loaded',
+      },
+    ]);
   });
 });

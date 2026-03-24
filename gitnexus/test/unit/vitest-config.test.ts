@@ -1,0 +1,34 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { describe, expect, it } from 'vitest';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '..', '..');
+
+describe('vitest configuration split', () => {
+  it('unit config does not load global native Kuzu setup', async () => {
+    const unitConfig = await fs.readFile(path.join(repoRoot, 'vitest.config.ts'), 'utf8');
+
+    expect(unitConfig).not.toContain("globalSetup: ['test/global-setup.ts']");
+    expect(unitConfig).not.toContain("setupFiles: ['test/setup.ts']");
+    expect(unitConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
+  });
+
+  it('default integration config does not force native Kuzu setup', async () => {
+    const integrationConfig = await fs.readFile(path.join(repoRoot, 'vitest.integration.config.ts'), 'utf8');
+
+    expect(integrationConfig).not.toContain("globalSetup: ['test/global-setup.ts']");
+    expect(integrationConfig).not.toContain("setupFiles: ['test/setup.ts']");
+    expect(integrationConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
+  });
+
+  it('native integration config keeps Kuzu setup but no longer needs global error suppression', async () => {
+    const integrationConfig = await fs.readFile(path.join(repoRoot, 'vitest.integration.native.config.ts'), 'utf8');
+
+    expect(integrationConfig).toContain("globalSetup: ['test/global-setup.ts']");
+    expect(integrationConfig).not.toContain("setupFiles: ['test/setup.ts']");
+    expect(integrationConfig).not.toContain('dangerouslyIgnoreUnhandledErrors: true');
+  });
+});

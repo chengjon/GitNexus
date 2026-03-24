@@ -15,6 +15,8 @@
 import path from 'path';
 import { describe, beforeAll, afterAll, inject } from 'vitest';
 import type { TestDBHandle } from './test-db.js';
+import { createNativeRuntimeFixture } from './native-runtime-fixture.js';
+import { shouldExplicitlyCloseNativeKuzu } from './native-teardown-policy.js';
 import {
   NODE_TABLES,
   EMBEDDING_TABLE_NAME,
@@ -79,6 +81,7 @@ export function withTestKuzuDB(
   const timeout = options?.timeout ?? 30000;
 
   const setup = async () => {
+    const fixture = createNativeRuntimeFixture();
     // Get shared DB path from globalSetup (created once with full schema)
     const dbPath = inject<'kuzuDbPath'>('kuzuDbPath');
     const repoId = `test-${prefix}-${Date.now()}-${repoCounter++}`;
@@ -126,18 +129,26 @@ export function withTestKuzuDB(
     //    destructor hooks, but concurrent Database instances on the same
     //    path are allowed, so we skip the close entirely.
     if (options?.poolAdapter) {
-      if (process.platform === 'win32') {
+      if (shouldExplicitlyCloseNativeKuzu()) {
         await adapter.closeKuzu();
       }
       const { initKuzu: poolInitKuzu } = await import('../../src/mcp/core/kuzu-adapter.js');
       await poolInitKuzu(repoId, dbPath);
+      fixture.addCleanup(async () => {
+        try {
+          const { closeKuzu: poolCloseKuzu } = await import('../../src/mcp/core/kuzu-adapter.js');
+          await poolCloseKuzu(repoId);
+        } catch {
+          // best-effort only
+        }
+      });
     }
 
-    // Cleanup: intentionally a no-op. We do NOT call detachKuzu() here
-    // because .closeSync() segfaults on Linux (KuzuDB N-API destructor bug).
-    // CI runs each KuzuDB test file in its own vitest process, so the OS
-    // reclaims all native resources on process exit — no explicit cleanup needed.
-    const cleanup = async () => {};
+    // Cleanup remains best-effort: native Kuzu teardown still has platform-specific
+    // risks, but tests now use an explicit fixture instead of an implicit no-op.
+    const cleanup = async () => {
+      await fixture.cleanup();
+    };
 
     // tmpHandle.dbPath → parent temp dir (not the kuzu file) so tests
     // that create sibling directories (e.g. 'storage') still work.

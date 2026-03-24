@@ -22,6 +22,7 @@ import { hybridSearch } from '../core/search/hybrid-search.js';
 // at server startup — crashes on unsupported Node ABI versions (#89)
 import { LocalBackend } from '../mcp/local/local-backend.js';
 import { mountMCPEndpoints } from './mcp-http.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 const buildGraph = async (): Promise<{ nodes: GraphNode[]; relationships: GraphRelationship[] }> => {
   const nodes: GraphNode[] = [];
@@ -349,12 +350,17 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
   // Graceful shutdown — close Express + KuzuDB cleanly
   const shutdown = async () => {
-    server.close();
-    await cleanupMcp();
-    await closeKuzu();
-    await backend.disconnect();
-    process.exit(0);
+    await nativeRuntimeManager.runCleanupAndExit(0, {
+      cleanup: async () => {
+        server.close();
+        await cleanupMcp();
+        await closeKuzu();
+        await backend.disconnect();
+      },
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
   };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+  nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);
 };

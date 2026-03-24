@@ -91,7 +91,7 @@ jobs:
           exit_code=0
           for f in "${files[@]}"; do
             echo "::group::$f"
-            if ! npx vitest run --reporter=verbose --pool=forks "$f"; then
+            if ! npx vitest run --config vitest.integration.native.config.ts --reporter=verbose --pool=forks "$f"; then
               exit_code=1
               echo "::error::Test file failed: $f"
             fi
@@ -105,7 +105,7 @@ jobs:
         shell: bash
         env:
           TEST_GLOB: ${{ matrix.test-glob }}
-        run: npx vitest run --reporter=verbose $TEST_GLOB
+        run: npx vitest run --config vitest.integration.config.ts --reporter=verbose $TEST_GLOB
         working-directory: gitnexus
 
   # ── Coverage collection (ubuntu only) ─────────────────────────────────
@@ -127,7 +127,7 @@ jobs:
       - name: Run integration tests with coverage
         working-directory: gitnexus
         run: >-
-          npx vitest run
+          npx vitest run --config vitest.integration.config.ts
           --reporter=default
           --reporter=json
           --outputFile=integration-results.json

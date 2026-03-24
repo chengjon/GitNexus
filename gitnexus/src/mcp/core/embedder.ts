@@ -13,6 +13,7 @@ import {
   getEmbeddingRuntimeConfig,
 } from '../../core/embeddings/runtime-config.js';
 import { embedQueryWithOllama } from '../../core/embeddings/ollama-client.js';
+import { nativeRuntimeManager } from '../../runtime/native-runtime-manager.js';
 
 // Model config
 const MODEL_ID = 'Snowflake/snowflake-arctic-embed-xs';
@@ -31,6 +32,7 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
   const runtimeConfig = getEmbeddingRuntimeConfig();
 
   if (embedderInstance && activeProvider === runtimeConfig.provider) {
+    nativeRuntimeManager.markEmbedderActive('mcp');
     return embedderInstance;
   }
 
@@ -38,6 +40,7 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
     embedderInstance = null;
     initPromise = null;
     activeProvider = null;
+    nativeRuntimeManager.markEmbedderInactive('mcp');
   }
 
   if (isInitializing && initPromise) {
@@ -51,6 +54,7 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
       if (runtimeConfig.provider === 'ollama') {
         embedderInstance = {} as FeatureExtractionPipeline;
         activeProvider = 'ollama';
+        nativeRuntimeManager.markEmbedderActive('mcp');
         console.error(`GitNexus: Using Ollama embedding model (${runtimeConfig.ollamaModel})`);
         return embedderInstance;
       }
@@ -88,6 +92,7 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
             process.stdout.write = origStdout;
             process.stderr.write = origStderr;
           }
+          nativeRuntimeManager.markEmbedderActive('mcp');
           console.error(`GitNexus: Embedding model loaded (${device})`);
           return embedderInstance!;
         } catch {
@@ -101,6 +106,7 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
       initPromise = null;
       embedderInstance = null;
       activeProvider = null;
+      nativeRuntimeManager.markEmbedderInactive('mcp');
       throw formatEmbeddingInitError(error, runtimeConfig);
     } finally {
       isInitializing = false;
@@ -159,4 +165,5 @@ export const disposeEmbedder = async (): Promise<void> => {
     initPromise = null;
   }
   activeProvider = null;
+  nativeRuntimeManager.markEmbedderInactive('mcp');
 };

@@ -229,3 +229,29 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 3. 在 P0 稳定后，再拆大模块
 
 也就是说，下一阶段不该直接去“拆最大的文件”，而应该先稳住原生运行时与测试基建这两个基础面。
+
+---
+
+## 7. 当前进度（2026-03-24）
+
+已完成：
+
+- `NativeRuntimeManager` 骨架已建立，并接入 `analyze`、MCP Kuzu adapter、`mcp/server`、`server/api`、`eval-server`
+- `doctor --json` 已暴露 `native-runtime` 与 `language-support`
+- 测试基建已拆成：
+  - `unit`
+  - `integration`
+  - `integration:native`
+- `dangerouslyIgnoreUnhandledErrors` 已从当前 active Vitest 配置中移除
+- `test/setup.ts` 已从所有 active Vitest 配置路径移除
+- `native-runtime` 已能显示：
+  - `kuzuActiveRepos`
+  - `coreEmbedderActive`
+  - `mcpEmbedderActive`
+- CI workflow 已对齐新的三层测试配置
+
+仍待完成：
+
+- 评估是否要把 `NativeRuntimeManager` 扩展到真正的 embedder dispose 策略，而不只是状态与政策承载
+- 继续收缩 test helper 中的平台特判和历史兼容注释
+- 决定这一阶段是否已经足够形成评审 PR，还是继续深入到 `global-setup` / `test-indexed-db` 的更细颗粒治理

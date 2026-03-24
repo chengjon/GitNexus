@@ -53,6 +53,7 @@ describe('CLI commands', () => {
       const pkg = await readPackageJson();
       expect(pkg.scripts.test).toBeDefined();
       expect(pkg.scripts['test:integration']).toBeDefined();
+      expect(pkg.scripts['test:integration:native']).toBeDefined();
       expect(pkg.scripts['test:all']).toBeDefined();
     });
 

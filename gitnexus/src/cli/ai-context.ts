@@ -62,6 +62,8 @@ This project is indexed by GitNexus as **${projectName}** (${stats.nodes || 0} s
 
 > If any GitNexus tool warns the index is stale, run \`gitnexus analyze\` in terminal first.
 
+> If GitNexus behaves differently across machines or CI, run \`gitnexus doctor --json\` to inspect \`native-runtime\`, \`language-support\`, and host configuration checks.
+
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run \`gitnexus_impact({target: "symbolName", direction: "upstream"})\` and report the blast radius (direct callers, affected processes, risk level) to the user.
@@ -151,6 +153,8 @@ Use \`gitnexus analyze --embeddings\` when natural-language, concept, or fuzzy c
 This enables hybrid retrieval (\`BM25 + semantic + RRF\`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
 
 During \`gitnexus analyze\`, GitNexus automatically detects and stops local \`gitnexus mcp\` processes that are holding the target repo's \`.gitnexus/kuzu\` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI or editor sessions open.
+
+Use \`gitnexus doctor --json\` when you need to verify whether optional grammars such as Kotlin / Swift are actually available in the current environment.
 
 If the index previously included embeddings, preserve them by adding \`--embeddings\`:
 

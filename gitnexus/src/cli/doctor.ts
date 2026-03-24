@@ -4,6 +4,8 @@ import { getEmbeddingsConfigSnapshot } from './config.js';
 import { DEFAULT_EMBEDDING_CONFIG } from '../core/embeddings/types.js';
 import { getHostPlans } from './setup.js';
 import { execFileSync } from 'node:child_process';
+import { getOptionalLanguageSupportSummary, type OptionalLanguageSupport } from '../core/tree-sitter/language-registry.js';
+import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 export interface DoctorOptions {
   host?: string;
@@ -31,6 +33,8 @@ interface DoctorDeps {
   fetchJson: (url: string, init?: RequestInit) => Promise<any>;
   probeOllama: (baseUrl: string, model: string) => Promise<{ status: 'pass' | 'warn'; detail: string }>;
   getHostPlans: typeof getHostPlans;
+  getLanguageSupportSummary?: () => OptionalLanguageSupport[];
+  getNativeRuntimeCheck?: () => DoctorCheck;
 }
 
 function validateOllamaEmbedPayload(payload: any): boolean {
@@ -116,6 +120,19 @@ const DEFAULT_DEPS: DoctorDeps = {
   },
   probeOllama: async (baseUrl: string, model: string) => defaultProbeOllama(DEFAULT_DEPS.fetchJson, baseUrl, model),
   getHostPlans,
+  getLanguageSupportSummary: () => getOptionalLanguageSupportSummary(),
+  getNativeRuntimeCheck: () => {
+    const snapshot = nativeRuntimeManager.getSnapshot();
+    return {
+      name: 'native-runtime',
+      status: snapshot.activeKuzuRepos === 0 && !snapshot.coreEmbedderActive && !snapshot.mcpEmbedderActive ? 'pass' : 'warn',
+      detail: [
+        `kuzuActiveRepos=${snapshot.activeKuzuRepos}${snapshot.activeRepoIds.length ? ` (${snapshot.activeRepoIds.join(', ')})` : ''}`,
+        `coreEmbedderActive=${snapshot.coreEmbedderActive}`,
+        `mcpEmbedderActive=${snapshot.mcpEmbedderActive}`,
+      ].join(', '),
+    };
+  },
 };
 
 function resolveOverall(checks: DoctorCheck[]): DoctorResult['overall'] {
@@ -159,6 +176,8 @@ export async function runDoctor(
     detail: `Git repository detected at ${repoRoot}`,
   });
 
+  checks.push((deps.getNativeRuntimeCheck ?? DEFAULT_DEPS.getNativeRuntimeCheck)!());
+
   const indexed = await deps.hasIndex(repoRoot);
   checks.push({
     name: 'repo-indexed',
@@ -169,6 +188,18 @@ export async function runDoctor(
   });
 
   const cliConfig = await deps.loadCLIConfig();
+  const languageSupport = (deps.getLanguageSupportSummary ?? DEFAULT_DEPS.getLanguageSupportSummary)!();
+  if (languageSupport.length > 0) {
+    const unavailable = languageSupport.filter((entry) => entry.status === 'unavailable');
+    checks.push({
+      name: 'language-support',
+      status: unavailable.length > 0 ? 'warn' : 'pass',
+      detail: languageSupport
+        .map((entry) => `${entry.language}=${entry.status}${entry.detail ? ` (${entry.detail})` : ''}`)
+        .join(', '),
+    });
+  }
+
   const embeddingSnapshot = getEmbeddingsConfigSnapshot(cliConfig, process.env);
   const embeddingRuntime = embeddingSnapshot.effective;
   const embeddingDetail = [
