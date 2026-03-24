@@ -45,6 +45,7 @@ import {
   VALID_NODE_LABELS as SHARED_VALID_NODE_LABELS,
 } from '../../src/mcp/local/tools/shared/query-safety.js';
 import { formatCypherAsMarkdown } from '../../src/mcp/local/tools/shared/cypher-format.js';
+import { searchFTSFromKuzu } from '../../src/core/search/bm25-index.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
 import { execFileSync } from 'child_process';
@@ -186,6 +187,51 @@ describe('LocalBackend.callTool', () => {
   it('query tool returns error for whitespace-only query', async () => {
     const result = await backend.callTool('query', { query: '   ' });
     expect(result.error).toContain('query parameter is required');
+  });
+
+  it('query tool probes embedding existence without COUNT(*) aggregation', async () => {
+    vi.mocked(executeQuery).mockResolvedValue([]);
+
+    const result = await backend.callTool('query', { query: 'auth' });
+
+    expect(result).toHaveProperty('processes');
+    const embeddingProbeQueries = vi
+      .mocked(executeQuery)
+      .mock.calls
+      .map(([, query]) => String(query))
+      .filter((query) => query.includes('CodeEmbedding'));
+    expect(embeddingProbeQueries.length).toBeGreaterThan(0);
+    expect(embeddingProbeQueries.some((query) => /COUNT\s*\(\s*\*\s*\)/i.test(query))).toBe(false);
+  });
+
+  it('query tool keeps process_symbols unique by symbol id across processes', async () => {
+    vi.mocked(searchFTSFromKuzu).mockResolvedValue([
+      { filePath: 'src/auth.ts', score: 0.9 } as any,
+    ]);
+    (executeParameterized as any).mockImplementation(async (_repoId: string, query: string) => {
+      if (query.includes('WHERE n.filePath = $filePath')) {
+        return [
+          { id: 'func:login', name: 'login', type: 'Function', filePath: 'src/auth.ts', startLine: 1, endLine: 10 },
+        ];
+      }
+      if (query.includes(`MATCH (n {id: $nodeId})-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)`)) {
+        return [
+          { pid: 'proc:one', label: 'Login One', heuristicLabel: 'Login One', processType: 'intra_community', stepCount: 3, step: 1 },
+          { pid: 'proc:two', label: 'Login Two', heuristicLabel: 'Login Two', processType: 'intra_community', stepCount: 4, step: 2 },
+        ];
+      }
+      if (query.includes(`MATCH (n {id: $nodeId})-[:CodeRelation {type: 'MEMBER_OF'}]->(c:Community)`)) {
+        return [];
+      }
+      return [];
+    });
+    vi.mocked(executeQuery).mockResolvedValue([]);
+
+    const result = await backend.callTool('query', { query: 'login', limit: 5, max_symbols: 10 });
+    const ids = (result.process_symbols || []).map((sym: any) => sym.id);
+
+    expect(result.processes).toHaveLength(2);
+    expect(ids).toEqual(['func:login']);
   });
 
   it('dispatches cypher tool and blocks write queries', async () => {

@@ -198,7 +198,7 @@ export async function runQueryTool(ctx: ToolContext, params: QueryToolParams): P
     }))
   );
 
-  // Deduplicate process_symbols by id
+  // Contract: process_symbols is unique by symbol id, even if one symbol belongs to multiple processes.
   const seen = new Set<string>();
   const dedupedSymbols = processSymbols.filter((s) => {
     if (seen.has(s.id)) return false;
@@ -279,8 +279,8 @@ async function bm25Search(ctx: ToolContext, query: string, limit: number): Promi
 async function semanticSearch(ctx: ToolContext, query: string, limit: number): Promise<any[]> {
   try {
     // Check if embedding table exists before loading the model (avoids heavy model init when embeddings are off)
-    const tableCheck = await executeQuery(ctx.repo.id, `MATCH (e:CodeEmbedding) RETURN COUNT(*) AS cnt LIMIT 1`);
-    if (!tableCheck.length || (tableCheck[0].cnt ?? tableCheck[0][0]) === 0) return [];
+    const embeddingProbe = await executeQuery(ctx.repo.id, `MATCH (e:CodeEmbedding) RETURN e.nodeId AS nodeId LIMIT 1`);
+    if (!embeddingProbe.length) return [];
 
     const { embedQuery, getEmbeddingDims } = await import('../../../core/embedder.js');
     const queryVec = await embedQuery(query);

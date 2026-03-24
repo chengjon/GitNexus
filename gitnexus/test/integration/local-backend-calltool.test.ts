@@ -165,7 +165,10 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result).not.toHaveProperty('error');
       // Should have some combination of processes, process_symbols, or definitions
       expect(result).toHaveProperty('processes');
+      expect(result).toHaveProperty('process_symbols');
       expect(result).toHaveProperty('definitions');
+      const symbolIds = (result.process_symbols || []).map((sym: any) => sym.id);
+      expect(new Set(symbolIds).size).toBe(symbolIds.length);
       // The search should find something (FTS or graph-based)
       const totalResults =
         (result.processes?.length || 0) +
