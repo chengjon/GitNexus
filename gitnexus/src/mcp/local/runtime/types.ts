@@ -22,3 +22,7 @@ export interface RepoHandle {
   lastCommit: string;
   stats?: RegistryEntry['stats'];
 }
+
+export interface BackendRuntimeLike {
+  ensureInitialized(repoId: string): Promise<void>;
+}

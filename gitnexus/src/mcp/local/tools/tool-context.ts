@@ -1,8 +1,7 @@
-import type { RepoHandle } from '../runtime/types.js';
-import type { BackendRuntime } from '../runtime/backend-runtime.js';
+import type { BackendRuntimeLike, RepoHandle } from '../runtime/types.js';
 
 export interface ToolContext {
-  runtime: BackendRuntime;
+  runtime: BackendRuntimeLike;
   repo: RepoHandle;
   logQueryError: (context: string, err: unknown) => void;
 }

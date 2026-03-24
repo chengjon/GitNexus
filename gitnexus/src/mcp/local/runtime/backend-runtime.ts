@@ -1,9 +1,9 @@
 import path from 'path';
 import { closeKuzu, initKuzu, isKuzuReady } from '../../core/kuzu-adapter.js';
 import { listRegisteredRepos } from '../../../storage/repo-manager.js';
-import type { CodebaseContext, RepoHandle } from './types.js';
+import type { BackendRuntimeLike, CodebaseContext, RepoHandle } from './types.js';
 
-export class BackendRuntime {
+export class BackendRuntime implements BackendRuntimeLike {
   private repos: Map<string, RepoHandle> = new Map();
   private contextCache: Map<string, CodebaseContext> = new Map();
   private initializedRepos: Set<string> = new Set();
