@@ -1,16 +1,8 @@
 /**
- * Format raw Cypher result rows as a markdown table for LLM readability.
- * Falls back to raw result if rows aren't tabular objects.
+ * Format tabular Cypher result rows as a markdown table for LLM readability.
  */
-export function formatCypherAsMarkdown(result: any): any {
-  if (!Array.isArray(result) || result.length === 0) return result;
-
-  const firstRow = result[0];
-  if (typeof firstRow !== 'object' || firstRow === null) return result;
-
-  const keys = Object.keys(firstRow);
-  if (keys.length === 0) return result;
-
+export function formatCypherAsMarkdown(result: any[]): { markdown: string; row_count: number } {
+  const keys = Object.keys(result[0]);
   const header = '| ' + keys.join(' | ') + ' |';
   const separator = '| ' + keys.map(() => '---').join(' | ') + ' |';
   const dataRows = result.map((row: any) =>

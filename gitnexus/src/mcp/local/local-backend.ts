@@ -34,6 +34,13 @@ function logQueryError(context: string, err: unknown): void {
   console.error(`GitNexus [${context}]: ${msg}`);
 }
 
+function isFormatReadyCypherTable(result: unknown): result is any[] {
+  if (!Array.isArray(result) || result.length === 0) return false;
+  const firstRow = result[0];
+  if (typeof firstRow !== 'object' || firstRow === null) return false;
+  return Object.keys(firstRow).length > 0;
+}
+
 export type { CodebaseContext, RepoHandle } from './runtime/types.js';
 export {
   isTestFilePath,
@@ -53,6 +60,7 @@ export class LocalBackend {
       query: async (_ctx, toolParams) => this.query(_ctx.repo, toolParams),
       cypher: async (_ctx, toolParams) => {
         const raw = await this.cypher(_ctx.repo, toolParams);
+        if (!isFormatReadyCypherTable(raw)) return raw;
         return formatCypherAsMarkdown(raw);
       },
       context: async (_ctx, toolParams) => this.context(_ctx.repo, toolParams),
