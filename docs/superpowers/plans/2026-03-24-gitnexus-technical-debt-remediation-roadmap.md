@@ -172,6 +172,10 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 4. `src/core/kuzu/kuzu-adapter.ts`
 5. `src/cli/analyze.ts`
 
+进度更新（2026-03-24）：
+
+- `src/mcp/local/local-backend.ts` handler-first 拆分已在分支 `local-backend-handler-first-impl` 完成并通过目标测试与构建验证，当前状态为待合并。
+
 ### Phase P2：语言支持确定性工程
 
 建立语言支持分级与环境检测：

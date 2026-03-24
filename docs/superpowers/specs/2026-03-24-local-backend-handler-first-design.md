@@ -1,8 +1,16 @@
 # LocalBackend Handler-First Refactor Design
 
 Date: 2026-03-24  
-Status: Draft for review  
+Status: Implemented in feature branch (`local-backend-handler-first-impl`), pending merge  
 Scope: `gitnexus/src/mcp/local/local-backend.ts`
+
+## Implementation Sync (2026-03-24)
+
+- The implemented handler-first refactor matches the architecture and migration intent in sections 5-8, with no bounded architectural deviations found.
+- Final task-level verification in this branch passed:
+  - `npx vitest run test/unit/tool-registry.test.ts test/unit/calltool-dispatch.test.ts test/unit/server.test.ts test/integration/local-backend.test.ts test/integration/local-backend-calltool.test.ts`
+  - `npm run build`
+- Environment caveat: `gitnexus_detect_changes(scope:"all")` is unreliable in this git worktree when the index targets the main repo path. Final scope verification for this branch used `git diff --stat main...HEAD` and file-level diff checks.
 
 ## 1. Goal
 
