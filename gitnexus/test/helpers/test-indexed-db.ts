@@ -16,6 +16,7 @@ import path from 'path';
 import { describe, beforeAll, afterAll, inject } from 'vitest';
 import type { TestDBHandle } from './test-db.js';
 import { createNativeRuntimeFixture } from './native-runtime-fixture.js';
+import { shouldExplicitlyCloseNativeKuzu } from './native-teardown-policy.js';
 import {
   NODE_TABLES,
   EMBEDDING_TABLE_NAME,
@@ -128,7 +129,7 @@ export function withTestKuzuDB(
     //    destructor hooks, but concurrent Database instances on the same
     //    path are allowed, so we skip the close entirely.
     if (options?.poolAdapter) {
-      if (process.platform === 'win32') {
+      if (shouldExplicitlyCloseNativeKuzu()) {
         await adapter.closeKuzu();
       }
       const { initKuzu: poolInitKuzu } = await import('../../src/mcp/core/kuzu-adapter.js');

@@ -11,6 +11,7 @@ import path from 'path';
 import kuzu from 'kuzu';
 import type { GlobalSetupContext } from 'vitest/node';
 import { createTempDir } from './helpers/test-db.js';
+import { shouldExplicitlyCloseNativeKuzu } from './helpers/native-teardown-policy.js';
 import {
   NODE_SCHEMA_QUERIES,
   REL_SCHEMA_QUERIES,
@@ -45,7 +46,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   // On Linux/macOS, skip close — the N-API destructor hooks can segfault
   // or deadlock. The teardown function removes the temp directory, and
   // process exit reclaims all native resources.
-  if (process.platform === 'win32') {
+  if (shouldExplicitlyCloseNativeKuzu()) {
     conn.close();
     db.close();
   }
