@@ -15,8 +15,9 @@ export function createToolRegistry(handlers: Record<string, ToolHandler>): ToolR
   return {
     async dispatch(method: string, ctx: ToolContext, params: any): Promise<any> {
       const resolvedMethod = TOOL_ALIASES[method] || method;
-      const handler = handlers[resolvedMethod];
-      if (!handler) {
+      const hasHandler = Object.prototype.hasOwnProperty.call(handlers, resolvedMethod);
+      const handler = hasHandler ? handlers[resolvedMethod] : undefined;
+      if (typeof handler !== 'function') {
         throw new Error(`Unknown tool: ${method}`);
       }
       return handler(ctx, params);

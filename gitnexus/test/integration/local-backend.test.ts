@@ -13,7 +13,7 @@
  * #3 (path traversal), #4 (relation allowlist), #25 (regex lastIndex),
  * #26 (rename first-occurrence-only)
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   executeQuery,
   executeParameterized,
@@ -30,8 +30,15 @@ import {
   VALID_RELATION_TYPES as SHARED_VALID_RELATION_TYPES,
   isWriteQuery as sharedIsWriteQuery,
 } from '../../src/mcp/local/tools/shared/query-safety.js';
+import { runImpactTool } from '../../src/mcp/local/tools/handlers/impact-handler.js';
+import { runDetectChangesTool } from '../../src/mcp/local/tools/handlers/detect-changes-handler.js';
 import { withTestKuzuDB } from '../helpers/test-indexed-db.js';
 import { LOCAL_BACKEND_SEED_DATA } from '../fixtures/local-backend-seed.js';
+import { execFileSync } from 'child_process';
+
+vi.mock('child_process', () => ({
+  execFileSync: vi.fn(),
+}));
 
 // ─── Block 1: Pool adapter tests ─────────────────────────────────────
 
@@ -266,6 +273,72 @@ withTestKuzuDB('local-backend', (handle) => {
         { name: null as any },
       );
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  // ─── Analysis handlers ───────────────────────────────────────────────
+
+  describe('analysis handlers', () => {
+    const createHandlerContext = (repoPath = '/test/repo') => ({
+      runtime: {
+        ensureInitialized: async () => undefined,
+      },
+      repo: {
+        id: handle.repoId,
+        name: 'test-repo',
+        repoPath,
+        storagePath: '/tmp/.gitnexus/test-repo',
+        kuzuPath: handle.dbPath,
+        indexedAt: new Date(0).toISOString(),
+        lastCommit: 'abc123',
+      },
+      logQueryError: () => undefined,
+    });
+
+    it('runImpactTool resolves file-path targets against seeded DB', async () => {
+      const result = await runImpactTool(createHandlerContext() as any, {
+        target: 'src/auth.ts',
+        direction: 'upstream',
+      });
+
+      expect(result).not.toHaveProperty('error');
+      expect(result).toEqual(expect.objectContaining({
+        target: expect.objectContaining({
+          name: 'auth.ts',
+          filePath: 'src/auth.ts',
+        }),
+        direction: 'upstream',
+        byDepth: expect.any(Object),
+      }));
+    });
+
+    it('runDetectChangesTool uses compare scope git args and returns summary shape', async () => {
+      vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+      const repoPath = '/tmp/repo-under-test';
+      const result = await runDetectChangesTool(createHandlerContext(repoPath) as any, {
+        scope: 'compare',
+        base_ref: 'main',
+      });
+
+      expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+        'git',
+        ['diff', 'main', '--name-only'],
+        expect.objectContaining({
+          cwd: repoPath,
+          encoding: 'utf-8',
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({
+        summary: expect.objectContaining({
+          changed_files: 1,
+          changed_count: expect.any(Number),
+          affected_count: expect.any(Number),
+          risk_level: expect.any(String),
+        }),
+        changed_symbols: expect.any(Array),
+        affected_processes: expect.any(Array),
+      }));
     });
   });
 
