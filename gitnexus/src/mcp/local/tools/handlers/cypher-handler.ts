@@ -7,6 +7,11 @@ export interface CypherToolParams {
 }
 
 export async function runCypherTool(ctx: ToolContext, params: CypherToolParams): Promise<any> {
+  const query = typeof params?.query === 'string' ? params.query.trim() : '';
+  if (!query) {
+    return { error: 'query parameter is required and cannot be empty.' };
+  }
+
   await ctx.runtime.ensureInitialized(ctx.repo.id);
 
   if (!isKuzuReady(ctx.repo.id)) {
@@ -14,12 +19,12 @@ export async function runCypherTool(ctx: ToolContext, params: CypherToolParams):
   }
 
   // Block write operations (defense-in-depth — DB is already read-only)
-  if (isWriteQuery(params.query)) {
+  if (isWriteQuery(query)) {
     return { error: 'Write operations (CREATE, DELETE, SET, MERGE, REMOVE, DROP, ALTER, COPY, DETACH) are not allowed. The knowledge graph is read-only.' };
   }
 
   try {
-    const result = await executeQuery(ctx.repo.id, params.query);
+    const result = await executeQuery(ctx.repo.id, query);
     return result;
   } catch (err: any) {
     return { error: err.message || 'Query failed' };

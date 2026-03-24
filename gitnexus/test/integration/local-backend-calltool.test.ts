@@ -226,6 +226,13 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result).toHaveProperty('error');
     });
 
+    it('cypher tool returns error for missing query param', async () => {
+      const result = await backend.callTool('cypher', {} as any);
+      expect(result).toEqual({
+        error: 'query parameter is required and cannot be empty.',
+      });
+    });
+
     it('context tool returns error when no name or uid provided', async () => {
       const result = await backend.callTool('context', {});
       expect(result).toHaveProperty('error');

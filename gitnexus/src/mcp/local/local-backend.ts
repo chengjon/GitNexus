@@ -37,6 +37,7 @@ function isFormatReadyCypherTable(result: unknown): result is any[] {
   if (!Array.isArray(result) || result.length === 0) return false;
   const firstRow = result[0];
   if (typeof firstRow !== 'object' || firstRow === null) return false;
+  if (Array.isArray(firstRow)) return false;
   return Object.keys(firstRow).length > 0;
 }
 
@@ -60,7 +61,11 @@ export class LocalBackend {
       cypher: async (_ctx, toolParams) => {
         const raw = await runCypherTool(_ctx, toolParams);
         if (!isFormatReadyCypherTable(raw)) return raw;
-        return formatCypherAsMarkdown(raw);
+        try {
+          return formatCypherAsMarkdown(raw);
+        } catch {
+          return raw;
+        }
       },
       context: runContextTool,
       impact: runImpactTool,

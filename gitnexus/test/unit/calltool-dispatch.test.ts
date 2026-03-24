@@ -1080,6 +1080,22 @@ describe('cypher result formatting', () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
+  it('returns array-shaped row results as-is without formatter crash', async () => {
+    const arrayRows = [['main'], ['helper']];
+    (executeQuery as any).mockResolvedValue(arrayRows);
+    const result = await backend.callTool('cypher', {
+      query: 'MATCH (n:Function) RETURN n.name',
+    });
+    expect(result).toEqual(arrayRows);
+  });
+
+  it('returns structured error when cypher query param is missing', async () => {
+    const result = await backend.callTool('cypher', {} as any);
+    expect(result).toEqual({
+      error: 'query parameter is required and cannot be empty.',
+    });
+  });
+
   it('throws clear error when cypher formatter is misused with non-tabular input', () => {
     expect(() => formatCypherAsMarkdown([] as any)).toThrow('formatCypherAsMarkdown expected a non-empty array of row objects');
     expect(() => formatCypherAsMarkdown([null] as any)).toThrow('formatCypherAsMarkdown expected each row to be a plain object');
