@@ -35,7 +35,7 @@
 
 - [x] **Step 1: 列出所有 `process.exit(...)`、native close 规避、lock cleanup 的散点**
 - [x] **Step 2: 逐步迁移到 manager，不改变外部行为**
-- [ ] **Step 3: 保留行为兼容，但让策略只在 manager 中定义**
+- [x] **Step 3: 保留行为兼容，但让策略只在 manager 中定义**
 - [x] **Step 4: 跑构建与关键测试**
 
 ### Task 3: 重构测试基建，降低原生脆弱性
@@ -77,4 +77,4 @@
 - [x] **Step 2: 跑 `npm test`**
 - [x] **Step 3: 跑关键 integration suites**
 - [x] **Step 4: 运行 `gitnexus analyze` 和 MCP 关键场景手工验证**
-- [ ] **Step 5: 更新技术债路线图状态**
+- [x] **Step 5: 更新技术债路线图状态**

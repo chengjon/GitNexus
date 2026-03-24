@@ -244,9 +244,14 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   - `integration:native`
 - `dangerouslyIgnoreUnhandledErrors` 已从当前 active Vitest 配置中移除
 - `test/setup.ts` 已从所有 active Vitest 配置路径移除
+- `native-runtime` 已能显示：
+  - `kuzuActiveRepos`
+  - `coreEmbedderActive`
+  - `mcpEmbedderActive`
+- CI workflow 已对齐新的三层测试配置
 
 仍待完成：
 
-- 把剩余零散的 native exit / teardown 策略进一步收口到 runtime 层
+- 评估是否要把 `NativeRuntimeManager` 扩展到真正的 embedder dispose 策略，而不只是状态与政策承载
 - 继续收缩 test helper 中的平台特判和历史兼容注释
-- 决定是否要把 `NativeRuntimeManager` 继续扩展到 ONNX/embedder 生命周期
+- 决定这一阶段是否已经足够形成评审 PR，还是继续深入到 `global-setup` / `test-indexed-db` 的更细颗粒治理
