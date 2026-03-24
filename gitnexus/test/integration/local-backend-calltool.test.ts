@@ -110,6 +110,18 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(totalResults).toBeGreaterThanOrEqual(1);
     });
 
+    it('search/explore aliases keep query/context behavior', async () => {
+      const searchResult = await backend.callTool('search', { query: 'login' });
+      expect(searchResult).not.toHaveProperty('error');
+      expect(searchResult).toHaveProperty('processes');
+      expect(searchResult).toHaveProperty('definitions');
+
+      const exploreResult = await backend.callTool('explore', { name: 'login' });
+      expect(exploreResult).not.toHaveProperty('error');
+      expect(exploreResult.status).toBe('found');
+      expect(exploreResult.symbol.name).toBe('login');
+    });
+
     it('unknown tool throws', async () => {
       await expect(
         backend.callTool('nonexistent_tool', {}),

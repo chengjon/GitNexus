@@ -308,6 +308,57 @@ describe('LocalBackend.callTool', () => {
     expect(result).toBeDefined();
     expect(result.status === 'found' || result.symbol || result.error === undefined).toBeTruthy();
   });
+
+  it('preserves read-only callTool dispatch contract for core tools and aliases', async () => {
+    (executeQuery as any).mockResolvedValue([{ name: 'main', filePath: 'src/index.ts' }]);
+    (executeParameterized as any).mockImplementation(async (_repoId: string, query: string) => {
+      if (query.includes('MATCH (n) WHERE n.name = $symName')) {
+        return [{ id: 'func:main', name: 'main', type: 'Function', filePath: 'src/index.ts', startLine: 1, endLine: 10 }];
+      }
+      if (query.includes('MATCH (caller)-[r:CodeRelation]->(n {id: $symId})')) {
+        return [{ relType: 'CALLS', uid: 'func:caller', name: 'caller', filePath: 'src/caller.ts', kind: 'Function' }];
+      }
+      if (query.includes('MATCH (n {id: $symId})-[r:CodeRelation]->(target)')) {
+        return [{ relType: 'CALLS', uid: 'func:callee', name: 'callee', filePath: 'src/callee.ts', kind: 'Function' }];
+      }
+      if (query.includes(`MATCH (n {id: $symId})-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)`)) {
+        return [{ pid: 'proc:login', label: 'Login', step: 1, stepCount: 3 }];
+      }
+      return [];
+    });
+
+    const queryResult = await backend.callTool('query', { query: 'main' });
+    expect(queryResult).toEqual(expect.objectContaining({
+      processes: expect.any(Array),
+      definitions: expect.any(Array),
+    }));
+
+    const cypherResult = await backend.callTool('cypher', {
+      query: 'MATCH (n:Function) RETURN n.name AS name, n.filePath AS filePath LIMIT 1',
+    });
+    expect(cypherResult).toEqual(expect.objectContaining({
+      markdown: expect.any(String),
+      row_count: 1,
+    }));
+
+    const contextResult = await backend.callTool('context', { name: 'main' });
+    expect(contextResult).toEqual(expect.objectContaining({
+      status: 'found',
+      symbol: expect.objectContaining({ name: 'main' }),
+    }));
+
+    const searchAliasResult = await backend.callTool('search', { query: 'main' });
+    expect(searchAliasResult).toEqual(expect.objectContaining({
+      processes: expect.any(Array),
+      definitions: expect.any(Array),
+    }));
+
+    const exploreAliasResult = await backend.callTool('explore', { name: 'main' });
+    expect(exploreAliasResult).toEqual(expect.objectContaining({
+      status: 'found',
+      symbol: expect.objectContaining({ name: 'main' }),
+    }));
+  });
 });
 
 describe('LocalBackend shared query-safety compatibility exports', () => {
