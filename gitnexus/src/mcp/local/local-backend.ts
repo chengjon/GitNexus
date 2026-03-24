@@ -8,15 +8,15 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { initKuzu, executeQuery, executeParameterized, closeKuzu, isKuzuReady } from '../core/kuzu-adapter.js';
+import { executeQuery, executeParameterized, isKuzuReady } from '../core/kuzu-adapter.js';
 // Embedding imports are lazy (dynamic import) to avoid loading onnxruntime-node
 // at MCP server startup — crashes on unsupported Node ABI versions (#89)
 // git utilities available if needed
 // import { isGitRepo, getCurrentCommit, getGitRoot } from '../../storage/git.js';
-import {
-  listRegisteredRepos,
-  type RegistryEntry,
-} from '../../storage/repo-manager.js';
+import { BackendRuntime } from './runtime/backend-runtime.js';
+import type { CodebaseContext, RepoHandle } from './runtime/types.js';
+import { createToolRegistry, type ToolRegistry } from './tools/tool-registry.js';
+import type { ToolContext } from './tools/tool-context.js';
 // AI context generation is CLI-only (gitnexus analyze)
 // import { generateAIContextFiles } from '../../cli/ai-context.js';
 
@@ -61,64 +61,26 @@ function logQueryError(context: string, err: unknown): void {
   console.error(`GitNexus [${context}]: ${msg}`);
 }
 
-export interface CodebaseContext {
-  projectName: string;
-  stats: {
-    fileCount: number;
-    functionCount: number;
-    communityCount: number;
-    processCount: number;
-  };
-}
-
-interface RepoHandle {
-  id: string;          // unique key = repo name (basename)
-  name: string;
-  repoPath: string;
-  storagePath: string;
-  kuzuPath: string;
-  indexState?: RegistryEntry['indexState'];
-  suggestedFix?: string;
-  indexedAt: string;
-  lastCommit: string;
-  stats?: RegistryEntry['stats'];
-}
+export type { CodebaseContext, RepoHandle } from './runtime/types.js';
 
 export class LocalBackend {
-  private repos: Map<string, RepoHandle> = new Map();
-  private contextCache: Map<string, CodebaseContext> = new Map();
-  private initializedRepos: Set<string> = new Set();
+  private runtime: BackendRuntime;
+  private registry: ToolRegistry;
 
-  private samePath(left: string, right: string): boolean {
-    return process.platform === 'win32'
-      ? left.toLowerCase() === right.toLowerCase()
-      : left === right;
-  }
-
-  private ambiguousRepoError(repoParam: string, candidates: RepoHandle[]): Error {
-    const formatted = candidates
-      .map((candidate) => `${candidate.name} (${candidate.repoPath})`)
-      .join(', ');
-    const nameCounts = new Map<string, number>();
-    for (const candidate of candidates) {
-      nameCounts.set(candidate.name, (nameCounts.get(candidate.name) || 0) + 1);
-    }
-    const suggestedParams = candidates.map((candidate) => {
-      const value = nameCounts.get(candidate.name) === 1 ? candidate.name : candidate.repoPath;
-      return `repo: "${value}"`;
-    }).join(', ');
-    return new Error(
-      `Repository "${repoParam}" is ambiguous. Candidates: ${formatted}. Use one of: ${suggestedParams}`,
-    );
-  }
-
-  private resolveUniqueRepo(
-    repoParam: string,
-    candidates: RepoHandle[],
-  ): RepoHandle | null {
-    if (candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
-    throw this.ambiguousRepoError(repoParam, candidates);
+  constructor(runtime = new BackendRuntime()) {
+    this.runtime = runtime;
+    this.registry = createToolRegistry({
+      query: async (_ctx, toolParams) => this.query(_ctx.repo, toolParams),
+      cypher: async (_ctx, toolParams) => {
+        const raw = await this.cypher(_ctx.repo, toolParams);
+        return this.formatCypherAsMarkdown(raw);
+      },
+      context: async (_ctx, toolParams) => this.context(_ctx.repo, toolParams),
+      impact: async (_ctx, toolParams) => this.impact(_ctx.repo, toolParams),
+      detect_changes: async (_ctx, toolParams) => this.detectChanges(_ctx.repo, toolParams),
+      rename: async (_ctx, toolParams) => this.rename(_ctx.repo, toolParams),
+      overview: async (_ctx, toolParams) => this.overview(_ctx.repo, toolParams),
+    });
   }
 
   // ─── Initialization ──────────────────────────────────────────────
@@ -128,79 +90,7 @@ export class LocalBackend {
    * Returns true if at least one repo is available.
    */
   async init(): Promise<boolean> {
-    await this.refreshRepos();
-    return this.repos.size > 0;
-  }
-
-  /**
-   * Re-read the global registry and update the in-memory repo map.
-   * New repos are added, existing repos are updated, removed repos are pruned.
-   * KuzuDB connections for removed repos are NOT closed (they idle-timeout naturally).
-   */
-  private async refreshRepos(): Promise<void> {
-    const entries = await listRegisteredRepos({ validate: true });
-    const freshIds = new Set<string>();
-
-    for (const entry of entries) {
-      const id = this.repoId(entry.name, entry.path);
-      freshIds.add(id);
-
-      const storagePath = entry.storagePath;
-      const kuzuPath = path.join(storagePath, 'kuzu');
-
-      const handle: RepoHandle = {
-        id,
-        name: entry.name,
-        repoPath: entry.path,
-        storagePath,
-        kuzuPath: entry.kuzuPath || kuzuPath,
-        indexState: entry.indexState,
-        suggestedFix: entry.suggestedFix,
-        indexedAt: entry.indexedAt,
-        lastCommit: entry.lastCommit,
-        stats: entry.stats,
-      };
-
-      this.repos.set(id, handle);
-
-      // Build lightweight context (no KuzuDB needed)
-      const s = entry.stats || {};
-      this.contextCache.set(id, {
-        projectName: entry.name,
-        stats: {
-          fileCount: s.files || 0,
-          functionCount: s.nodes || 0,
-          communityCount: s.communities || 0,
-          processCount: s.processes || 0,
-        },
-      });
-    }
-
-    // Prune repos that no longer exist in the registry
-    for (const id of this.repos.keys()) {
-      if (!freshIds.has(id)) {
-        this.repos.delete(id);
-        this.contextCache.delete(id);
-        this.initializedRepos.delete(id);
-      }
-    }
-  }
-
-  /**
-   * Generate a stable repo ID from name + path.
-   * If names collide, append a hash of the path.
-   */
-  private repoId(name: string, repoPath: string): string {
-    const base = name.toLowerCase();
-    // Check for name collision with a different path
-    for (const [id, handle] of this.repos) {
-      if (id === base && handle.repoPath !== path.resolve(repoPath)) {
-        // Collision — use path hash
-        const hash = Buffer.from(repoPath).toString('base64url').slice(0, 6);
-        return `${base}-${hash}`;
-      }
-    }
-    return base;
+    return this.runtime.init();
   }
 
   // ─── Repo Resolution ─────────────────────────────────────────────
@@ -215,92 +105,7 @@ export class LocalBackend {
    * while the MCP server was running.
    */
   async resolveRepo(repoParam?: string): Promise<RepoHandle> {
-    const result = this.resolveRepoFromCache(repoParam);
-    if (result) return result;
-
-    // Miss — refresh registry and try once more
-    await this.refreshRepos();
-    const retried = this.resolveRepoFromCache(repoParam);
-    if (retried) return retried;
-
-    // Still no match — throw with helpful message
-    if (this.repos.size === 0) {
-      throw new Error('No indexed repositories. Run: gitnexus analyze');
-    }
-    if (repoParam) {
-      const names = [...this.repos.values()].map(h => h.name);
-      throw new Error(`Repository "${repoParam}" not found. Available: ${names.join(', ')}`);
-    }
-    const names = [...this.repos.values()].map(h => h.name);
-    throw new Error(
-      `Multiple repositories indexed. Specify which one with the "repo" parameter. Available: ${names.join(', ')}`
-    );
-  }
-
-  /**
-   * Try to resolve a repo from the in-memory cache. Returns null on miss.
-   */
-  private resolveRepoFromCache(repoParam?: string): RepoHandle | null {
-    if (this.repos.size === 0) return null;
-
-    if (repoParam) {
-      const handles = [...this.repos.values()];
-      const paramLower = repoParam.toLowerCase();
-      const resolved = path.resolve(repoParam);
-
-      const exactPathMatch = this.resolveUniqueRepo(
-        repoParam,
-        handles.filter((handle) => this.samePath(handle.repoPath, resolved)),
-      );
-      if (exactPathMatch) return exactPathMatch;
-
-      const exactNameMatch = this.resolveUniqueRepo(
-        repoParam,
-        handles.filter((handle) => handle.name === repoParam),
-      );
-      if (exactNameMatch) return exactNameMatch;
-
-      const caseInsensitiveNameMatch = this.resolveUniqueRepo(
-        repoParam,
-        handles.filter((handle) => handle.name.toLowerCase() === paramLower),
-      );
-      if (caseInsensitiveNameMatch) return caseInsensitiveNameMatch;
-
-      if (this.repos.has(paramLower)) return this.repos.get(paramLower)!;
-
-      const partialNameMatch = this.resolveUniqueRepo(
-        repoParam,
-        handles.filter((handle) => handle.name.toLowerCase().includes(paramLower)),
-      );
-      if (partialNameMatch) return partialNameMatch;
-
-      return null;
-    }
-
-    if (this.repos.size === 1) {
-      return this.repos.values().next().value!;
-    }
-
-    return null; // Multiple repos, no param — ambiguous
-  }
-
-  // ─── Lazy KuzuDB Init ────────────────────────────────────────────
-
-  private async ensureInitialized(repoId: string): Promise<void> {
-    // Always check the actual pool — the idle timer may have evicted the connection
-    if (this.initializedRepos.has(repoId) && isKuzuReady(repoId)) return;
-
-    const handle = this.repos.get(repoId);
-    if (!handle) throw new Error(`Unknown repo: ${repoId}`);
-
-    try {
-      await initKuzu(repoId, handle.kuzuPath);
-      this.initializedRepos.add(repoId);
-    } catch (err: any) {
-      // If lock error, mark as not initialized so next call retries
-      this.initializedRepos.delete(repoId);
-      throw err;
-    }
+    return this.runtime.resolveRepo(repoParam);
   }
 
   // ─── Public Getters ──────────────────────────────────────────────
@@ -309,13 +114,7 @@ export class LocalBackend {
    * Get context for a specific repo (or the single repo if only one).
    */
   getContext(repoId?: string): CodebaseContext | null {
-    if (repoId && this.contextCache.has(repoId)) {
-      return this.contextCache.get(repoId)!;
-    }
-    if (this.repos.size === 1) {
-      return this.contextCache.values().next().value ?? null;
-    }
-    return null;
+    return this.runtime.getContext(repoId);
   }
 
   /**
@@ -328,14 +127,14 @@ export class LocalBackend {
     path: string;
     storagePath: string;
     kuzuPath: string;
-    indexState: RegistryEntry['indexState'] | 'ready';
+    indexState: RepoHandle['indexState'] | 'ready';
     suggestedFix?: string;
     indexedAt: string;
     lastCommit: string;
     stats?: any;
   }>> {
-    await this.refreshRepos();
-    return [...this.repos.values()].map(h => ({
+    await this.runtime.refreshRepos();
+    return this.runtime.getRepos().map((h) => ({
       name: h.name,
       path: h.repoPath,
       storagePath: h.storagePath,
@@ -355,34 +154,13 @@ export class LocalBackend {
       return this.listRepos();
     }
 
-    // Resolve repo from optional param (re-reads registry on miss)
-    const repo = await this.resolveRepo(params?.repo);
-
-    switch (method) {
-      case 'query':
-        return this.query(repo, params);
-      case 'cypher': {
-        const raw = await this.cypher(repo, params);
-        return this.formatCypherAsMarkdown(raw);
-      }
-      case 'context':
-        return this.context(repo, params);
-      case 'impact':
-        return this.impact(repo, params);
-      case 'detect_changes':
-        return this.detectChanges(repo, params);
-      case 'rename':
-        return this.rename(repo, params);
-      // Legacy aliases for backwards compatibility
-      case 'search':
-        return this.query(repo, params);
-      case 'explore':
-        return this.context(repo, { name: params?.name, ...params });
-      case 'overview':
-        return this.overview(repo, params);
-      default:
-        throw new Error(`Unknown tool: ${method}`);
-    }
+    const repo = await this.runtime.resolveRepo(params?.repo);
+    const ctx: ToolContext = {
+      runtime: this.runtime,
+      repo,
+      logQueryError,
+    };
+    return this.registry.dispatch(method, ctx, params);
   }
 
   // ─── Tool Implementations ────────────────────────────────────────
@@ -407,7 +185,7 @@ export class LocalBackend {
       return { error: 'query parameter is required and cannot be empty.' };
     }
     
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const processLimit = params.limit || 5;
     const maxSymbolsPerProcess = params.max_symbols || 10;
@@ -730,7 +508,7 @@ export class LocalBackend {
   }
 
   private async cypher(repo: RepoHandle, params: { query: string }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
 
     if (!isKuzuReady(repo.id)) {
       return { error: 'KuzuDB not ready. Index may be corrupted.' };
@@ -819,7 +597,7 @@ export class LocalBackend {
   }
 
   private async overview(repo: RepoHandle, params: { showClusters?: boolean; showProcesses?: boolean; limit?: number }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const limit = params.limit || 20;
     const result: any = {
@@ -887,7 +665,7 @@ export class LocalBackend {
     file_path?: string;
     include_content?: boolean;
   }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const { name, uid, file_path, include_content } = params;
     
@@ -1019,7 +797,7 @@ export class LocalBackend {
    * Routes cluster/process types to direct graph queries.
    */
   private async explore(repo: RepoHandle, params: { name: string; type: 'symbol' | 'cluster' | 'process' }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     const { name, type } = params;
     
     if (type === 'symbol') {
@@ -1107,7 +885,7 @@ export class LocalBackend {
     scope?: string;
     base_ref?: string;
   }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const scope = params.scope || 'unstaged';
     const { execFileSync } = await import('child_process');
@@ -1223,7 +1001,7 @@ export class LocalBackend {
     file_path?: string;
     dry_run?: boolean;
   }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const { new_name, file_path } = params;
     const dry_run = params.dry_run ?? true;
@@ -1385,7 +1163,7 @@ export class LocalBackend {
     includeTests?: boolean;
     minConfidence?: number;
   }): Promise<any> {
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
     
     const { target, direction } = params;
     const maxDepth = params.maxDepth || 3;
@@ -1563,7 +1341,7 @@ export class LocalBackend {
    */
   async queryClusters(repoName?: string, limit = 100): Promise<{ clusters: any[] }> {
     const repo = await this.resolveRepo(repoName);
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
 
     try {
       const rawLimit = Math.max(limit * 5, 200);
@@ -1592,7 +1370,7 @@ export class LocalBackend {
    */
   async queryProcesses(repoName?: string, limit = 50): Promise<{ processes: any[] }> {
     const repo = await this.resolveRepo(repoName);
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
 
     try {
       const processes = await executeQuery(repo.id, `
@@ -1621,7 +1399,7 @@ export class LocalBackend {
    */
   async queryClusterDetail(name: string, repoName?: string): Promise<any> {
     const repo = await this.resolveRepo(repoName);
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
 
     const clusters = await executeParameterized(repo.id, `
       MATCH (c:Community)
@@ -1670,7 +1448,7 @@ export class LocalBackend {
    */
   async queryProcessDetail(name: string, repoName?: string): Promise<any> {
     const repo = await this.resolveRepo(repoName);
-    await this.ensureInitialized(repo.id);
+    await this.runtime.ensureInitialized(repo.id);
 
     const processes = await executeParameterized(repo.id, `
       MATCH (p:Process)
@@ -1700,14 +1478,11 @@ export class LocalBackend {
   }
 
   async disconnect(): Promise<void> {
-    await closeKuzu(); // close all connections
+    await this.runtime.disconnect();
     // Note: we intentionally do NOT call disposeEmbedder() here.
     // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs,
     // and importing the embedder module on Node v24+ crashes if onnxruntime
     // was never loaded during the session. Since process.exit(0) follows
     // immediately after disconnect(), the OS reclaims everything. See #38, #89.
-    this.repos.clear();
-    this.contextCache.clear();
-    this.initializedRepos.clear();
   }
 }
