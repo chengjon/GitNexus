@@ -142,6 +142,9 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(preview.changes[0].edits[0].line).toBe(1);
       expect(preview.changes[0].edits[1].line).toBe(2);
       expect(preview.changes[0].edits[2].line).toBe(3);
+      expect(preview.changes[0].edits[0].confidence).toBe('graph');
+      expect(preview.changes[0].edits[1].confidence).toBe('text_search');
+      expect(preview.changes[0].edits[2].confidence).toBe('text_search');
 
       const applied = await backend.callTool('rename', {
         symbol_name: 'login',

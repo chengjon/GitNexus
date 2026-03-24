@@ -543,6 +543,8 @@ describe('LocalBackend.callTool', () => {
     expect(preview.changes[0].edits).toHaveLength(2);
     expect(preview.changes[0].edits[0].line).toBe(1);
     expect(preview.changes[0].edits[1].line).toBe(2);
+    expect(preview.changes[0].edits[0].confidence).toBe('graph');
+    expect(preview.changes[0].edits[1].confidence).toBe('text_search');
 
     (executeParameterized as any)
       .mockResolvedValueOnce([
@@ -1099,6 +1101,15 @@ describe('cypher result formatting', () => {
     expect(result.markdown).toContain('name');
     expect(result.markdown).toContain('main');
     expect(result.row_count).toBe(2);
+  });
+
+  it('escapes markdown table delimiters and newlines in cypher row values', () => {
+    const formatted = formatCypherAsMarkdown([
+      { name: 'pipe|value', note: 'line1\nline2' },
+    ]);
+
+    expect(formatted.markdown).toContain('pipe\\|value');
+    expect(formatted.markdown).toContain('line1\\nline2');
   });
 
   it('returns empty array as-is', async () => {

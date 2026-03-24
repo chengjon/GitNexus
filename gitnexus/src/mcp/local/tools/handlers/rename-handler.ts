@@ -69,7 +69,9 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     return { error: 'New name is the same as the current name.' };
   }
 
-  // Step 2: Collect edits from graph (high confidence)
+  // Step 2: Collect edits from graph context.
+  // Only exact symbol-line hits keep high-confidence "graph".
+  // Broader same-file matches are downgraded to lower-confidence "text_search".
   const changes = new Map<string, { file_path: string; edits: any[] }>();
   const warnings: string[] = [];
   let textSearchSkipped = false;
@@ -113,16 +115,38 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     ),
   );
   const graphFiles = new Set(Array.from(graphFilesToScan).map(normalizeRelativePath));
+  const graphHighConfidenceLines = new Map<string, Set<number>>();
+  const markHighConfidenceLine = (filePath: string | undefined, line: unknown): void => {
+    if (!filePath || typeof line !== 'number' || !Number.isInteger(line) || line <= 0) return;
+    const normalizedFile = normalizeRelativePath(filePath);
+    if (!graphHighConfidenceLines.has(normalizedFile)) {
+      graphHighConfidenceLines.set(normalizedFile, new Set<number>());
+    }
+    graphHighConfidenceLines.get(normalizedFile)!.add(line);
+  };
+  markHighConfidenceLine(sym.filePath, sym.startLine);
+  for (const incomingRef of allIncoming) {
+    markHighConfidenceLine(incomingRef.filePath, incomingRef.startLine);
+  }
   let graphEdits = 0;
+  let astSearchEdits = 0;
 
   for (const filePath of graphFilesToScan) {
     try {
       const content = await fs.readFile(assertSafePath(filePath), 'utf-8');
       const lines = content.split('\n');
+      const normalizedFile = normalizeRelativePath(filePath);
+      const highConfidenceLines = graphHighConfidenceLines.get(normalizedFile);
       for (let i = 0; i < lines.length; i++) {
         if (hasTargetName(lines[i])) {
-          addEdit(filePath, i + 1, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), 'graph');
-          graphEdits++;
+          const lineNumber = i + 1;
+          const confidence = highConfidenceLines?.has(lineNumber) ? 'graph' : 'text_search';
+          addEdit(filePath, lineNumber, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), confidence);
+          if (confidence === 'graph') {
+            graphEdits++;
+          } else {
+            astSearchEdits++;
+          }
         }
       }
     } catch (e) {
@@ -135,7 +159,6 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
   }
 
   // Step 3: Text search for refs the graph might have missed
-  let astSearchEdits = 0;
 
   // Simple text search across the repo for the old name (in files not already covered by graph)
   try {

@@ -26,8 +26,8 @@ export function formatCypherAsMarkdown(result: any[]): { markdown: string; row_c
     '| ' + keys.map(k => {
       const v = row[k];
       if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
+      if (typeof v === 'object') return escapeMarkdownTableCell(JSON.stringify(v));
+      return escapeMarkdownTableCell(String(v));
     }).join(' | ') + ' |'
   );
 
@@ -39,4 +39,11 @@ export function formatCypherAsMarkdown(result: any[]): { markdown: string; row_c
 
 function isPlainObjectRow(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\|/g, '\\|');
 }
