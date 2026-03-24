@@ -20,11 +20,13 @@ import {
 } from '../../src/mcp/core/kuzu-adapter.js';
 import {
   CYPHER_WRITE_RE,
+  VALID_NODE_LABELS,
   VALID_RELATION_TYPES,
   isWriteQuery,
 } from '../../src/mcp/local/local-backend.js';
 import {
   CYPHER_WRITE_RE as SHARED_CYPHER_WRITE_RE,
+  VALID_NODE_LABELS as SHARED_VALID_NODE_LABELS,
   VALID_RELATION_TYPES as SHARED_VALID_RELATION_TYPES,
   isWriteQuery as sharedIsWriteQuery,
 } from '../../src/mcp/local/tools/shared/query-safety.js';
@@ -179,6 +181,8 @@ withTestKuzuDB('local-backend', (handle) => {
 
     it('shared query-safety exports match local-backend compatibility exports', () => {
       expect(CYPHER_WRITE_RE).toBe(SHARED_CYPHER_WRITE_RE);
+      expect(isWriteQuery).toBe(sharedIsWriteQuery);
+      expect(VALID_NODE_LABELS).toBe(SHARED_VALID_NODE_LABELS);
       expect(VALID_RELATION_TYPES).toBe(SHARED_VALID_RELATION_TYPES);
       expect(sharedIsWriteQuery('CREATE (n)')).toBe(isWriteQuery('CREATE (n)'));
       expect(sharedIsWriteQuery('MATCH (n) RETURN n')).toBe(isWriteQuery('MATCH (n) RETURN n'));

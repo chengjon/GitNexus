@@ -33,10 +33,11 @@ vi.mock('../../src/mcp/core/embedder.js', () => ({
   getEmbeddingDims: vi.fn().mockReturnValue(384),
 }));
 
-import { LocalBackend, isWriteQuery, CYPHER_WRITE_RE } from '../../src/mcp/local/local-backend.js';
+import { LocalBackend, isWriteQuery, CYPHER_WRITE_RE, VALID_NODE_LABELS } from '../../src/mcp/local/local-backend.js';
 import {
   isWriteQuery as sharedIsWriteQuery,
   CYPHER_WRITE_RE as SHARED_CYPHER_WRITE_RE,
+  VALID_NODE_LABELS as SHARED_VALID_NODE_LABELS,
 } from '../../src/mcp/local/tools/shared/query-safety.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
@@ -312,6 +313,8 @@ describe('LocalBackend.callTool', () => {
 describe('LocalBackend shared query-safety compatibility exports', () => {
   it('re-exported regex and predicate remain aligned with shared module', () => {
     expect(CYPHER_WRITE_RE).toBe(SHARED_CYPHER_WRITE_RE);
+    expect(isWriteQuery).toBe(sharedIsWriteQuery);
+    expect(VALID_NODE_LABELS).toBe(SHARED_VALID_NODE_LABELS);
     expect(sharedIsWriteQuery('DELETE n')).toBe(isWriteQuery('DELETE n'));
     expect(sharedIsWriteQuery('MATCH (n) RETURN n')).toBe(isWriteQuery('MATCH (n) RETURN n'));
   });
@@ -692,5 +695,13 @@ describe('cypher result formatting', () => {
     });
     expect(result).toHaveProperty('error');
     expect(result.error).toContain('Syntax error');
+  });
+
+  it('returns non-tabular primitive arrays as-is', async () => {
+    (executeQuery as any).mockResolvedValue([1, 2, 3]);
+    const result = await backend.callTool('cypher', {
+      query: 'MATCH (n) RETURN 1 AS one',
+    });
+    expect(result).toEqual([1, 2, 3]);
   });
 });
