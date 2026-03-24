@@ -23,6 +23,11 @@ import {
   VALID_RELATION_TYPES,
   isWriteQuery,
 } from '../../src/mcp/local/local-backend.js';
+import {
+  CYPHER_WRITE_RE as SHARED_CYPHER_WRITE_RE,
+  VALID_RELATION_TYPES as SHARED_VALID_RELATION_TYPES,
+  isWriteQuery as sharedIsWriteQuery,
+} from '../../src/mcp/local/tools/shared/query-safety.js';
 import { withTestKuzuDB } from '../helpers/test-indexed-db.js';
 import { LOCAL_BACKEND_SEED_DATA } from '../fixtures/local-backend-seed.js';
 
@@ -170,6 +175,13 @@ withTestKuzuDB('local-backend', (handle) => {
         isWriteQuery('SET n.x = 1'),    // true
       ];
       expect(results).toEqual([true, false, true, false, true]);
+    });
+
+    it('shared query-safety exports match local-backend compatibility exports', () => {
+      expect(CYPHER_WRITE_RE).toBe(SHARED_CYPHER_WRITE_RE);
+      expect(VALID_RELATION_TYPES).toBe(SHARED_VALID_RELATION_TYPES);
+      expect(sharedIsWriteQuery('CREATE (n)')).toBe(isWriteQuery('CREATE (n)'));
+      expect(sharedIsWriteQuery('MATCH (n) RETURN n')).toBe(isWriteQuery('MATCH (n) RETURN n'));
     });
   });
 

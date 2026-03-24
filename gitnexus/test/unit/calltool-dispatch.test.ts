@@ -34,6 +34,10 @@ vi.mock('../../src/mcp/core/embedder.js', () => ({
 }));
 
 import { LocalBackend, isWriteQuery, CYPHER_WRITE_RE } from '../../src/mcp/local/local-backend.js';
+import {
+  isWriteQuery as sharedIsWriteQuery,
+  CYPHER_WRITE_RE as SHARED_CYPHER_WRITE_RE,
+} from '../../src/mcp/local/tools/shared/query-safety.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
 
@@ -302,6 +306,14 @@ describe('LocalBackend.callTool', () => {
     // explore calls context — which may return found or ambiguous depending on mock
     expect(result).toBeDefined();
     expect(result.status === 'found' || result.symbol || result.error === undefined).toBeTruthy();
+  });
+});
+
+describe('LocalBackend shared query-safety compatibility exports', () => {
+  it('re-exported regex and predicate remain aligned with shared module', () => {
+    expect(CYPHER_WRITE_RE).toBe(SHARED_CYPHER_WRITE_RE);
+    expect(sharedIsWriteQuery('DELETE n')).toBe(isWriteQuery('DELETE n'));
+    expect(sharedIsWriteQuery('MATCH (n) RETURN n')).toBe(isWriteQuery('MATCH (n) RETURN n'));
   });
 });
 

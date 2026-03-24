@@ -17,43 +17,16 @@ import { BackendRuntime } from './runtime/backend-runtime.js';
 import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './runtime/types.js';
 import { createToolRegistry, type ToolRegistry } from './tools/tool-registry.js';
 import type { ToolContext } from './tools/tool-context.js';
+import {
+  isTestFilePath,
+  VALID_NODE_LABELS,
+  VALID_RELATION_TYPES,
+  isWriteQuery,
+} from './tools/shared/query-safety.js';
+import { formatCypherAsMarkdown } from './tools/shared/cypher-format.js';
+import { aggregateClusters } from './tools/shared/cluster-aggregation.js';
 // AI context generation is CLI-only (gitnexus analyze)
 // import { generateAIContextFiles } from '../../cli/ai-context.js';
-
-/**
- * Quick test-file detection for filtering impact results.
- * Matches common test file patterns across all supported languages.
- */
-export function isTestFilePath(filePath: string): boolean {
-  const p = filePath.toLowerCase().replace(/\\/g, '/');
-  return (
-    p.includes('.test.') || p.includes('.spec.') ||
-    p.includes('__tests__/') || p.includes('__mocks__/') ||
-    p.includes('/test/') || p.includes('/tests/') ||
-    p.includes('/testing/') || p.includes('/fixtures/') ||
-    p.endsWith('_test.go') || p.endsWith('_test.py') ||
-    p.includes('/test_') || p.includes('/conftest.')
-  );
-}
-
-/** Valid KuzuDB node labels for safe Cypher query construction */
-export const VALID_NODE_LABELS = new Set([
-  'File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'CodeElement',
-  'Community', 'Process', 'Struct', 'Enum', 'Macro', 'Typedef', 'Union',
-  'Namespace', 'Trait', 'Impl', 'TypeAlias', 'Const', 'Static', 'Property',
-  'Record', 'Delegate', 'Annotation', 'Constructor', 'Template', 'Module',
-]);
-
-/** Valid relation types for impact analysis filtering */
-export const VALID_RELATION_TYPES = new Set(['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS']);
-
-/** Regex to detect write operations in user-supplied Cypher queries */
-export const CYPHER_WRITE_RE = /\b(CREATE|DELETE|SET|MERGE|REMOVE|DROP|ALTER|COPY|DETACH)\b/i;
-
-/** Check if a Cypher query contains write operations */
-export function isWriteQuery(query: string): boolean {
-  return CYPHER_WRITE_RE.test(query);
-}
 
 /** Structured error logging for query failures — replaces empty catch blocks */
 function logQueryError(context: string, err: unknown): void {
@@ -62,6 +35,13 @@ function logQueryError(context: string, err: unknown): void {
 }
 
 export type { CodebaseContext, RepoHandle } from './runtime/types.js';
+export {
+  isTestFilePath,
+  VALID_RELATION_TYPES,
+  VALID_NODE_LABELS,
+  CYPHER_WRITE_RE,
+  isWriteQuery,
+} from './tools/shared/query-safety.js';
 
 export class LocalBackend {
   private runtime: LocalBackendRuntimeLike;
@@ -73,7 +53,7 @@ export class LocalBackend {
       query: async (_ctx, toolParams) => this.query(_ctx.repo, toolParams),
       cypher: async (_ctx, toolParams) => {
         const raw = await this.cypher(_ctx.repo, toolParams);
-        return this.formatCypherAsMarkdown(raw);
+        return formatCypherAsMarkdown(raw);
       },
       context: async (_ctx, toolParams) => this.context(_ctx.repo, toolParams),
       impact: async (_ctx, toolParams) => this.impact(_ctx.repo, toolParams),
@@ -515,7 +495,7 @@ export class LocalBackend {
     }
 
     // Block write operations (defense-in-depth — DB is already read-only)
-    if (CYPHER_WRITE_RE.test(params.query)) {
+    if (isWriteQuery(params.query)) {
       return { error: 'Write operations (CREATE, DELETE, SET, MERGE, REMOVE, DROP, ALTER, COPY, DETACH) are not allowed. The knowledge graph is read-only.' };
     }
 
@@ -525,75 +505,6 @@ export class LocalBackend {
     } catch (err: any) {
       return { error: err.message || 'Query failed' };
     }
-  }
-
-  /**
-   * Format raw Cypher result rows as a markdown table for LLM readability.
-   * Falls back to raw result if rows aren't tabular objects.
-   */
-  private formatCypherAsMarkdown(result: any): any {
-    if (!Array.isArray(result) || result.length === 0) return result;
-
-    const firstRow = result[0];
-    if (typeof firstRow !== 'object' || firstRow === null) return result;
-
-    const keys = Object.keys(firstRow);
-    if (keys.length === 0) return result;
-
-    const header = '| ' + keys.join(' | ') + ' |';
-    const separator = '| ' + keys.map(() => '---').join(' | ') + ' |';
-    const dataRows = result.map((row: any) =>
-      '| ' + keys.map(k => {
-        const v = row[k];
-        if (v === null || v === undefined) return '';
-        if (typeof v === 'object') return JSON.stringify(v);
-        return String(v);
-      }).join(' | ') + ' |'
-    );
-
-    return {
-      markdown: [header, separator, ...dataRows].join('\n'),
-      row_count: result.length,
-    };
-  }
-
-  /**
-   * Aggregate same-named clusters: group by heuristicLabel, sum symbols,
-   * weighted-average cohesion, filter out tiny clusters (<5 symbols).
-   * Raw communities stay intact in KuzuDB for Cypher queries.
-   */
-  private aggregateClusters(clusters: any[]): any[] {
-    const groups = new Map<string, { ids: string[]; totalSymbols: number; weightedCohesion: number; largest: any }>();
-
-    for (const c of clusters) {
-      const label = c.heuristicLabel || c.label || 'Unknown';
-      const symbols = c.symbolCount || 0;
-      const cohesion = c.cohesion || 0;
-      const existing = groups.get(label);
-
-      if (!existing) {
-        groups.set(label, { ids: [c.id], totalSymbols: symbols, weightedCohesion: cohesion * symbols, largest: c });
-      } else {
-        existing.ids.push(c.id);
-        existing.totalSymbols += symbols;
-        existing.weightedCohesion += cohesion * symbols;
-        if (symbols > (existing.largest.symbolCount || 0)) {
-          existing.largest = c;
-        }
-      }
-    }
-
-    return Array.from(groups.entries())
-      .map(([label, g]) => ({
-        id: g.largest.id,
-        label,
-        heuristicLabel: label,
-        symbolCount: g.totalSymbols,
-        cohesion: g.totalSymbols > 0 ? g.weightedCohesion / g.totalSymbols : 0,
-        subCommunities: g.ids.length,
-      }))
-      .filter(c => c.symbolCount >= 5)
-      .sort((a, b) => b.symbolCount - a.symbolCount);
   }
 
   private async overview(repo: RepoHandle, params: { showClusters?: boolean; showProcesses?: boolean; limit?: number }): Promise<any> {
@@ -625,7 +536,7 @@ export class LocalBackend {
           cohesion: c.cohesion || c[3],
           symbolCount: c.symbolCount || c[4],
         }));
-        result.clusters = this.aggregateClusters(rawClusters).slice(0, limit);
+        result.clusters = aggregateClusters(rawClusters).slice(0, limit);
       } catch {
         result.clusters = [];
       }
@@ -1358,7 +1269,7 @@ export class LocalBackend {
         cohesion: c.cohesion || c[3],
         symbolCount: c.symbolCount || c[4],
       }));
-      return { clusters: this.aggregateClusters(rawClusters).slice(0, limit) };
+      return { clusters: aggregateClusters(rawClusters).slice(0, limit) };
     } catch {
       return { clusters: [] };
     }
