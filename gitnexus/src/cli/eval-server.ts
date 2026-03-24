@@ -306,7 +306,12 @@ export async function evalServerCommand(options?: EvalServerOptions): Promise<vo
 
   if (!ok) {
     console.error('GitNexus eval-server: No indexed repositories found. Run: gitnexus analyze');
-    process.exit(1);
+    await nativeRuntimeManager.runCleanupAndExit(1, {
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
+    return;
   }
 
   const repos = await backend.listRepos();
@@ -319,8 +324,14 @@ export async function evalServerCommand(options?: EvalServerOptions): Promise<vo
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(async () => {
       console.error('GitNexus eval-server: Idle timeout reached, shutting down');
-      await backend.disconnect();
-      process.exit(0);
+      await nativeRuntimeManager.runCleanupAndExit(0, {
+        cleanup: async () => {
+          await backend.disconnect();
+        },
+        scheduleExit: async (code) => {
+          nativeRuntimeManager.scheduleExit(code);
+        },
+      });
     }, idleTimeoutSec * 1000);
   }
 
@@ -341,11 +352,20 @@ export async function evalServerCommand(options?: EvalServerOptions): Promise<vo
         res.setHeader('Content-Type', 'application/json');
         res.writeHead(200);
         res.end(JSON.stringify({ status: 'shutting_down' }));
-        setTimeout(async () => {
-          await backend.disconnect();
-          server.close();
-          process.exit(0);
-        }, 100);
+        nativeRuntimeManager.scheduleExit(0, {
+          delayMs: 100,
+          exit: async () => {
+            await nativeRuntimeManager.runCleanupAndExit(0, {
+              cleanup: async () => {
+                await backend.disconnect();
+                server.close();
+              },
+              scheduleExit: async (code) => {
+                nativeRuntimeManager.scheduleExit(code);
+              },
+            });
+          },
+        });
         return;
       }
 
@@ -412,9 +432,15 @@ export async function evalServerCommand(options?: EvalServerOptions): Promise<vo
 
   const shutdown = async () => {
     console.error('GitNexus eval-server: shutting down...');
-    await backend.disconnect();
-    server.close();
-    process.exit(0);
+    await nativeRuntimeManager.runCleanupAndExit(0, {
+      cleanup: async () => {
+        await backend.disconnect();
+        server.close();
+      },
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
   };
 
   nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);

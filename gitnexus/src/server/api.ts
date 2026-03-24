@@ -350,11 +350,17 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
   // Graceful shutdown — close Express + KuzuDB cleanly
   const shutdown = async () => {
-    server.close();
-    await cleanupMcp();
-    await closeKuzu();
-    await backend.disconnect();
-    process.exit(0);
+    await nativeRuntimeManager.runCleanupAndExit(0, {
+      cleanup: async () => {
+        server.close();
+        await cleanupMcp();
+        await closeKuzu();
+        await backend.disconnect();
+      },
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
   };
   nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);
 };

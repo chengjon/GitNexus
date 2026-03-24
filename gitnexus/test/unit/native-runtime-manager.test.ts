@@ -115,4 +115,20 @@ describe('NativeRuntimeManager', () => {
       activeRepoIds: ['repo-a', 'repo-b'],
     });
   });
+
+  it('runs async cleanup before scheduling exit', async () => {
+    const manager = new NativeRuntimeManager();
+    const calls: string[] = [];
+
+    await manager.runCleanupAndExit(130, {
+      cleanup: async () => {
+        calls.push('cleanup');
+      },
+      scheduleExit: async (code) => {
+        calls.push(`exit:${code}`);
+      },
+    });
+
+    expect(calls).toEqual(['cleanup', 'exit:130']);
+  });
 });

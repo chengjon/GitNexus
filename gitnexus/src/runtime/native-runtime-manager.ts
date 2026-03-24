@@ -24,6 +24,11 @@ interface ScheduleExitOptions {
   schedule?: (fn: () => void, delayMs: number) => unknown;
 }
 
+interface CleanupAndExitOptions {
+  cleanup?: () => Promise<void> | void;
+  scheduleExit?: (code: number) => Promise<void> | void;
+}
+
 export class NativeRuntimeManager {
   private activeKuzuRepos = new Set<string>();
 
@@ -138,6 +143,20 @@ export class NativeRuntimeManager {
     const exit = options.exit ?? ((code: number) => process.exit(code));
     const schedule = options.schedule ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
     return schedule(() => exit(exitCode), delayMs);
+  }
+
+  async runCleanupAndExit(
+    exitCode: number,
+    options: CleanupAndExitOptions = {},
+  ): Promise<void> {
+    if (options.cleanup) {
+      await options.cleanup();
+    }
+    if (options.scheduleExit) {
+      await options.scheduleExit(exitCode);
+      return;
+    }
+    this.scheduleExit(exitCode);
   }
 }
 

@@ -358,10 +358,15 @@ export const analyzeCommand = async (
     aborted = true;
     try { bar?.stop(); } catch {}
     console.log('\n  Interrupted — cleaning up...');
-    closeKuzu()
-      .catch(() => {})
-      .then(() => nativeRuntimeManager.removeReindexLock(reindexLockPath))
-      .finally(() => process.exit(exitCode));
+    void nativeRuntimeManager.runCleanupAndExit(exitCode, {
+      cleanup: async () => {
+        try { await closeKuzu(); } catch {}
+        await nativeRuntimeManager.removeReindexLock(reindexLockPath);
+      },
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
   };
   const onSigInt = () => shutdownHandler(130);
   const onSigTerm = () => shutdownHandler(143);
@@ -683,6 +688,10 @@ export const analyzeCommand = async (
   }
 
   if (forceExitCode !== null) {
-    process.exit(forceExitCode);
+    await nativeRuntimeManager.runCleanupAndExit(forceExitCode, {
+      scheduleExit: async (code) => {
+        nativeRuntimeManager.scheduleExit(code);
+      },
+    });
   }
 };
