@@ -349,6 +349,7 @@ withTestKuzuDB('local-backend', (handle) => {
         affected_processes: expect.any(Array),
       }));
     });
+
   });
 
 }, {

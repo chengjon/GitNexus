@@ -8,6 +8,11 @@ export class BackendRuntime implements LocalBackendRuntimeLike {
   private contextCache: Map<string, CodebaseContext> = new Map();
   private initializedRepos: Set<string> = new Set();
 
+  private normalizePathForKey(repoPath: string): string {
+    const resolved = path.resolve(repoPath);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+
   private samePath(left: string, right: string): boolean {
     return process.platform === 'win32'
       ? left.toLowerCase() === right.toLowerCase()
@@ -48,9 +53,22 @@ export class BackendRuntime implements LocalBackendRuntimeLike {
   async refreshRepos(): Promise<void> {
     const entries = await listRegisteredRepos({ validate: true });
     const freshIds = new Set<string>();
+    const baseNamePaths = new Map<string, string[]>();
 
     for (const entry of entries) {
-      const id = this.repoId(entry.name, entry.path);
+      const base = entry.name.toLowerCase();
+      const normalizedPath = this.normalizePathForKey(entry.path);
+      if (!baseNamePaths.has(base)) baseNamePaths.set(base, []);
+      const paths = baseNamePaths.get(base)!;
+      if (!paths.includes(normalizedPath)) paths.push(normalizedPath);
+    }
+
+    for (const paths of baseNamePaths.values()) {
+      paths.sort((a, b) => a.localeCompare(b));
+    }
+
+    for (const entry of entries) {
+      const id = this.repoId(entry.name, entry.path, baseNamePaths);
       freshIds.add(id);
 
       const storagePath = entry.storagePath;
@@ -92,15 +110,15 @@ export class BackendRuntime implements LocalBackendRuntimeLike {
     }
   }
 
-  private repoId(name: string, repoPath: string): string {
+  private repoId(name: string, repoPath: string, baseNamePaths: Map<string, string[]>): string {
     const base = name.toLowerCase();
-    for (const [id, handle] of this.repos) {
-      if (id === base && handle.repoPath !== path.resolve(repoPath)) {
-        const hash = Buffer.from(repoPath).toString('base64url').slice(0, 6);
-        return `${base}-${hash}`;
-      }
+    const normalizedPath = this.normalizePathForKey(repoPath);
+    const paths = baseNamePaths.get(base) || [];
+    if (paths.length <= 1 || paths[0] === normalizedPath) {
+      return base;
     }
-    return base;
+    const hash = Buffer.from(normalizedPath).toString('base64url').slice(0, 6);
+    return `${base}-${hash}`;
   }
 
   async resolveRepo(repoParam?: string): Promise<RepoHandle> {

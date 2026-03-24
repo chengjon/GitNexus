@@ -268,6 +268,32 @@ describe('LocalBackend.callTool', () => {
     expect(traversalQuery).not.toContain('r.confidence >=');
   });
 
+  it('impact tool preserves zero confidence values in traversal results', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      { id: 'func:main', name: 'main', type: 'Function', filePath: 'src/index.ts' },
+    ]);
+    vi.mocked(executeQuery)
+      .mockResolvedValueOnce([
+        {
+          sourceId: 'func:main',
+          id: 'func:caller',
+          name: 'caller',
+          type: 'Function',
+          filePath: 'src/caller.ts',
+          relType: 'CALLS',
+          confidence: 0,
+        },
+      ] as any)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([] as any);
+
+    const result = await backend.callTool('impact', { target: 'main', direction: 'upstream' });
+    const direct = result.byDepth[1] || result.byDepth['1'] || [];
+    expect(direct).toHaveLength(1);
+    expect(direct[0].confidence).toBe(0);
+  });
+
   it('dispatches impact tool for file path targets', async () => {
     (executeParameterized as any)
       .mockResolvedValueOnce([])
@@ -359,6 +385,27 @@ describe('LocalBackend.callTool', () => {
       }),
       warnings: expect.any(Array),
     }));
+  });
+
+  it('detect_changes filters out path-collision symbols for similarly named files', async () => {
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+    (executeParameterized as any).mockImplementation(async (_repoId: string, query: string) => {
+      if (query.includes('n.filePath = $relativePath')) {
+        return [
+          { id: 'file:auth.ts', name: 'auth.ts', type: 'File', filePath: 'src/auth.ts' },
+          { id: 'file:auth.tsx', name: 'auth.tsx', type: 'File', filePath: 'src/auth.tsx' },
+        ];
+      }
+      if (query.includes(`MATCH (n {id: $nodeId})-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)`)) {
+        return [];
+      }
+      return [];
+    });
+
+    const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
+
+    expect(result.changed_symbols).toHaveLength(1);
+    expect(result.changed_symbols[0].filePath).toBe('src/auth.ts');
   });
 
   it('dispatches rename tool', async () => {
@@ -501,6 +548,34 @@ describe('LocalBackend.callTool', () => {
         timeout: 5000,
       }),
     );
+  });
+
+  it('rename reports skipped text-search coverage when ripgrep fails', async () => {
+    await fs.mkdir('/tmp/test-project/src', { recursive: true });
+    await fs.writeFile('/tmp/test-project/src/test.ts', 'function oldName() {}\n', 'utf-8');
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 5 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('rg timed out');
+    });
+
+    const result = await backend.callTool('rename', {
+      symbol_name: 'oldName',
+      new_name: 'newName',
+      dry_run: true,
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/text-search coverage/i),
+      expect.stringMatching(/ripgrep/i),
+    ]));
   });
 
   // Legacy tool aliases
@@ -688,6 +763,43 @@ describe('LocalBackend.resolveRepo', () => {
 
     await expect(backend.resolveRepo('GITNEXUS'))
       .rejects.toThrow(/Use one of:/i);
+  });
+
+  it('keeps repo ids deterministic for duplicate names across refresh order changes', async () => {
+    const lower = {
+      ...MOCK_REPO_ENTRY,
+      name: 'gitnexus',
+      path: path.resolve('/tmp/gitnexus-lower'),
+      storagePath: '/tmp/.gitnexus/gitnexus-lower',
+    };
+    const upper = {
+      ...MOCK_REPO_ENTRY,
+      name: 'GitNexus',
+      path: path.resolve('/tmp/GitNexus-upper'),
+      storagePath: '/tmp/.gitnexus/GitNexus-upper',
+    };
+
+    (listRegisteredRepos as any).mockResolvedValue([lower, upper]);
+    const backendA = new LocalBackend();
+    await backendA.init();
+    const idsA = new Map(
+      (backendA as any).runtime
+        .getRepos()
+        .map((repo: any) => [repo.repoPath, repo.id]),
+    );
+
+    (listRegisteredRepos as any).mockResolvedValue([upper, lower]);
+    const backendB = new LocalBackend();
+    await backendB.init();
+    const idsB = new Map(
+      (backendB as any).runtime
+        .getRepos()
+        .map((repo: any) => [repo.repoPath, repo.id]),
+    );
+
+    expect(idsA.get(lower.path)).toBe(idsB.get(lower.path));
+    expect(idsA.get(upper.path)).toBe(idsB.get(upper.path));
+    expect(idsA.get(lower.path)).not.toBe(idsA.get(upper.path));
   });
 });
 

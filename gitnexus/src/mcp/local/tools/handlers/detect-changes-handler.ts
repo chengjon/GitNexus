@@ -73,14 +73,32 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
   // Map changed files to indexed symbols
   const changedSymbols: any[] = [];
   for (const file of changedFiles) {
-    const normalizedFile = file.replace(/\\/g, '/');
+    const normalizedFile = file.replace(/\\/g, '/').replace(/^\.\//, '');
+    const absoluteFile = path.resolve(gitRepoPath, normalizedFile).replace(/\\/g, '/');
+    const exactCandidates = Array.from(new Set([normalizedFile, absoluteFile]));
     try {
-      const symbols = await executeParameterized(ctx.repo.id, `
-          MATCH (n) WHERE n.filePath CONTAINS $filePath
+      let symbols = await executeParameterized(ctx.repo.id, `
+          MATCH (n)
+          WHERE n.filePath = $relativePath OR n.filePath = $absolutePath
           RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
           LIMIT 20
-        `, { filePath: normalizedFile });
+        `, { relativePath: normalizedFile, absolutePath: absoluteFile });
+
+      // Fallback for indexes that persist absolute paths with varying repo roots.
+      if (symbols.length === 0) {
+        symbols = await executeParameterized(ctx.repo.id, `
+            MATCH (n)
+            WHERE n.filePath ENDS WITH $relativePath
+            RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
+            LIMIT 20
+          `, { relativePath: normalizedFile });
+      }
+
       for (const sym of symbols) {
+        const symbolPath = String(sym.filePath || sym[3] || '').replace(/\\/g, '/').replace(/^\.\//, '');
+        const absoluteSymbolPath = path.resolve(gitRepoPath, symbolPath).replace(/\\/g, '/');
+        const suffixMatch = symbolPath === normalizedFile || symbolPath.endsWith(`/${normalizedFile}`);
+        if (!exactCandidates.includes(symbolPath) && !exactCandidates.includes(absoluteSymbolPath) && !suffixMatch) continue;
         changedSymbols.push({
           id: sym.id || sym[0],
           name: sym.name || sym[1],

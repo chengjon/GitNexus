@@ -69,6 +69,8 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
 
   // Step 2: Collect edits from graph (high confidence)
   const changes = new Map<string, { file_path: string; edits: any[] }>();
+  const warnings: string[] = [];
+  let textSearchSkipped = false;
 
   const addEdit = (filePath: string, line: number, oldText: string, newText: string, confidence: string) => {
     if (!changes.has(filePath)) {
@@ -183,7 +185,15 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
         ctx.logQueryError('rename:text-search-read', e);
       }
     }
-  } catch (e) { ctx.logQueryError('rename:ripgrep', e); }
+  } catch (e: any) {
+    // rg exits with code 1 when no files match; treat that as successful empty coverage.
+    if (typeof e?.status !== 'number' || e.status !== 1) {
+      textSearchSkipped = true;
+      const message = e instanceof Error ? e.message : String(e);
+      warnings.push(`Text-search coverage skipped because ripgrep failed: ${message}`);
+      ctx.logQueryError('rename:ripgrep', e);
+    }
+  }
 
   // Step 4: Apply or preview
   const allChanges = Array.from(changes.values());
@@ -222,6 +232,7 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     total_edits: totalEdits,
     graph_edits: graphEdits,
     text_search_edits: astSearchEdits,
+    ...(textSearchSkipped ? { text_search_skipped: true, warnings } : {}),
     changes: allChanges,
     applied: !dry_run,
   };

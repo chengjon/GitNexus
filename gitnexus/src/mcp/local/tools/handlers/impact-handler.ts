@@ -98,7 +98,7 @@ export async function runImpactTool(ctx: ToolContext, params: ImpactToolParams):
             type: rel.type || rel[3],
             filePath,
             relationType: rel.relType || rel[5],
-            confidence: rel.confidence || rel[6] || 1.0,
+            confidence: rel.confidence ?? rel[6] ?? 1.0,
           });
         }
       }
