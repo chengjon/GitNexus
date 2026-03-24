@@ -121,11 +121,11 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result.applied).toBe(false);
     });
 
-    it('rename dry_run=false applies only the previewed line edits', async () => {
+    it('rename previews and applies all matching lines in graph-covered files', async () => {
       const authFile = path.join(handle.tmpHandle.dbPath, 'repo', 'src', 'auth.ts');
       await fs.writeFile(
         authFile,
-        'function login() { return true; }\nconst secondUse = login();\nfunction validate() { return true; }\n',
+        'function login() { return true; }\nconst secondUse = login();\nconst thirdUse = login();\nfunction validate() { return true; }\n',
         'utf-8',
       );
 
@@ -138,8 +138,10 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(preview.applied).toBe(false);
       expect(preview.changes).toHaveLength(1);
       expect(preview.changes[0].file_path).toBe('src/auth.ts');
-      expect(preview.changes[0].edits).toHaveLength(1);
+      expect(preview.changes[0].edits).toHaveLength(3);
       expect(preview.changes[0].edits[0].line).toBe(1);
+      expect(preview.changes[0].edits[1].line).toBe(2);
+      expect(preview.changes[0].edits[2].line).toBe(3);
 
       const applied = await backend.callTool('rename', {
         symbol_name: 'login',
@@ -150,10 +152,12 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(applied.applied).toBe(true);
 
       const updated = await fs.readFile(authFile, 'utf-8');
-      const [line1, line2] = updated.split('\n');
+      const [line1, line2, line3] = updated.split('\n');
       expect(line1).toContain('loginRenamed');
-      expect(line2).toContain('login()');
-      expect(line2).not.toContain('loginRenamed');
+      expect(line2).toContain('loginRenamed');
+      expect(line2).not.toContain('login()');
+      expect(line3).toContain('loginRenamed');
+      expect(line3).not.toContain('login()');
     });
 
     it('query tool returns results for keyword search', async () => {

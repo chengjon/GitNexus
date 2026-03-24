@@ -470,7 +470,7 @@ describe('LocalBackend.callTool', () => {
     expect((backend as any).rename).toBeUndefined();
   });
 
-  it('rename dry_run=false only applies the line edits preview advertised', async () => {
+  it('rename previews and applies all matching lines in graph-covered files', async () => {
     await fs.mkdir('/tmp/test-project/src', { recursive: true });
     await fs.writeFile(
       '/tmp/test-project/src/test.ts',
@@ -494,8 +494,9 @@ describe('LocalBackend.callTool', () => {
     });
     expect(preview.applied).toBe(false);
     expect(preview.changes).toHaveLength(1);
-    expect(preview.changes[0].edits).toHaveLength(1);
+    expect(preview.changes[0].edits).toHaveLength(2);
     expect(preview.changes[0].edits[0].line).toBe(1);
+    expect(preview.changes[0].edits[1].line).toBe(2);
 
     (executeParameterized as any)
       .mockResolvedValueOnce([
@@ -516,8 +517,8 @@ describe('LocalBackend.callTool', () => {
     const updated = await fs.readFile('/tmp/test-project/src/test.ts', 'utf-8');
     const [line1, line2] = updated.split('\n');
     expect(line1).toContain('newName');
-    expect(line2).toContain('oldName');
-    expect(line2).not.toContain('newName');
+    expect(line2).toContain('newName');
+    expect(line2).not.toContain('oldName');
   });
 
   it('rename escapes regex metacharacters when building ripgrep pattern', async () => {

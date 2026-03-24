@@ -58,6 +58,8 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
   const oldName = sym.name;
   const escapedOldName = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const oldNameWordPattern = `\\b${escapedOldName}\\b`;
+  const normalizeRelativePath = (filePath: string): string =>
+    filePath.replace(/\\/g, '/').replace(/^\.\//, '');
   const replaceOnTargetLine = (line: string): string =>
     line.replace(new RegExp(oldNameWordPattern, 'g'), new_name);
   const hasTargetName = (line: string): boolean =>
@@ -78,24 +80,6 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     }
     changes.get(filePath)!.edits.push({ line, old_text: oldText, new_text: newText, confidence });
   };
-
-  // The definition itself
-  if (sym.filePath && sym.startLine) {
-    try {
-      const content = await fs.readFile(assertSafePath(sym.filePath), 'utf-8');
-      const lines = content.split('\n');
-      const lineIdx = sym.startLine - 1;
-      if (lineIdx >= 0 && lineIdx < lines.length && lines[lineIdx].includes(oldName)) {
-        addEdit(sym.filePath, sym.startLine, lines[lineIdx].trim(), replaceOnTargetLine(lines[lineIdx]).trim(), 'graph');
-      }
-    } catch (e) {
-      const traversalMessage = getTraversalMessage(e);
-      if (traversalMessage) {
-        return { error: traversalMessage };
-      }
-      ctx.logQueryError('rename:read-definition', e);
-    }
-  }
 
   // All incoming refs from graph (callers, importers, etc.)
   const allIncoming = [
@@ -123,18 +107,22 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     }
   }
 
-  let graphEdits = changes.size > 0 ? 1 : 0; // count definition edit
+  const graphFilesToScan = new Set<string>(
+    [sym.filePath, ...allIncoming.map((r) => r.filePath)].filter(
+      (filePath): filePath is string => typeof filePath === 'string' && filePath.length > 0,
+    ),
+  );
+  const graphFiles = new Set(Array.from(graphFilesToScan).map(normalizeRelativePath));
+  let graphEdits = 0;
 
-  for (const ref of allIncoming) {
-    if (!ref.filePath) continue;
+  for (const filePath of graphFilesToScan) {
     try {
-      const content = await fs.readFile(assertSafePath(ref.filePath), 'utf-8');
+      const content = await fs.readFile(assertSafePath(filePath), 'utf-8');
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(oldName)) {
-          addEdit(ref.filePath, i + 1, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), 'graph');
+        if (hasTargetName(lines[i])) {
+          addEdit(filePath, i + 1, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), 'graph');
           graphEdits++;
-          break; // one edit per file from graph refs
         }
       }
     } catch (e) {
@@ -148,7 +136,6 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
 
   // Step 3: Text search for refs the graph might have missed
   let astSearchEdits = 0;
-  const graphFiles = new Set([sym.filePath, ...allIncoming.map(r => r.filePath)].filter(Boolean));
 
   // Simple text search across the repo for the old name (in files not already covered by graph)
   try {
@@ -165,7 +152,7 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     const files = output.trim().split('\n').filter(f => f.length > 0);
 
     for (const file of files) {
-      const normalizedFile = file.replace(/\\/g, '/').replace(/^\.\//, '');
+      const normalizedFile = normalizeRelativePath(file);
       if (graphFiles.has(normalizedFile)) continue; // already covered by graph
 
       try {
