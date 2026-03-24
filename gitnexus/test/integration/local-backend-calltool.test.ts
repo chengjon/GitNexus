@@ -6,6 +6,8 @@
  * end-to-end against seeded graph data with FTS indexes.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import fs from 'fs/promises';
+import path from 'path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { withTestKuzuDB } from '../helpers/test-indexed-db.js';
@@ -96,18 +98,98 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result.target.filePath).toBe('src/auth.ts');
     });
 
+    it('detect_changes compare scope validates base_ref', async () => {
+      const result = await backend.callTool('detect_changes', {
+        scope: 'compare',
+      });
+
+      expect(result).toEqual({
+        error: 'base_ref is required for "compare" scope',
+      });
+    });
+
+    it('rename tool keeps default dry-run behavior through callTool', async () => {
+      const result = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+      });
+
+      expect(result).not.toHaveProperty('error');
+      expect(result.status).toBe('success');
+      expect(result.old_name).toBe('login');
+      expect(result.new_name).toBe('loginRenamed');
+      expect(result.applied).toBe(false);
+    });
+
+    it('rename previews and applies all matching lines in graph-covered files', async () => {
+      const authFile = path.join(handle.tmpHandle.dbPath, 'repo', 'src', 'auth.ts');
+      await fs.writeFile(
+        authFile,
+        'function login() { return true; }\nconst secondUse = login();\nconst thirdUse = login();\nfunction validate() { return true; }\n',
+        'utf-8',
+      );
+
+      const preview = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+        dry_run: true,
+      });
+      expect(preview).not.toHaveProperty('error');
+      expect(preview.applied).toBe(false);
+      expect(preview.changes).toHaveLength(1);
+      expect(preview.changes[0].file_path).toBe('src/auth.ts');
+      expect(preview.changes[0].edits).toHaveLength(3);
+      expect(preview.changes[0].edits[0].line).toBe(1);
+      expect(preview.changes[0].edits[1].line).toBe(2);
+      expect(preview.changes[0].edits[2].line).toBe(3);
+      expect(preview.changes[0].edits[0].confidence).toBe('graph');
+      expect(preview.changes[0].edits[1].confidence).toBe('text_search');
+      expect(preview.changes[0].edits[2].confidence).toBe('text_search');
+
+      const applied = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+        dry_run: false,
+      });
+      expect(applied).not.toHaveProperty('error');
+      expect(applied.applied).toBe(true);
+
+      const updated = await fs.readFile(authFile, 'utf-8');
+      const [line1, line2, line3] = updated.split('\n');
+      expect(line1).toContain('loginRenamed');
+      expect(line2).toContain('loginRenamed');
+      expect(line2).not.toContain('login()');
+      expect(line3).toContain('loginRenamed');
+      expect(line3).not.toContain('login()');
+    });
+
     it('query tool returns results for keyword search', async () => {
       const result = await backend.callTool('query', { query: 'login' });
       expect(result).not.toHaveProperty('error');
       // Should have some combination of processes, process_symbols, or definitions
       expect(result).toHaveProperty('processes');
+      expect(result).toHaveProperty('process_symbols');
       expect(result).toHaveProperty('definitions');
+      const symbolIds = (result.process_symbols || []).map((sym: any) => sym.id);
+      expect(new Set(symbolIds).size).toBe(symbolIds.length);
       // The search should find something (FTS or graph-based)
       const totalResults =
         (result.processes?.length || 0) +
         (result.process_symbols?.length || 0) +
         (result.definitions?.length || 0);
       expect(totalResults).toBeGreaterThanOrEqual(1);
+    });
+
+    it('search/explore aliases keep query/context behavior', async () => {
+      const searchResult = await backend.callTool('search', { query: 'login' });
+      expect(searchResult).not.toHaveProperty('error');
+      expect(searchResult).toHaveProperty('processes');
+      expect(searchResult).toHaveProperty('definitions');
+
+      const exploreResult = await backend.callTool('explore', { name: 'login' });
+      expect(exploreResult).not.toHaveProperty('error');
+      expect(exploreResult.status).toBe('found');
+      expect(exploreResult.symbol.name).toBe('login');
     });
 
     it('unknown tool throws', async () => {
@@ -150,6 +232,13 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result).toHaveProperty('error');
     });
 
+    it('cypher tool returns error for missing query param', async () => {
+      const result = await backend.callTool('cypher', {} as any);
+      expect(result).toEqual({
+        error: 'query parameter is required and cannot be empty.',
+      });
+    });
+
     it('context tool returns error when no name or uid provided', async () => {
       const result = await backend.callTool('context', {});
       expect(result).toHaveProperty('error');
@@ -162,11 +251,24 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
   ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
   poolAdapter: true,
   afterSetup: async (handle) => {
+    const repoPath = path.join(handle.tmpHandle.dbPath, 'repo');
+    await fs.mkdir(path.join(repoPath, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repoPath, 'src', 'auth.ts'),
+      'function login() { return validate(); }\nfunction validate() { return true; }\n',
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(repoPath, 'src', 'utils.ts'),
+      'function hash() { return "x"; }\n',
+      'utf-8',
+    );
+
     // Configure listRegisteredRepos mock with handle values
     vi.mocked(listRegisteredRepos).mockResolvedValue([
       {
         name: 'test-repo',
-        path: '/test/repo',
+        path: repoPath,
         storagePath: handle.tmpHandle.dbPath,
         indexedAt: new Date().toISOString(),
         lastCommit: 'abc123',
