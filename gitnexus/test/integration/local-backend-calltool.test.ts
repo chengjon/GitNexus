@@ -96,6 +96,16 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result.target.filePath).toBe('src/auth.ts');
     });
 
+    it('detect_changes compare scope validates base_ref', async () => {
+      const result = await backend.callTool('detect_changes', {
+        scope: 'compare',
+      });
+
+      expect(result).toEqual({
+        error: 'base_ref is required for "compare" scope',
+      });
+    });
+
     it('query tool returns results for keyword search', async () => {
       const result = await backend.callTool('query', { query: 'login' });
       expect(result).not.toHaveProperty('error');

@@ -33,6 +33,10 @@ vi.mock('../../src/mcp/core/embedder.js', () => ({
   getEmbeddingDims: vi.fn().mockReturnValue(384),
 }));
 
+vi.mock('child_process', () => ({
+  execFileSync: vi.fn(),
+}));
+
 import { LocalBackend, isWriteQuery, CYPHER_WRITE_RE, VALID_NODE_LABELS } from '../../src/mcp/local/local-backend.js';
 import {
   isWriteQuery as sharedIsWriteQuery,
@@ -41,6 +45,7 @@ import {
 } from '../../src/mcp/local/tools/shared/query-safety.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
+import { execFileSync } from 'child_process';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -263,13 +268,53 @@ describe('LocalBackend.callTool', () => {
     });
   });
 
-  it('dispatches detect_changes tool', async () => {
-    // detect_changes calls execFileSync which we haven't mocked at module level,
-    // so it will throw a git error — that's fine, we test the error path
+  it.each([
+    ['unstaged', undefined, ['diff', '--name-only']],
+    ['staged', undefined, ['diff', '--staged', '--name-only']],
+    ['all', undefined, ['diff', 'HEAD', '--name-only']],
+    ['compare', 'main', ['diff', 'main', '--name-only']],
+  ] as const)('dispatches detect_changes tool for %s scope', async (scope, baseRef, expectedArgs) => {
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+    const result = await backend.callTool('detect_changes', {
+      scope,
+      ...(baseRef ? { base_ref: baseRef } : {}),
+    });
+
+    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+      'git',
+      expectedArgs,
+      expect.objectContaining({
+        cwd: '/tmp/test-project',
+        encoding: 'utf-8',
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      summary: expect.objectContaining({
+        changed_count: expect.any(Number),
+        affected_count: expect.any(Number),
+        changed_files: 1,
+        risk_level: expect.any(String),
+      }),
+      changed_symbols: expect.any(Array),
+      affected_processes: expect.any(Array),
+    }));
+  });
+
+  it('detect_changes compare scope requires base_ref', async () => {
+    const result = await backend.callTool('detect_changes', { scope: 'compare' });
+    expect(result).toEqual({ error: 'base_ref is required for "compare" scope' });
+  });
+
+  it('detect_changes surfaces git diff errors', async () => {
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('fatal: not a git repository');
+    });
+
     const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
-    // Should either return changes or a git error
-    expect(result).toBeDefined();
-    expect(result.error || result.summary).toBeDefined();
+    expect(result).toEqual({
+      error: 'Git diff failed: fatal: not a git repository',
+    });
   });
 
   it('dispatches rename tool', async () => {

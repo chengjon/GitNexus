@@ -17,16 +17,14 @@ import { BackendRuntime } from './runtime/backend-runtime.js';
 import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './runtime/types.js';
 import { createToolRegistry, type ToolRegistry } from './tools/tool-registry.js';
 import type { ToolContext } from './tools/tool-context.js';
-import {
-  isTestFilePath,
-  VALID_RELATION_TYPES,
-} from './tools/shared/query-safety.js';
 import { formatCypherAsMarkdown } from './tools/shared/cypher-format.js';
 import { aggregateClusters } from './tools/shared/cluster-aggregation.js';
 import { runQueryTool } from './tools/handlers/query-handler.js';
 import { runCypherTool } from './tools/handlers/cypher-handler.js';
 import { runContextTool } from './tools/handlers/context-handler.js';
 import { runOverviewTool } from './tools/handlers/overview-handler.js';
+import { runImpactTool } from './tools/handlers/impact-handler.js';
+import { runDetectChangesTool } from './tools/handlers/detect-changes-handler.js';
 // AI context generation is CLI-only (gitnexus analyze)
 // import { generateAIContextFiles } from '../../cli/ai-context.js';
 
@@ -66,8 +64,8 @@ export class LocalBackend {
         return formatCypherAsMarkdown(raw);
       },
       context: runContextTool,
-      impact: async (_ctx, toolParams) => this.impact(_ctx.repo, toolParams),
-      detect_changes: async (_ctx, toolParams) => this.detectChanges(_ctx.repo, toolParams),
+      impact: runImpactTool,
+      detect_changes: runDetectChangesTool,
       rename: async (_ctx, toolParams) => this.rename(_ctx.repo, toolParams),
       overview: runOverviewTool,
     });
@@ -246,118 +244,6 @@ export class LocalBackend {
   }
 
   /**
-   * Detect changes — git-diff based impact analysis.
-   * Maps changed lines to indexed symbols, then finds affected processes.
-   */
-  private async detectChanges(repo: RepoHandle, params: {
-    scope?: string;
-    base_ref?: string;
-  }): Promise<any> {
-    await this.runtime.ensureInitialized(repo.id);
-    
-    const scope = params.scope || 'unstaged';
-    const { execFileSync } = await import('child_process');
-
-    // Build git diff args based on scope (using execFileSync to avoid shell injection)
-    let diffArgs: string[];
-    switch (scope) {
-      case 'staged':
-        diffArgs = ['diff', '--staged', '--name-only'];
-        break;
-      case 'all':
-        diffArgs = ['diff', 'HEAD', '--name-only'];
-        break;
-      case 'compare':
-        if (!params.base_ref) return { error: 'base_ref is required for "compare" scope' };
-        diffArgs = ['diff', params.base_ref, '--name-only'];
-        break;
-      case 'unstaged':
-      default:
-        diffArgs = ['diff', '--name-only'];
-        break;
-    }
-
-    let changedFiles: string[];
-    try {
-      const output = execFileSync('git', diffArgs, { cwd: repo.repoPath, encoding: 'utf-8' });
-      changedFiles = output.trim().split('\n').filter(f => f.length > 0);
-    } catch (err: any) {
-      return { error: `Git diff failed: ${err.message}` };
-    }
-    
-    if (changedFiles.length === 0) {
-      return {
-        summary: { changed_count: 0, affected_count: 0, risk_level: 'none', message: 'No changes detected.' },
-        changed_symbols: [],
-        affected_processes: [],
-      };
-    }
-    
-    // Map changed files to indexed symbols
-    const changedSymbols: any[] = [];
-    for (const file of changedFiles) {
-      const normalizedFile = file.replace(/\\/g, '/');
-      try {
-        const symbols = await executeParameterized(repo.id, `
-          MATCH (n) WHERE n.filePath CONTAINS $filePath
-          RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
-          LIMIT 20
-        `, { filePath: normalizedFile });
-        for (const sym of symbols) {
-          changedSymbols.push({
-            id: sym.id || sym[0],
-            name: sym.name || sym[1],
-            type: sym.type || sym[2],
-            filePath: sym.filePath || sym[3],
-            change_type: 'Modified',
-          });
-        }
-      } catch (e) { logQueryError('detect-changes:file-symbols', e); }
-    }
-
-    // Find affected processes
-    const affectedProcesses = new Map<string, any>();
-    for (const sym of changedSymbols) {
-      try {
-        const procs = await executeParameterized(repo.id, `
-          MATCH (n {id: $nodeId})-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)
-          RETURN p.id AS pid, p.heuristicLabel AS label, p.processType AS processType, p.stepCount AS stepCount, r.step AS step
-        `, { nodeId: sym.id });
-        for (const proc of procs) {
-          const pid = proc.pid || proc[0];
-          if (!affectedProcesses.has(pid)) {
-            affectedProcesses.set(pid, {
-              id: pid,
-              name: proc.label || proc[1],
-              process_type: proc.processType || proc[2],
-              step_count: proc.stepCount || proc[3],
-              changed_steps: [],
-            });
-          }
-          affectedProcesses.get(pid)!.changed_steps.push({
-            symbol: sym.name,
-            step: proc.step || proc[4],
-          });
-        }
-      } catch (e) { logQueryError('detect-changes:process-lookup', e); }
-    }
-
-    const processCount = affectedProcesses.size;
-    const risk = processCount === 0 ? 'low' : processCount <= 5 ? 'medium' : processCount <= 15 ? 'high' : 'critical';
-    
-    return {
-      summary: {
-        changed_count: changedSymbols.length,
-        affected_count: processCount,
-        changed_files: changedFiles.length,
-        risk_level: risk,
-      },
-      changed_symbols: changedSymbols,
-      affected_processes: Array.from(affectedProcesses.values()),
-    };
-  }
-
-  /**
    * Rename tool — multi-file coordinated rename using graph + text search.
    * Graph refs are tagged "graph" (high confidence).
    * Additional refs found via text search are tagged "text_search" (lower confidence).
@@ -520,184 +406,6 @@ export class LocalBackend {
       text_search_edits: astSearchEdits,
       changes: allChanges,
       applied: !dry_run,
-    };
-  }
-
-  private async impact(repo: RepoHandle, params: {
-    target: string;
-    direction: 'upstream' | 'downstream';
-    maxDepth?: number;
-    relationTypes?: string[];
-    includeTests?: boolean;
-    minConfidence?: number;
-  }): Promise<any> {
-    await this.runtime.ensureInitialized(repo.id);
-    
-    const { target, direction } = params;
-    const maxDepth = params.maxDepth || 3;
-    const rawRelTypes = params.relationTypes && params.relationTypes.length > 0
-      ? params.relationTypes.filter(t => VALID_RELATION_TYPES.has(t))
-      : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS'];
-    const relationTypes = rawRelTypes.length > 0 ? rawRelTypes : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS'];
-    const includeTests = params.includeTests ?? false;
-    const minConfidence = params.minConfidence ?? 0;
-
-    const relTypeFilter = relationTypes.map(t => `'${t}'`).join(', ');
-    const confidenceFilter = minConfidence > 0 ? ` AND r.confidence >= ${minConfidence}` : '';
-
-    let targets = await executeParameterized(repo.id, `
-      MATCH (n)
-      WHERE n.name = $targetName
-      RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
-      LIMIT 1
-    `, { targetName: target });
-
-    if (targets.length === 0 && /[\\/]/.test(target)) {
-      let targetPath = target.replace(/\\/g, '/');
-      if (path.isAbsolute(target)) {
-        targetPath = path.relative(repo.repoPath, target).replace(/\\/g, '/');
-      }
-
-      targets = await executeParameterized(repo.id, `
-        MATCH (n:File)
-        WHERE n.filePath = $targetPath
-        RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n.filePath AS filePath
-        LIMIT 1
-      `, { targetPath });
-    }
-
-    if (targets.length === 0) return { error: `Target '${target}' not found` };
-    
-    const sym = targets[0];
-    const symId = sym.id || sym[0];
-    
-    const impacted: any[] = [];
-    const visited = new Set<string>([symId]);
-    let frontier = [symId];
-    
-    for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
-      const nextFrontier: string[] = [];
-      
-      // Batch frontier nodes into a single Cypher query per depth level
-      const idList = frontier.map(id => `'${id.replace(/'/g, "''")}'`).join(', ');
-      const query = direction === 'upstream'
-        ? `MATCH (caller)-[r:CodeRelation]->(n) WHERE n.id IN [${idList}] AND r.type IN [${relTypeFilter}]${confidenceFilter} RETURN n.id AS sourceId, caller.id AS id, caller.name AS name, labels(caller)[0] AS type, caller.filePath AS filePath, r.type AS relType, r.confidence AS confidence`
-        : `MATCH (n)-[r:CodeRelation]->(callee) WHERE n.id IN [${idList}] AND r.type IN [${relTypeFilter}]${confidenceFilter} RETURN n.id AS sourceId, callee.id AS id, callee.name AS name, labels(callee)[0] AS type, callee.filePath AS filePath, r.type AS relType, r.confidence AS confidence`;
-      
-      try {
-        const related = await executeQuery(repo.id, query);
-        
-        for (const rel of related) {
-          const relId = rel.id || rel[1];
-          const filePath = rel.filePath || rel[4] || '';
-          
-          if (!includeTests && isTestFilePath(filePath)) continue;
-          
-          if (!visited.has(relId)) {
-            visited.add(relId);
-            nextFrontier.push(relId);
-            impacted.push({
-              depth,
-              id: relId,
-              name: rel.name || rel[2],
-              type: rel.type || rel[3],
-              filePath,
-              relationType: rel.relType || rel[5],
-              confidence: rel.confidence || rel[6] || 1.0,
-            });
-          }
-        }
-      } catch (e) { logQueryError('impact:depth-traversal', e); }
-      
-      frontier = nextFrontier;
-    }
-    
-    const grouped: Record<number, any[]> = {};
-    for (const item of impacted) {
-      if (!grouped[item.depth]) grouped[item.depth] = [];
-      grouped[item.depth].push(item);
-    }
-
-    // ── Enrichment: affected processes, modules, risk ──────────────
-    const directCount = (grouped[1] || []).length;
-    let affectedProcesses: any[] = [];
-    let affectedModules: any[] = [];
-
-    if (impacted.length > 0) {
-      const allIds = impacted.map(i => `'${i.id.replace(/'/g, "''")}'`).join(', ');
-      const d1Ids = (grouped[1] || []).map((i: any) => `'${i.id.replace(/'/g, "''")}'`).join(', ');
-
-      // Affected processes: which execution flows are broken and at which step
-      const [processRows, moduleRows, directModuleRows] = await Promise.all([
-        executeQuery(repo.id, `
-          MATCH (s)-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)
-          WHERE s.id IN [${allIds}]
-          RETURN p.heuristicLabel AS name, COUNT(DISTINCT s.id) AS hits, MIN(r.step) AS minStep, p.stepCount AS stepCount
-          ORDER BY hits DESC
-          LIMIT 20
-        `).catch(() => []),
-        executeQuery(repo.id, `
-          MATCH (s)-[:CodeRelation {type: 'MEMBER_OF'}]->(c:Community)
-          WHERE s.id IN [${allIds}]
-          RETURN c.heuristicLabel AS name, COUNT(DISTINCT s.id) AS hits
-          ORDER BY hits DESC
-          LIMIT 20
-        `).catch(() => []),
-        d1Ids ? executeQuery(repo.id, `
-          MATCH (s)-[:CodeRelation {type: 'MEMBER_OF'}]->(c:Community)
-          WHERE s.id IN [${d1Ids}]
-          RETURN DISTINCT c.heuristicLabel AS name
-        `).catch(() => []) : Promise.resolve([]),
-      ]);
-
-      affectedProcesses = processRows.map((r: any) => ({
-        name: r.name || r[0],
-        hits: r.hits || r[1],
-        broken_at_step: r.minStep ?? r[2],
-        step_count: r.stepCount ?? r[3],
-      }));
-
-      const directModuleSet = new Set(directModuleRows.map((r: any) => r.name || r[0]));
-      affectedModules = moduleRows.map((r: any) => {
-        const name = r.name || r[0];
-        return {
-          name,
-          hits: r.hits || r[1],
-          impact: directModuleSet.has(name) ? 'direct' : 'indirect',
-        };
-      });
-    }
-
-    // Risk scoring
-    const processCount = affectedProcesses.length;
-    const moduleCount = affectedModules.length;
-    let risk = 'LOW';
-    if (directCount >= 30 || processCount >= 5 || moduleCount >= 5 || impacted.length >= 200) {
-      risk = 'CRITICAL';
-    } else if (directCount >= 15 || processCount >= 3 || moduleCount >= 3 || impacted.length >= 100) {
-      risk = 'HIGH';
-    } else if (directCount >= 5 || impacted.length >= 30) {
-      risk = 'MEDIUM';
-    }
-
-    return {
-      target: {
-        id: symId,
-        name: sym.name || sym[1],
-        type: sym.type || sym[2],
-        filePath: sym.filePath || sym[3],
-      },
-      direction,
-      impactedCount: impacted.length,
-      risk,
-      summary: {
-        direct: directCount,
-        processes_affected: processCount,
-        modules_affected: moduleCount,
-      },
-      affected_processes: affectedProcesses,
-      affected_modules: affectedModules,
-      byDepth: grouped,
     };
   }
 
