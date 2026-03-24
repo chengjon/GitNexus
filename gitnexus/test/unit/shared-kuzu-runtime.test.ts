@@ -1,3 +1,4 @@
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { createSharedKuzuTestRuntime } from '../../test/helpers/shared-kuzu-runtime.js';
 
@@ -20,7 +21,7 @@ describe('createSharedKuzuTestRuntime', () => {
       shouldExplicitlyCloseNativeKuzu: () => true,
     });
 
-    expect(runtime.dbPath).toBe('/tmp/shared-root/kuzu');
+    expect(runtime.dbPath).toBe(path.join('/tmp/shared-root', 'kuzu'));
     expect(queries).toEqual([
       'node-1',
       'node-2',
