@@ -413,7 +413,7 @@ describe('runDoctor', () => {
         getNativeRuntimeCheck: () => ({
           name: 'native-runtime',
           status: 'pass',
-          detail: 'kuzuActiveRepos=0',
+          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
         }),
       },
     );
@@ -423,7 +423,7 @@ describe('runDoctor', () => {
         expect.objectContaining({
           name: 'native-runtime',
           status: 'pass',
-          detail: expect.stringContaining('kuzuActiveRepos=0'),
+          detail: expect.stringContaining('coreEmbedderActive=false'),
         }),
       ]),
     );

@@ -55,6 +55,8 @@ describe('NativeRuntimeManager', () => {
     expect(manager.getSnapshot()).toEqual({
       activeKuzuRepos: 0,
       activeRepoIds: [],
+      coreEmbedderActive: false,
+      mcpEmbedderActive: false,
     });
   });
 
@@ -113,6 +115,30 @@ describe('NativeRuntimeManager', () => {
     expect(manager.getSnapshot()).toEqual({
       activeKuzuRepos: 2,
       activeRepoIds: ['repo-a', 'repo-b'],
+      coreEmbedderActive: false,
+      mcpEmbedderActive: false,
+    });
+  });
+
+  it('tracks core and mcp embedder readiness in the runtime snapshot', () => {
+    const manager = new NativeRuntimeManager();
+
+    manager.markEmbedderActive('core');
+    manager.markEmbedderActive('mcp');
+
+    expect(manager.getSnapshot()).toEqual({
+      activeKuzuRepos: 0,
+      activeRepoIds: [],
+      coreEmbedderActive: true,
+      mcpEmbedderActive: true,
+    });
+
+    manager.markEmbedderInactive('mcp');
+    expect(manager.getSnapshot()).toEqual({
+      activeKuzuRepos: 0,
+      activeRepoIds: [],
+      coreEmbedderActive: true,
+      mcpEmbedderActive: false,
     });
   });
 

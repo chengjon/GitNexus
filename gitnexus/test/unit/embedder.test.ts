@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getEmbeddingDims, isEmbedderReady } from '../../src/mcp/core/embedder.js';
+import { nativeRuntimeManager } from '../../src/runtime/native-runtime-manager.js';
 
 describe('embedder', () => {
   describe('getEmbeddingDims', () => {
@@ -11,6 +12,7 @@ describe('embedder', () => {
   describe('isEmbedderReady', () => {
     it('returns false before initialization', () => {
       expect(isEmbedderReady()).toBe(false);
+      expect(nativeRuntimeManager.getSnapshot().mcpEmbedderActive).toBe(false);
     });
   });
 });

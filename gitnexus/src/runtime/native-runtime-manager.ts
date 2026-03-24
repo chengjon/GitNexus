@@ -11,6 +11,8 @@ export interface ReindexLockPayload {
 export interface NativeRuntimeSnapshot {
   activeKuzuRepos: number;
   activeRepoIds: string[];
+  coreEmbedderActive: boolean;
+  mcpEmbedderActive: boolean;
 }
 
 interface SignalTarget {
@@ -31,6 +33,7 @@ interface CleanupAndExitOptions {
 
 export class NativeRuntimeManager {
   private activeKuzuRepos = new Set<string>();
+  private activeEmbedders = new Set<'core' | 'mcp'>();
 
   getReindexLockPath(storagePath: string): string {
     return path.join(storagePath, REINDEX_LOCK_FILENAME);
@@ -115,10 +118,24 @@ export class NativeRuntimeManager {
     return this.activeKuzuRepos.has(repoId);
   }
 
+  markEmbedderActive(kind: 'core' | 'mcp'): void {
+    this.activeEmbedders.add(kind);
+  }
+
+  markEmbedderInactive(kind: 'core' | 'mcp'): void {
+    this.activeEmbedders.delete(kind);
+  }
+
+  isEmbedderActive(kind: 'core' | 'mcp'): boolean {
+    return this.activeEmbedders.has(kind);
+  }
+
   getSnapshot(): NativeRuntimeSnapshot {
     return {
       activeKuzuRepos: this.activeKuzuRepos.size,
       activeRepoIds: [...this.activeKuzuRepos].sort(),
+      coreEmbedderActive: this.activeEmbedders.has('core'),
+      mcpEmbedderActive: this.activeEmbedders.has('mcp'),
     };
   }
 

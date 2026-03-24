@@ -125,8 +125,12 @@ const DEFAULT_DEPS: DoctorDeps = {
     const snapshot = nativeRuntimeManager.getSnapshot();
     return {
       name: 'native-runtime',
-      status: snapshot.activeKuzuRepos === 0 ? 'pass' : 'warn',
-      detail: `kuzuActiveRepos=${snapshot.activeKuzuRepos}${snapshot.activeRepoIds.length ? ` (${snapshot.activeRepoIds.join(', ')})` : ''}`,
+      status: snapshot.activeKuzuRepos === 0 && !snapshot.coreEmbedderActive && !snapshot.mcpEmbedderActive ? 'pass' : 'warn',
+      detail: [
+        `kuzuActiveRepos=${snapshot.activeKuzuRepos}${snapshot.activeRepoIds.length ? ` (${snapshot.activeRepoIds.join(', ')})` : ''}`,
+        `coreEmbedderActive=${snapshot.coreEmbedderActive}`,
+        `mcpEmbedderActive=${snapshot.mcpEmbedderActive}`,
+      ].join(', '),
     };
   },
 };

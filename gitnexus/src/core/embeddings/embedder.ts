@@ -25,6 +25,7 @@ import {
   getEmbeddingRuntimeConfig,
 } from './runtime-config.js';
 import { embedTextsWithOllama } from './ollama-client.js';
+import { nativeRuntimeManager } from '../../runtime/native-runtime-manager.js';
 
 /**
  * Check whether CUDA libraries are actually available on this system.
@@ -94,6 +95,7 @@ export const initEmbedder = async (
   const runtimeConfig = getEmbeddingRuntimeConfig();
 
   if (embedderInstance && activeProvider === runtimeConfig.provider) {
+    nativeRuntimeManager.markEmbedderActive('core');
     return embedderInstance;
   }
 
@@ -102,6 +104,7 @@ export const initEmbedder = async (
     initPromise = null;
     activeProvider = null;
     currentDevice = null;
+    nativeRuntimeManager.markEmbedderInactive('core');
   }
 
   // If already initializing, wait for that promise
@@ -127,6 +130,7 @@ export const initEmbedder = async (
         activeProvider = 'ollama';
         currentDevice = null;
         embedderInstance = {} as FeatureExtractionPipeline;
+        nativeRuntimeManager.markEmbedderActive('core');
         const isDev = process.env.NODE_ENV === 'development';
         if (isDev) {
           console.log(`🧠 Using Ollama embedding model: ${runtimeConfig.ollamaModel} @ ${runtimeConfig.ollamaBaseUrl}`);
@@ -185,6 +189,7 @@ export const initEmbedder = async (
             }
           );
           currentDevice = device;
+          nativeRuntimeManager.markEmbedderActive('core');
 
           if (isDev) {
             const label = device === 'dml' ? 'GPU (DirectML/DirectX12)' 
@@ -212,6 +217,7 @@ export const initEmbedder = async (
       isInitializing = false;
       initPromise = null;
       embedderInstance = null;
+      nativeRuntimeManager.markEmbedderInactive('core');
       throw formatEmbeddingInitError(error, getEmbeddingRuntimeConfig());
     } finally {
       isInitializing = false;
@@ -345,4 +351,5 @@ export const disposeEmbedder = async (): Promise<void> => {
   activeProvider = null;
   currentDevice = null;
   currentDimensions = DEFAULT_EMBEDDING_CONFIG.dimensions;
+  nativeRuntimeManager.markEmbedderInactive('core');
 };
