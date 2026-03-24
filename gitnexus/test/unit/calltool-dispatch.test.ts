@@ -44,6 +44,7 @@ import {
   CYPHER_WRITE_RE as SHARED_CYPHER_WRITE_RE,
   VALID_NODE_LABELS as SHARED_VALID_NODE_LABELS,
 } from '../../src/mcp/local/tools/shared/query-safety.js';
+import { formatCypherAsMarkdown } from '../../src/mcp/local/tools/shared/cypher-format.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
 import { execFileSync } from 'child_process';
@@ -420,6 +421,86 @@ describe('LocalBackend.callTool', () => {
     expect(traversalResult.error).toContain('Path traversal blocked: ../escape.ts');
 
     expect((backend as any).rename).toBeUndefined();
+  });
+
+  it('rename dry_run=false only applies the line edits preview advertised', async () => {
+    await fs.mkdir('/tmp/test-project/src', { recursive: true });
+    await fs.writeFile(
+      '/tmp/test-project/src/test.ts',
+      'function oldName() {}\nconst followup = oldName();\n',
+      'utf-8',
+    );
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 5 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockReturnValue('' as any);
+
+    const preview = await backend.callTool('rename', {
+      symbol_name: 'oldName',
+      new_name: 'newName',
+      dry_run: true,
+    });
+    expect(preview.applied).toBe(false);
+    expect(preview.changes).toHaveLength(1);
+    expect(preview.changes[0].edits).toHaveLength(1);
+    expect(preview.changes[0].edits[0].line).toBe(1);
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 5 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockReturnValue('' as any);
+
+    const applied = await backend.callTool('rename', {
+      symbol_name: 'oldName',
+      new_name: 'newName',
+      dry_run: false,
+    });
+    expect(applied.applied).toBe(true);
+
+    const updated = await fs.readFile('/tmp/test-project/src/test.ts', 'utf-8');
+    const [line1, line2] = updated.split('\n');
+    expect(line1).toContain('newName');
+    expect(line2).toContain('oldName');
+    expect(line2).not.toContain('newName');
+  });
+
+  it('rename escapes regex metacharacters when building ripgrep pattern', async () => {
+    await fs.mkdir('/tmp/test-project/src', { recursive: true });
+    await fs.writeFile('/tmp/test-project/src/test.ts', 'const value = old.Name;\n', 'utf-8');
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'sym:old.dot', name: 'old.Name', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 1 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockReturnValue('' as any);
+
+    await backend.callTool('rename', {
+      symbol_name: 'old.Name',
+      new_name: 'new.Name',
+      dry_run: true,
+    });
+
+    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+      'rg',
+      expect.arrayContaining(['\\bold\\.Name\\b']),
+      expect.objectContaining({
+        cwd: '/tmp/test-project',
+        encoding: 'utf-8',
+        timeout: 5000,
+      }),
+    );
   });
 
   // Legacy tool aliases
@@ -884,5 +965,10 @@ describe('cypher result formatting', () => {
       query: 'MATCH (n) RETURN 1 AS one',
     });
     expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('throws clear error when cypher formatter is misused with non-tabular input', () => {
+    expect(() => formatCypherAsMarkdown([] as any)).toThrow('formatCypherAsMarkdown expected a non-empty array of row objects');
+    expect(() => formatCypherAsMarkdown([null] as any)).toThrow('formatCypherAsMarkdown expected each row to be a plain object');
   });
 });

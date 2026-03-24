@@ -56,6 +56,12 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
 
   const sym = lookupResult.symbol;
   const oldName = sym.name;
+  const escapedOldName = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const oldNameWordPattern = `\\b${escapedOldName}\\b`;
+  const replaceOnTargetLine = (line: string): string =>
+    line.replace(new RegExp(oldNameWordPattern, 'g'), new_name);
+  const hasTargetName = (line: string): boolean =>
+    new RegExp(oldNameWordPattern).test(line);
 
   if (oldName === new_name) {
     return { error: 'New name is the same as the current name.' };
@@ -78,8 +84,7 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
       const lines = content.split('\n');
       const lineIdx = sym.startLine - 1;
       if (lineIdx >= 0 && lineIdx < lines.length && lines[lineIdx].includes(oldName)) {
-        const defRegex = new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
-        addEdit(sym.filePath, sym.startLine, lines[lineIdx].trim(), lines[lineIdx].replace(defRegex, new_name).trim(), 'graph');
+        addEdit(sym.filePath, sym.startLine, lines[lineIdx].trim(), replaceOnTargetLine(lines[lineIdx]).trim(), 'graph');
       }
     } catch (e) {
       const traversalMessage = getTraversalMessage(e);
@@ -125,7 +130,7 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].includes(oldName)) {
-          addEdit(ref.filePath, i + 1, lines[i].trim(), lines[i].replace(new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'), new_name).trim(), 'graph');
+          addEdit(ref.filePath, i + 1, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), 'graph');
           graphEdits++;
           break; // one edit per file from graph refs
         }
@@ -150,7 +155,8 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
       '-l',
       '--type-add', 'code:*.{ts,tsx,js,jsx,py,go,rs,java,c,h,cpp,cc,cxx,hpp,hxx,hh,cs,php,swift}',
       '-t', 'code',
-      `\\b${oldName}\\b`,
+      '--',
+      oldNameWordPattern,
       '.',
     ];
     const output = execFileSync('rg', rgArgs, { cwd: repo.repoPath, encoding: 'utf-8', timeout: 5000 });
@@ -163,12 +169,9 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
       try {
         const content = await fs.readFile(assertSafePath(normalizedFile), 'utf-8');
         const lines = content.split('\n');
-        const regex = new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
         for (let i = 0; i < lines.length; i++) {
-          regex.lastIndex = 0;
-          if (regex.test(lines[i])) {
-            regex.lastIndex = 0;
-            addEdit(normalizedFile, i + 1, lines[i].trim(), lines[i].replace(regex, new_name).trim(), 'text_search');
+          if (hasTargetName(lines[i])) {
+            addEdit(normalizedFile, i + 1, lines[i].trim(), replaceOnTargetLine(lines[i]).trim(), 'text_search');
             astSearchEdits++;
           }
         }
@@ -191,10 +194,16 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     for (const change of allChanges) {
       try {
         const fullPath = assertSafePath(change.file_path);
-        let content = await fs.readFile(fullPath, 'utf-8');
-        const regex = new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
-        content = content.replace(regex, new_name);
-        await fs.writeFile(fullPath, content, 'utf-8');
+        const content = await fs.readFile(fullPath, 'utf-8');
+        const lines = content.split('\n');
+
+        for (const edit of change.edits) {
+          const lineIdx = edit.line - 1;
+          if (lineIdx < 0 || lineIdx >= lines.length) continue;
+          lines[lineIdx] = replaceOnTargetLine(lines[lineIdx]);
+        }
+
+        await fs.writeFile(fullPath, lines.join('\n'), 'utf-8');
       } catch (e) {
         const traversalMessage = getTraversalMessage(e);
         if (traversalMessage) {

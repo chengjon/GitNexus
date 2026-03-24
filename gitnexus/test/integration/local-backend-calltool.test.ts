@@ -6,6 +6,8 @@
  * end-to-end against seeded graph data with FTS indexes.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import fs from 'fs/promises';
+import path from 'path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { withTestKuzuDB } from '../helpers/test-indexed-db.js';
@@ -119,6 +121,41 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       expect(result.applied).toBe(false);
     });
 
+    it('rename dry_run=false applies only the previewed line edits', async () => {
+      const authFile = path.join(handle.tmpHandle.dbPath, 'repo', 'src', 'auth.ts');
+      await fs.writeFile(
+        authFile,
+        'function login() { return true; }\nconst secondUse = login();\nfunction validate() { return true; }\n',
+        'utf-8',
+      );
+
+      const preview = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+        dry_run: true,
+      });
+      expect(preview).not.toHaveProperty('error');
+      expect(preview.applied).toBe(false);
+      expect(preview.changes).toHaveLength(1);
+      expect(preview.changes[0].file_path).toBe('src/auth.ts');
+      expect(preview.changes[0].edits).toHaveLength(1);
+      expect(preview.changes[0].edits[0].line).toBe(1);
+
+      const applied = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+        dry_run: false,
+      });
+      expect(applied).not.toHaveProperty('error');
+      expect(applied.applied).toBe(true);
+
+      const updated = await fs.readFile(authFile, 'utf-8');
+      const [line1, line2] = updated.split('\n');
+      expect(line1).toContain('loginRenamed');
+      expect(line2).toContain('login()');
+      expect(line2).not.toContain('loginRenamed');
+    });
+
     it('query tool returns results for keyword search', async () => {
       const result = await backend.callTool('query', { query: 'login' });
       expect(result).not.toHaveProperty('error');
@@ -197,11 +234,24 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
   ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
   poolAdapter: true,
   afterSetup: async (handle) => {
+    const repoPath = path.join(handle.tmpHandle.dbPath, 'repo');
+    await fs.mkdir(path.join(repoPath, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repoPath, 'src', 'auth.ts'),
+      'function login() { return validate(); }\nfunction validate() { return true; }\n',
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(repoPath, 'src', 'utils.ts'),
+      'function hash() { return "x"; }\n',
+      'utf-8',
+    );
+
     // Configure listRegisteredRepos mock with handle values
     vi.mocked(listRegisteredRepos).mockResolvedValue([
       {
         name: 'test-repo',
-        path: '/test/repo',
+        path: repoPath,
         storagePath: handle.tmpHandle.dbPath,
         indexedAt: new Date().toISOString(),
         lastCommit: 'abc123',
