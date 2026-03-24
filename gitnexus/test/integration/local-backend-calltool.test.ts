@@ -106,6 +106,19 @@ withTestKuzuDB('local-backend-calltool', (handle) => {
       });
     });
 
+    it('rename tool keeps default dry-run behavior through callTool', async () => {
+      const result = await backend.callTool('rename', {
+        symbol_name: 'login',
+        new_name: 'loginRenamed',
+      });
+
+      expect(result).not.toHaveProperty('error');
+      expect(result.status).toBe('success');
+      expect(result.old_name).toBe('login');
+      expect(result.new_name).toBe('loginRenamed');
+      expect(result.applied).toBe(false);
+    });
+
     it('query tool returns results for keyword search', async () => {
       const result = await backend.callTool('query', { query: 'login' });
       expect(result).not.toHaveProperty('error');

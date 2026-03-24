@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
+import fs from 'fs/promises';
 
 // We need to mock the KuzuDB adapter and repo-manager BEFORE importing LocalBackend
 vi.mock('../../src/mcp/core/kuzu-adapter.js', () => ({
@@ -335,6 +336,52 @@ describe('LocalBackend.callTool', () => {
   it('rename returns error when both symbol_name and symbol_uid are missing', async () => {
     const result = await backend.callTool('rename', { new_name: 'newName' });
     expect(result.error).toContain('Either symbol_name or symbol_uid');
+  });
+
+  it('rename defaults dry_run=true, keeps graph confidence tags, and blocks traversal with the same error', async () => {
+    await fs.mkdir('/tmp/test-project/src', { recursive: true });
+    await fs.writeFile('/tmp/test-project/src/test.ts', 'function oldName() {}\n', 'utf-8');
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 5 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockReturnValue('' as any);
+
+    const dryRunResult = await backend.callTool('rename', {
+      symbol_name: 'oldName',
+      new_name: 'newName',
+    });
+
+    expect(dryRunResult.applied).toBe(false);
+    expect(dryRunResult.graph_edits).toBe(1);
+    expect(dryRunResult.changes[0].edits[0].confidence).toBe('graph');
+
+    (executeParameterized as any)
+      .mockResolvedValueOnce([
+        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: '../escape.ts', startLine: 1, endLine: 5 },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    vi.mocked(execFileSync).mockReturnValue('' as any);
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await backend.callTool('rename', {
+      symbol_name: 'oldName',
+      new_name: 'newName',
+      dry_run: true,
+    });
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Path traversal blocked: ../escape.ts'),
+    );
+    consoleSpy.mockRestore();
+
+    expect((backend as any).rename).toBeUndefined();
   });
 
   // Legacy tool aliases
