@@ -336,6 +336,15 @@ withTestKuzuDB('local-backend', (handle) => {
           affected_count: expect.any(Number),
           risk_level: expect.any(String),
         }),
+        metadata: expect.objectContaining({
+          git_repo_path: repoPath,
+          process_cwd: expect.any(String),
+          scope: 'compare',
+          base_ref: 'main',
+        }),
+        warnings: expect.arrayContaining([
+          expect.stringContaining(repoPath),
+        ]),
         changed_symbols: expect.any(Array),
         affected_processes: expect.any(Array),
       }));

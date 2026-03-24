@@ -248,6 +248,25 @@ describe('LocalBackend.callTool', () => {
     expect(result.target).toBeDefined();
   });
 
+  it('impact tool sanitizes untyped minConfidence before query interpolation', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      { id: 'func:main', name: 'main', type: 'Function', filePath: 'src/index.ts' },
+    ]);
+    (executeQuery as any).mockResolvedValue([]);
+
+    const result = await backend.callTool('impact', {
+      target: 'main',
+      direction: 'upstream',
+      minConfidence: 'Infinity' as any,
+    });
+
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
+    const traversalQuery = vi.mocked(executeQuery).mock.calls[0]?.[1] as string;
+    expect(traversalQuery).not.toContain('Infinity');
+    expect(traversalQuery).not.toContain('r.confidence >=');
+  });
+
   it('dispatches impact tool for file path targets', async () => {
     (executeParameterized as any)
       .mockResolvedValueOnce([])
@@ -302,6 +321,23 @@ describe('LocalBackend.callTool', () => {
     }));
   });
 
+  it('detect_changes reports git execution path metadata and warnings for cwd mismatch', async () => {
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+    const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
+
+    expect(result).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        git_repo_path: '/tmp/test-project',
+        process_cwd: expect.any(String),
+        scope: 'unstaged',
+      }),
+      warnings: expect.arrayContaining([
+        expect.stringContaining('/tmp/test-project'),
+      ]),
+    }));
+  });
+
   it('detect_changes compare scope requires base_ref', async () => {
     const result = await backend.callTool('detect_changes', { scope: 'compare' });
     expect(result).toEqual({ error: 'base_ref is required for "compare" scope' });
@@ -313,9 +349,15 @@ describe('LocalBackend.callTool', () => {
     });
 
     const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       error: 'Git diff failed: fatal: not a git repository',
-    });
+      metadata: expect.objectContaining({
+        git_repo_path: '/tmp/test-project',
+        process_cwd: expect.any(String),
+        scope: 'unstaged',
+      }),
+      warnings: expect.any(Array),
+    }));
   });
 
   it('dispatches rename tool', async () => {
@@ -338,7 +380,7 @@ describe('LocalBackend.callTool', () => {
     expect(result.error).toContain('Either symbol_name or symbol_uid');
   });
 
-  it('rename defaults dry_run=true, keeps graph confidence tags, and blocks traversal with the same error', async () => {
+  it('rename defaults dry_run=true, keeps graph confidence tags, and surfaces traversal errors', async () => {
     await fs.mkdir('/tmp/test-project/src', { recursive: true });
     await fs.writeFile('/tmp/test-project/src/test.ts', 'function oldName() {}\n', 'utf-8');
 
@@ -368,18 +410,14 @@ describe('LocalBackend.callTool', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     vi.mocked(execFileSync).mockReturnValue('' as any);
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    await backend.callTool('rename', {
+    const traversalResult = await backend.callTool('rename', {
       symbol_name: 'oldName',
       new_name: 'newName',
       dry_run: true,
     });
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Path traversal blocked: ../escape.ts'),
-    );
-    consoleSpy.mockRestore();
+    expect(traversalResult.error).toContain('Path traversal blocked: ../escape.ts');
 
     expect((backend as any).rename).toBeUndefined();
   });

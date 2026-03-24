@@ -25,7 +25,17 @@ export async function runImpactTool(ctx: ToolContext, params: ImpactToolParams):
     : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS'];
   const relationTypes = rawRelTypes.length > 0 ? rawRelTypes : ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS'];
   const includeTests = params.includeTests ?? false;
-  const minConfidence = params.minConfidence ?? 0;
+  const normalizedMinConfidence = (() => {
+    if (typeof params.minConfidence === 'number') {
+      return Number.isFinite(params.minConfidence) ? params.minConfidence : 0;
+    }
+    if (typeof params.minConfidence === 'string') {
+      const parsed = Number(params.minConfidence);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  })();
+  const minConfidence = normalizedMinConfidence > 0 ? normalizedMinConfidence : 0;
 
   const relTypeFilter = relationTypes.map((t) => `'${t}'`).join(', ');
   const confidenceFilter = minConfidence > 0 ? ` AND r.confidence >= ${minConfidence}` : '';

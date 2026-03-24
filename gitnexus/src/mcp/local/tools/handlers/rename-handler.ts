@@ -35,6 +35,10 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     }
     return full;
   };
+  const getTraversalMessage = (error: unknown): string | null => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.startsWith('Path traversal blocked:') ? message : null;
+  };
 
   // Step 1: Find the target symbol (reuse context's lookup)
   const lookupResult = await runContextTool(ctx, {
@@ -77,7 +81,13 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
         const defRegex = new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
         addEdit(sym.filePath, sym.startLine, lines[lineIdx].trim(), lines[lineIdx].replace(defRegex, new_name).trim(), 'graph');
       }
-    } catch (e) { ctx.logQueryError('rename:read-definition', e); }
+    } catch (e) {
+      const traversalMessage = getTraversalMessage(e);
+      if (traversalMessage) {
+        return { error: traversalMessage };
+      }
+      ctx.logQueryError('rename:read-definition', e);
+    }
   }
 
   // All incoming refs from graph (callers, importers, etc.)
@@ -87,6 +97,24 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
     ...(lookupResult.incoming.extends || []),
     ...(lookupResult.incoming.implements || []),
   ];
+
+  const pathsToValidate = [
+    sym.filePath,
+    ...allIncoming.map((r) => r.filePath),
+  ].filter((filePath): filePath is string => typeof filePath === 'string' && filePath.length > 0);
+
+  for (const filePath of pathsToValidate) {
+    try {
+      assertSafePath(filePath);
+    } catch (e) {
+      const traversalMessage = getTraversalMessage(e);
+      if (traversalMessage) {
+        return { error: traversalMessage };
+      }
+      ctx.logQueryError('rename:path-validation', e);
+      return { error: 'Failed to validate file paths before rename.' };
+    }
+  }
 
   let graphEdits = changes.size > 0 ? 1 : 0; // count definition edit
 
@@ -102,7 +130,13 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
           break; // one edit per file from graph refs
         }
       }
-    } catch (e) { ctx.logQueryError('rename:read-ref', e); }
+    } catch (e) {
+      const traversalMessage = getTraversalMessage(e);
+      if (traversalMessage) {
+        return { error: traversalMessage };
+      }
+      ctx.logQueryError('rename:read-ref', e);
+    }
   }
 
   // Step 3: Text search for refs the graph might have missed
@@ -138,7 +172,13 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
             astSearchEdits++;
           }
         }
-      } catch (e) { ctx.logQueryError('rename:text-search-read', e); }
+      } catch (e) {
+        const traversalMessage = getTraversalMessage(e);
+        if (traversalMessage) {
+          return { error: traversalMessage };
+        }
+        ctx.logQueryError('rename:text-search-read', e);
+      }
     }
   } catch (e) { ctx.logQueryError('rename:ripgrep', e); }
 
@@ -155,7 +195,13 @@ export async function runRenameTool(ctx: ToolContext, params: RenameToolParams):
         const regex = new RegExp(`\\b${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
         content = content.replace(regex, new_name);
         await fs.writeFile(fullPath, content, 'utf-8');
-      } catch (e) { ctx.logQueryError('rename:apply-edit', e); }
+      } catch (e) {
+        const traversalMessage = getTraversalMessage(e);
+        if (traversalMessage) {
+          return { error: traversalMessage };
+        }
+        ctx.logQueryError('rename:apply-edit', e);
+      }
     }
   }
 

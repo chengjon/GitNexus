@@ -1,3 +1,4 @@
+import path from 'path';
 import { executeParameterized } from '../../../core/kuzu-adapter.js';
 import type { ToolContext } from '../tool-context.js';
 
@@ -14,6 +15,22 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
   await ctx.runtime.ensureInitialized(ctx.repo.id);
 
   const scope = params.scope || 'unstaged';
+  const gitRepoPath = ctx.repo.repoPath;
+  const processCwd = process.cwd();
+  const metadata: Record<string, any> = {
+    git_repo_path: gitRepoPath,
+    process_cwd: processCwd,
+    scope,
+  };
+  if (params.base_ref) {
+    metadata.base_ref = params.base_ref;
+  }
+  const warnings: string[] = [];
+  if (path.resolve(gitRepoPath) !== path.resolve(processCwd)) {
+    warnings.push(
+      `Git operations ran in '${gitRepoPath}' instead of process cwd '${processCwd}'. In git worktrees this can affect which working tree is diffed.`,
+    );
+  }
   const { execFileSync } = await import('child_process');
 
   // Build git diff args based on scope (using execFileSync to avoid shell injection)
@@ -37,15 +54,17 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
 
   let changedFiles: string[];
   try {
-    const output = execFileSync('git', diffArgs, { cwd: ctx.repo.repoPath, encoding: 'utf-8' });
+    const output = execFileSync('git', diffArgs, { cwd: gitRepoPath, encoding: 'utf-8' });
     changedFiles = output.trim().split('\n').filter((f) => f.length > 0);
   } catch (err: any) {
-    return { error: `Git diff failed: ${err.message}` };
+    return { error: `Git diff failed: ${err.message}`, metadata, ...(warnings.length > 0 ? { warnings } : {}) };
   }
 
   if (changedFiles.length === 0) {
     return {
       summary: { changed_count: 0, affected_count: 0, risk_level: 'none', message: 'No changes detected.' },
+      metadata,
+      ...(warnings.length > 0 ? { warnings } : {}),
       changed_symbols: [],
       affected_processes: [],
     };
@@ -110,6 +129,8 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
       changed_files: changedFiles.length,
       risk_level: risk,
     },
+    metadata,
+    ...(warnings.length > 0 ? { warnings } : {}),
     changed_symbols: changedSymbols,
     affected_processes: Array.from(affectedProcesses.values()),
   };
