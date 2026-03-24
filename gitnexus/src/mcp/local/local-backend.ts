@@ -14,7 +14,7 @@ import { executeQuery, executeParameterized, isKuzuReady } from '../core/kuzu-ad
 // git utilities available if needed
 // import { isGitRepo, getCurrentCommit, getGitRoot } from '../../storage/git.js';
 import { BackendRuntime } from './runtime/backend-runtime.js';
-import type { CodebaseContext, RepoHandle } from './runtime/types.js';
+import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './runtime/types.js';
 import { createToolRegistry, type ToolRegistry } from './tools/tool-registry.js';
 import type { ToolContext } from './tools/tool-context.js';
 // AI context generation is CLI-only (gitnexus analyze)
@@ -64,10 +64,10 @@ function logQueryError(context: string, err: unknown): void {
 export type { CodebaseContext, RepoHandle } from './runtime/types.js';
 
 export class LocalBackend {
-  private runtime: BackendRuntime;
+  private runtime: LocalBackendRuntimeLike;
   private registry: ToolRegistry;
 
-  constructor(runtime = new BackendRuntime()) {
+  constructor(runtime: LocalBackendRuntimeLike = new BackendRuntime()) {
     this.runtime = runtime;
     this.registry = createToolRegistry({
       query: async (_ctx, toolParams) => this.query(_ctx.repo, toolParams),
