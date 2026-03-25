@@ -69,6 +69,16 @@ export class CompatibleStdioServerTransport implements Transport {
     this.onerror?.(error);
   };
 
+  private readonly _onend = () => {
+    // stdin closed — parent process is gone, trigger clean shutdown
+    this.onclose?.();
+  };
+
+  private readonly _onclose = () => {
+    // Underlying stream closed (stronger signal than 'end' for pipes)
+    this.onclose?.();
+  };
+
   async start() {
     if (this._started) {
       throw new Error('CompatibleStdioServerTransport already started!');
@@ -77,6 +87,8 @@ export class CompatibleStdioServerTransport implements Transport {
     this._started = true;
     this._stdin.on('data', this._ondata);
     this._stdin.on('error', this._onerror);
+    this._stdin.on('end', this._onend);
+    this._stdin.on('close', this._onclose);
   }
 
   private detectFraming(): StdioFraming | null {
@@ -197,6 +209,8 @@ export class CompatibleStdioServerTransport implements Transport {
   async close() {
     this._stdin.off('data', this._ondata);
     this._stdin.off('error', this._onerror);
+    this._stdin.off('end', this._onend);
+    this._stdin.off('close', this._onclose);
 
     const remainingDataListeners = this._stdin.listenerCount('data');
     if (remainingDataListeners === 0) {

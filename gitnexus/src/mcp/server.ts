@@ -275,10 +275,6 @@ Follow these steps:
 export async function startMCPServer(backend: LocalBackend): Promise<void> {
   const server = createMCPServer(backend);
 
-  // Connect to stdio transport
-  const transport = new CompatibleStdioServerTransport();
-  await server.connect(transport);
-
   // Graceful shutdown helper
   let shuttingDown = false;
   const shutdown = async () => {
@@ -295,10 +291,19 @@ export async function startMCPServer(backend: LocalBackend): Promise<void> {
     });
   };
 
+  // Connect to stdio transport
+  const transport = new CompatibleStdioServerTransport();
+
+  // Handle transport close (stdin closed by parent) — this is the primary shutdown path
+  transport.onclose = shutdown;
+
+  await server.connect(transport);
+
   // Handle graceful shutdown
   nativeRuntimeManager.registerShutdownHandlers(process, shutdown, shutdown);
 
-  // Handle stdio errors — stdin close means the parent process is gone
+  // Fallback: Handle stdio errors — stdin close means the parent process is gone
+  // Note: transport.onclose is the primary handler; these are backups
   process.stdin.on('end', shutdown);
   process.stdin.on('error', () => shutdown());
   process.stdout.on('error', () => shutdown());
