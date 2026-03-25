@@ -172,9 +172,14 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 4. `src/core/kuzu/kuzu-adapter.ts`
 5. `src/cli/analyze.ts`
 
-进度更新（2026-03-24）：
+进度更新（2026-03-26）：
 
-- `src/mcp/local/local-backend.ts` handler-first 拆分已在分支 `local-backend-handler-first-impl` 完成并通过目标测试与构建验证，当前状态为待合并。
+- `src/mcp/local/local-backend.ts` 的 handler-first 拆分已完成，并已合并、验证、推送到 `main`
+- `detect_changes` 已补上 git worktree 解析能力：
+  - 支持显式 `cwd`
+  - 输出 `git_diff_path`、`path_resolution`、`fallback_reason`
+  - 对 worktree 限制给出更可解释的 metadata / warnings
+- 这意味着 `LocalBackend` 相关的第一轮结构治理已经从“巨型热点”降到“已拆分并带有回归测试的可维护模块”
 
 ### Phase P2：语言支持确定性工程
 
@@ -226,17 +231,17 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 
 ## 6. 当前推荐下一步
 
-从治理价值来看，最应该先做的是：
+从当前治理价值来看，下一步最应该做的是：
 
-1. 写出 `NativeRuntimeManager` 设计
-2. 基于该设计启动 `P0-A` 与 `P0-B`
-3. 在 P0 稳定后，再拆大模块
+1. 继续推进 P1，拆分 `src/core/ingestion/workers/parse-worker.ts`
+2. 然后处理 `src/core/wiki/generator.ts`
+3. 再评估 `src/core/kuzu/kuzu-adapter.ts` 与 `src/cli/analyze.ts` 的拆分顺序
 
-也就是说，下一阶段不该直接去“拆最大的文件”，而应该先稳住原生运行时与测试基建这两个基础面。
+P0 的原生运行时与测试基建已经完成第一轮落地，当前最值钱的工作不再是继续补 `NativeRuntimeManager` 骨架，而是把剩余的大热点模块按职责边界继续拆开。
 
 ---
 
-## 7. 当前进度（2026-03-24）
+## 7. 当前进度（2026-03-26）
 
 已完成：
 
@@ -253,9 +258,21 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   - `coreEmbedderActive`
   - `mcpEmbedderActive`
 - CI workflow 已对齐新的三层测试配置
+- `LocalBackend` 已完成以下结构化拆分：
+  - `runtime/`
+  - `tools/handlers/`
+  - `tools/shared/`
+  - `tool-context` / `tool-registry`
+- `query`、`cypher`、`context`、`overview`、`impact`、`detect_changes`、`rename` 已全部从 `LocalBackend` 中抽出为独立 handler
+- `detect_changes` 已支持 worktree-aware path resolution 和显式 fallback metadata
+- `README.md` 与 `CHANGELOG.md` 已补充最近几波平台级更新摘要
 
 仍待完成：
 
-- 评估是否要把 `NativeRuntimeManager` 扩展到真正的 embedder dispose 策略，而不只是状态与政策承载
-- 继续收缩 test helper 中的平台特判和历史兼容注释
+- 拆分 `src/core/ingestion/workers/parse-worker.ts`
+- 拆分 `src/core/wiki/generator.ts`
+- 评估 `src/core/kuzu/kuzu-adapter.ts` 是否继续缩薄为更明确的 runtime adapter 边界
+- 评估 `src/cli/analyze.ts` 是否继续拆成更清晰的 orchestration + policy 层
+- 继续推进 P2：语言支持确定性与 `doctor` / CI 诊断一致性
+- 继续推进 P3：平台兼容层进一步集中化
 - 决定这一阶段是否已经足够形成评审 PR，还是继续深入到 `global-setup` / `test-indexed-db` 的更细颗粒治理
