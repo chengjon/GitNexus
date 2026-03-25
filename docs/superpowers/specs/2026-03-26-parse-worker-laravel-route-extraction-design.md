@@ -143,6 +143,20 @@ Own only:
 
 This file should depend only on the minimum helper set it needs.
 
+### Shared Helper Handling
+
+`extractStringContent` and `findDescendant` are currently shared by the Laravel route extractor and other PHP-specific logic in `parse-worker.ts`.
+
+For this slice, the preferred handling is:
+
+- keep these two helpers in `parse-worker.ts`
+- import them into `routes/laravel-route-extraction.ts`
+- avoid duplicating them during the first extraction
+
+This keeps the extraction narrow and avoids accidentally turning this route-focused slice into a broader PHP helper refactor.
+
+If this shared dependency becomes awkward later, it can be followed by a separate extraction into a dedicated PHP/shared helper module.
+
 ### `workers/parse-worker.ts`
 
 After extraction, it should:
@@ -151,6 +165,32 @@ After extraction, it should:
 - import `extractLaravelRoutes`
 - call it from the existing worker flow
 - stop owning Laravel-specific route parsing internals
+
+### Import Path Changes
+
+Expected downstream import changes:
+
+```ts
+// Before (call-processor.ts)
+import type { ExtractedRoute } from './workers/parse-worker.js';
+
+// After
+import type { ExtractedRoute } from './routes/types.js';
+```
+
+```ts
+// Before (parsing-processor.ts)
+import type { ParseWorkerResult, ParseWorkerInput, ExtractedImport, ExtractedCall, ExtractedHeritage, ExtractedRoute } from './workers/parse-worker.js';
+
+// After
+import type { ParseWorkerResult, ParseWorkerInput, ExtractedImport, ExtractedCall, ExtractedHeritage } from './workers/parse-worker.js';
+import type { ExtractedRoute } from './routes/types.js';
+```
+
+Optional follow-up only:
+
+- add `routes/index.ts` as a barrel export if the route area grows beyond this initial Laravel extraction
+- do not require that barrel in this first slice
 
 ## 7. Behavior Requirements
 
@@ -246,7 +286,7 @@ This slice is successful when:
 - focused Laravel route tests exist
 - no broader parse-worker behavior changes are introduced
 
-## 12. Recommendation
+## 12. Implementation Guidance
 
 Implement this as a narrow module extraction, not a worker redesign.
 
