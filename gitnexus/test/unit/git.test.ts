@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { execSync } from 'child_process';
-import { isGitRepo, getCurrentCommit, getGitRoot } from '../../src/storage/git.js';
+import { isGitRepo, getCurrentCommit, getGitRoot, getGitCommonDir, getGitIdentity } from '../../src/storage/git.js';
 
 // Mock child_process.execSync
 vi.mock('child_process', () => ({
@@ -84,6 +84,50 @@ describe('git utilities', () => {
       const result = getGitRoot('/repo/src');
       expect(result).not.toBeNull();
       expect(result!.trim()).toBe(result);
+    });
+  });
+
+  describe('getGitCommonDir', () => {
+    it('returns resolved common dir on success', () => {
+      mockExecSync.mockReturnValueOnce(Buffer.from('../.git/worktrees/feature\n'));
+      const result = getGitCommonDir('/repo/worktrees/feature/src');
+      expect(result).toBeTruthy();
+      expect(typeof result).toBe('string');
+    });
+
+    it('returns null when git common dir cannot be resolved', () => {
+      mockExecSync.mockImplementationOnce(() => { throw new Error('not a git repo'); });
+      expect(getGitCommonDir('/not-a-repo')).toBeNull();
+    });
+
+    it('calls git rev-parse --git-common-dir', () => {
+      mockExecSync.mockReturnValueOnce(Buffer.from('.git\n'));
+      getGitCommonDir('/repo/src');
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git rev-parse --git-common-dir',
+        expect.objectContaining({ cwd: '/repo/src' })
+      );
+    });
+  });
+
+  describe('getGitIdentity', () => {
+    it('returns topLevel and commonDir together on success', () => {
+      mockExecSync
+        .mockReturnValueOnce(Buffer.from('/repo/worktrees/feature\n'))
+        .mockReturnValueOnce(Buffer.from('../.git/worktrees/feature\n'));
+
+      expect(getGitIdentity('/repo/worktrees/feature/src')).toEqual({
+        topLevel: expect.any(String),
+        commonDir: expect.any(String),
+      });
+    });
+
+    it('returns null if either lookup fails', () => {
+      mockExecSync
+        .mockReturnValueOnce(Buffer.from('/repo\n'))
+        .mockImplementationOnce(() => { throw new Error('missing common dir'); });
+
+      expect(getGitIdentity('/repo/src')).toBeNull();
     });
   });
 });
