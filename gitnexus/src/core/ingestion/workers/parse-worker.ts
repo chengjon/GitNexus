@@ -23,6 +23,7 @@ import { generateId } from '../../../lib/utils.js';
 import { extractNamedBindings } from '../named-binding-extraction.js';
 import { appendKotlinWildcard } from '../resolvers/index.js';
 import { normalizeContentForParsing } from '../vue-sfc.js';
+import type { ExtractedRoute } from '../routes/types.js';
 
 // ============================================================================
 // Types for serializable results
@@ -92,17 +93,6 @@ export interface ExtractedHeritage {
   parentName: string;
   /** 'extends' | 'implements' | 'trait-impl' */
   kind: string;
-}
-
-export interface ExtractedRoute {
-  filePath: string;
-  httpMethod: string;
-  routePath: string | null;
-  controllerName: string | null;
-  methodName: string | null;
-  middleware: string[];
-  prefix: string | null;
-  lineNumber: number;
 }
 
 export interface ParseWorkerResult {

@@ -21,7 +21,8 @@ import {
 } from './utils.js';
 import { buildTypeEnv, lookupTypeEnv } from './type-env.js';
 import { getTreeSitterBufferSize } from './constants.js';
-import type { ExtractedCall, ExtractedRoute } from './workers/parse-worker.js';
+import type { ExtractedCall } from './workers/parse-worker.js';
+import type { ExtractedRoute } from './routes/types.js';
 import { normalizeContentForParsing } from './vue-sfc.js';
 
 /**
