@@ -35,9 +35,18 @@
 - git_diff_path (实际diff路径)
 - process_cwd (进程cwd)
 - path_resolution (cwd_worktree | registry_repo)
+- fallback_reason (different_repo | not_git_repo | repo_identity_unresolved | null)  # 新增
 ```
 
 这些字段让调试和审计变得透明，对用户和调用方都友好。
+
+**⚠️ 建议增强**: 增加 `fallback_reason` 字段，区分以下情况：
+- `different_repo`: cwd 在不同仓库中（common-dir 不匹配）
+- `not_git_repo`: cwd 不在任何 git 仓库内
+- `repo_identity_unresolved`: git 命令执行失败或其他异常
+- `null` (或省略): 未 fallback，正常使用 cwd_worktree
+
+这样可以仅凭元数据就定位问题，无需依赖 warning 字段。参考实现见 `detect-changes-handler.ts:31-43`。
 
 ### 4. 风险分析完整
 
@@ -58,23 +67,58 @@
 
 ## 🔶 建议改进
 
-### 1. 补充 git common dir 获取的具体实现建议
+### 0. ⚠️ [高] 明确 process.cwd() 的假设前提
 
-**问题**: Section 4.1 提到需要获取 git common dir，但没有说明具体命令。
+**问题**: 当前设计（以及现有实现 `detect-changes-handler.ts:64-66`）假设 `process.cwd()` 能代表"调用方当前工作目录"。但在 Claude/Codex 等 MCP 宿主中，MCP server 进程的 cwd 可能与用户实际工作目录不同。
 
-**建议**: 明确使用以下 git 命令：
-
-```bash
-# 获取 common dir（.git 或 ../.git/worktrees/xxx）
-git rev-parse --git-common-dir
-
-# 获取 worktree 根目录
-git rev-parse --show-toplevel
+**实测案例**:
+```
+detect_changes 元数据显示:
+  process_cwd: /opt/claude/mystocks_spec
+用户实际工作目录: /opt/claude/quantix-rust/.worktrees/phase27d-industry-blocklist-v3
 ```
 
-**边界情况处理**:
-- `process.cwd()` 不在任何 git 仓库内时，命令会失败
-- 需要捕获异常并 fallback
+**后果**: 即使 common-dir 判定逻辑正确，如果 server cwd 指向错误仓库，也会 fallback 到 registry 路径，无法命中"用户当前 worktree"。
+
+**建议**:
+1. **明确前提**: 在文档中声明此方案成立的条件：
+   > "宿主必须将 MCP server 的 cwd 绑定到调用方的当前工作目录"
+
+2. **或提供逃生舱**: 支持请求级 `cwd` / `worktree_hint` 参数：
+   ```typescript
+   detect_changes({
+     scope: "all",
+     cwd?: string,  // 可选：显式指定工作目录
+   })
+   ```
+
+3. **当前实现检查**: 确认 Claude Code 是否满足这个前提。如果不满足，需要修改设计。
+
+**参考代码位置**: `gitnexus/src/mcp/local/tools/handlers/detect-changes-handler.ts:64-66`
+
+### 1. 修正 git 命令语义说明
+
+**问题**: Design 文档 Section 4.1 已有命令示例，但对 `--git-common-dir` 和 `--git-dir` 的语义区分不够准确。
+
+**实测结果**:
+```bash
+# 主仓 (/opt/claude/quantix-rust)
+git rev-parse --git-common-dir  # → .git
+git rev-parse --git-dir         # → .git
+
+# Worktree (/opt/claude/quantix-rust/.worktrees/phase27d-industry-blocklist-v3)
+git rev-parse --git-common-dir  # → /opt/claude/quantix-rust/.git
+git rev-parse --git-dir         # → /opt/claude/quantix-rust/.git/worktrees/phase27d-industry-blocklist-v3
+```
+
+**⚠️ 重要区分**:
+| 命令 | 主仓 | Worktree | 用途 |
+|------|------|----------|------|
+| `--git-common-dir` | `.git` | `/opt/claude/quantix-rust/.git` | 判断"是否同一仓库" |
+| `--git-dir` | `.git` | `/.../.git/worktrees/xxx` | 判断"哪个 worktree" |
+| `--show-toplevel` | `/path/to/main` | `/path/to/worktree` | git diff 路径 |
+
+**关键点**: `--git-common-dir` 用于判断"仓库共享身份"，`--git-dir` 用于判断"具体 worktree 管理目录"，两者不能混淆。
 
 ### 2. 考虑性能影响
 
