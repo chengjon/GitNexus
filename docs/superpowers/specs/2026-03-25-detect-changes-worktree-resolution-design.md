@@ -66,6 +66,17 @@ Introduce a small helper local to the `detect_changes` path, or a tiny git helpe
 
 The key comparison should be based on git identity, not only string prefix checks on filesystem paths.
 
+Recommended git commands:
+
+- `git rev-parse --git-common-dir`
+- `git rev-parse --show-toplevel`
+
+Expected failure mode:
+
+- if `process.cwd()` is not inside a git repository, these commands will fail
+- the handler must catch that failure and fall back to the registry-backed `repoPath`
+- git resolution failure is not itself a hard error for `detect_changes`
+
 ### 4.2 Matching Rule
 
 Two paths should be treated as the same repository when they share the same git common directory.
@@ -76,6 +87,16 @@ This matters because:
 - but they share the same common git storage
 
 That gives a much safer signal than comparing only `repoPath` strings.
+
+More precise boundary definition:
+
+| Scenario | Expected behavior |
+|----------|-------------------|
+| `process.cwd()` is the worktree root | use worktree path |
+| `process.cwd()` is a deep child of the worktree | use worktree path |
+| `process.cwd()` is not inside any git repo | fall back to registry `repoPath`, no warning |
+| `process.cwd()` is inside a different git repo | fall back to registry `repoPath`, warning |
+| git identity commands fail | fall back to registry `repoPath`, warning only when ambiguity exists |
 
 ### 4.3 Output Metadata
 
@@ -108,7 +129,22 @@ Warn only when:
 
 Do not warn merely because `process.cwd()` and `repoPath` differ as plain paths. That is too noisy for long-running MCP processes.
 
-## 5. Scope Semantics
+## 5. Performance
+
+This design adds a small amount of git-path discovery work to each `detect_changes` call.
+
+Recommended choice for the first implementation:
+
+- accept the extra git command cost
+- do not add caching yet
+
+Rationale:
+
+- the expected cost of `git rev-parse` is small compared with the correctness problem being fixed
+- caching would add state and invalidation complexity to a handler that is currently easy to reason about
+- if performance becomes measurable later, caching can be introduced as a follow-up
+
+## 6. Scope Semantics
 
 The fix must not change existing `scope` behavior.
 
@@ -123,9 +159,9 @@ These modes remain exactly the same:
 
 The only behavior change is which working tree path git commands run in.
 
-## 6. Testing Strategy
+## 7. Testing Strategy
 
-### 6.1 Unit / Handler-Level Coverage
+### 7.1 Unit / Handler-Level Coverage
 
 Add focused tests for:
 
@@ -138,7 +174,17 @@ Add focused tests for:
 - metadata fields are accurate
   especially `git_diff_path` and `path_resolution`
 
-### 6.2 Existing Contract Preservation
+### 7.2 Boundary Coverage
+
+Add focused tests for:
+
+- `process.cwd()` inside a deep subdirectory of the matching worktree
+- git resolution command failure
+- worktree paths containing spaces or other path characters that often reveal quoting issues
+
+Concurrency-specific behavior does not need a dedicated test in this slice unless implementation introduces shared mutable state.
+
+### 7.3 Existing Contract Preservation
 
 Retain tests for:
 
@@ -147,7 +193,7 @@ Retain tests for:
 - summary shape
 - changed symbol / affected process structure
 
-### 6.3 Non-Goals for This Slice
+### 7.4 Non-Goals for This Slice
 
 This fix does not attempt to:
 
@@ -156,7 +202,30 @@ This fix does not attempt to:
 - change risk-level formulas
 - change `impact` or `rename`
 
-## 7. Risks
+## 8. User-Visible Changes
+
+### 8.1 For Worktree Users
+
+- `detect_changes` will diff the active worktree when GitNexus is run from within that worktree
+- the tool should no longer incorrectly report “No changes detected” just because the registry path points at the main checkout
+
+### 8.2 For Non-Worktree Users
+
+- behavior remains unchanged
+- the handler will continue to use the registry-backed repo path
+
+### 8.3 New Metadata
+
+Expected additive metadata fields:
+
+- `git_repo_path`
+- `git_diff_path`
+- `process_cwd`
+- `path_resolution`
+
+These fields exist to explain path choice, not to change tool semantics.
+
+## 9. Risks
 
 ### Risk 1: Over-detecting unrelated git repositories
 
@@ -184,7 +253,7 @@ Mitigation:
 
 - warn only on meaningful ambiguity or forced fallback
 
-## 8. Success Criteria
+## 10. Success Criteria
 
 This slice is successful when:
 
@@ -194,7 +263,7 @@ This slice is successful when:
 - warnings only appear for real ambiguity/fallback situations
 - existing `scope` tests stay green
 
-## 9. Recommendation
+## 11. Recommendation
 
 Implement this as a small targeted correctness fix in `detect_changes`, not as a broader registry redesign.
 
