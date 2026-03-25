@@ -413,11 +413,64 @@ describe('LocalBackend.callTool', () => {
         git_repo_path: '/tmp/test-project',
         git_diff_path: '/tmp/test-project',
         path_resolution: 'registry_repo',
+        fallback_reason: 'not_git_repo',
         process_cwd: expect.any(String),
         scope: 'unstaged',
       }),
     }));
     expect(result.warnings).toBeUndefined();
+  });
+
+  it('detect_changes prefers explicit cwd over process.cwd()', async () => {
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/server-default');
+    vi.mocked(getGitIdentity).mockImplementation((input: string) => {
+      if (input === '/tmp/worktrees/feature/src') {
+        return {
+          topLevel: '/tmp/worktrees/feature',
+          commonDir: '/tmp/test-project/.git',
+        } as any;
+      }
+      if (input === '/tmp/test-project') {
+        return {
+          topLevel: '/tmp/test-project',
+          commonDir: '/tmp/test-project/.git',
+        } as any;
+      }
+      if (input === '/tmp/server-default') {
+        return {
+          topLevel: '/tmp/server-default',
+          commonDir: '/tmp/other-repo/.git',
+        } as any;
+      }
+      return null as any;
+    });
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+    try {
+      const result = await backend.callTool('detect_changes', {
+        scope: 'unstaged',
+        cwd: '/tmp/worktrees/feature/src',
+      });
+
+      expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+        'git',
+        ['diff', '--name-only'],
+        expect.objectContaining({
+          cwd: '/tmp/worktrees/feature',
+          encoding: 'utf-8',
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({
+        metadata: expect.objectContaining({
+          process_cwd: '/tmp/worktrees/feature/src',
+          git_diff_path: '/tmp/worktrees/feature',
+          path_resolution: 'cwd_worktree',
+          fallback_reason: null,
+        }),
+      }));
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 
   it('detect_changes compare scope requires base_ref', async () => {
@@ -437,6 +490,7 @@ describe('LocalBackend.callTool', () => {
         git_repo_path: '/tmp/test-project',
         git_diff_path: '/tmp/test-project',
         path_resolution: 'registry_repo',
+        fallback_reason: 'not_git_repo',
         process_cwd: expect.any(String),
         scope: 'unstaged',
       }),
@@ -471,6 +525,7 @@ describe('LocalBackend.callTool', () => {
         git_repo_path: '/tmp/test-project',
         git_diff_path: '/tmp/worktrees/feature',
         path_resolution: 'cwd_worktree',
+        fallback_reason: null,
       }),
     }));
   });
@@ -502,6 +557,7 @@ describe('LocalBackend.callTool', () => {
         git_repo_path: '/tmp/test-project',
         git_diff_path: '/tmp/test-project',
         path_resolution: 'registry_repo',
+        fallback_reason: 'different_repo',
       }),
       warnings: expect.arrayContaining([
         expect.stringContaining('different git repository'),

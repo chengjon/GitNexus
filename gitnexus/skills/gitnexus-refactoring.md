@@ -33,6 +33,7 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 - [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
 - [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
 - [ ] gitnexus_detect_changes() — verify only expected files changed
+- [ ] In worktrees, pass `cwd` explicitly if the MCP server may be running elsewhere
 - [ ] Run tests for affected processes
 ```
 
@@ -87,6 +88,15 @@ gitnexus_detect_changes({scope: "all"})
 → Risk: MEDIUM
 ```
 
+Worktree example:
+
+```
+gitnexus_detect_changes({
+  scope: "all",
+  cwd: "/path/to/repo/.worktrees/refactor-branch"
+})
+```
+
 **gitnexus_cypher** — custom reference queries:
 
 ```cypher
@@ -115,7 +125,7 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
 3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
    → Applied 12 edits across 8 files
 
-4. gitnexus_detect_changes({scope: "all"})
+4. gitnexus_detect_changes({scope: "all", cwd: "/path/to/repo/.worktrees/refactor-branch"})
    → Affected: LoginFlow, TokenRefresh
    → Risk: MEDIUM — run tests for these flows
 ```

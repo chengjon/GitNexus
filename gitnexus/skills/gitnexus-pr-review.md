@@ -33,6 +33,7 @@ description: "Use when the user wants to review a pull request, understand what 
 ```
 - [ ] Fetch PR diff (gh pr diff or git diff base...head)
 - [ ] gitnexus_detect_changes to map changes to affected execution flows
+- [ ] In worktrees, pass `cwd` explicitly if the MCP server may not be in the PR worktree
 - [ ] gitnexus_impact on each non-trivial changed symbol
 - [ ] Review d=1 items (WILL BREAK) — are callers updated?
 - [ ] gitnexus_context on key changed symbols to understand full picture
@@ -71,6 +72,16 @@ gitnexus_detect_changes({scope: "compare", base_ref: "main"})
 → Changed: 8 symbols in 4 files
 → Affected processes: CheckoutFlow, RefundFlow, WebhookHandler
 → Risk: MEDIUM
+```
+
+Worktree example:
+
+```
+gitnexus_detect_changes({
+  scope: "compare",
+  base_ref: "main",
+  cwd: "/path/to/repo/.worktrees/pr-42"
+})
 ```
 
 **gitnexus_impact** — blast radius per changed symbol:
@@ -112,7 +123,7 @@ gitnexus_context({name: "validatePayment"})
 1. gh pr diff 42 > /tmp/pr42.diff
    → 4 files changed: payments.ts, checkout.ts, types.ts, utils.ts
 
-2. gitnexus_detect_changes({scope: "compare", base_ref: "main"})
+2. gitnexus_detect_changes({scope: "compare", base_ref: "main", cwd: "/path/to/repo/.worktrees/pr-42"})
    → Changed symbols: validatePayment, PaymentInput, formatAmount
    → Affected processes: CheckoutFlow, RefundFlow
    → Risk: MEDIUM

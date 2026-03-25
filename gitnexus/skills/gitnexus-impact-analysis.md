@@ -33,6 +33,7 @@ description: "Use when the user wants to know what will break if they change som
 - [ ] Check high-confidence (>0.8) dependencies
 - [ ] READ processes to check affected execution flows
 - [ ] gitnexus_detect_changes() for pre-commit check
+- [ ] If working in a git worktree or MCP server cwd may differ, pass `cwd`
 - [ ] Assess risk level and report to user
 ```
 
@@ -82,6 +83,17 @@ gitnexus_detect_changes({scope: "staged"})
 → Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
 → Risk: MEDIUM
 ```
+
+Worktree / MCP server note:
+
+```
+gitnexus_detect_changes({
+  scope: "staged",
+  cwd: "/path/to/repo/.worktrees/feature-branch"
+})
+```
+
+Use `cwd` when the MCP server `process.cwd()` may not match the active worktree.
 
 ## Example: "What breaks if I change validateUser?"
 

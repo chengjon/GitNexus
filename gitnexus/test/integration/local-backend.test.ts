@@ -393,8 +393,61 @@ withTestKuzuDB('local-backend', (handle) => {
           git_repo_path: '/tmp/repo-under-test',
           git_diff_path: '/tmp/repo-worktrees/feature',
           path_resolution: 'cwd_worktree',
+          fallback_reason: null,
         }),
       }));
+    });
+
+    it('runDetectChangesTool uses explicit cwd over process.cwd()', async () => {
+      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/server-default');
+      vi.mocked(getGitIdentity).mockImplementation((input: string) => {
+        if (input === '/tmp/repo-worktrees/feature/src') {
+          return {
+            topLevel: '/tmp/repo-worktrees/feature',
+            commonDir: '/tmp/repo-under-test/.git',
+          } as any;
+        }
+        if (input === '/tmp/repo-under-test') {
+          return {
+            topLevel: '/tmp/repo-under-test',
+            commonDir: '/tmp/repo-under-test/.git',
+          } as any;
+        }
+        if (input === '/tmp/server-default') {
+          return {
+            topLevel: '/tmp/server-default',
+            commonDir: '/tmp/other-repo/.git',
+          } as any;
+        }
+        return null as any;
+      });
+      vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+      try {
+        const result = await runDetectChangesTool(createHandlerContext('/tmp/repo-under-test') as any, {
+          scope: 'unstaged',
+          cwd: '/tmp/repo-worktrees/feature/src',
+        });
+
+        expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+          'git',
+          ['diff', '--name-only'],
+          expect.objectContaining({
+            cwd: '/tmp/repo-worktrees/feature',
+            encoding: 'utf-8',
+          }),
+        );
+        expect(result).toEqual(expect.objectContaining({
+          metadata: expect.objectContaining({
+            process_cwd: '/tmp/repo-worktrees/feature/src',
+            git_diff_path: '/tmp/repo-worktrees/feature',
+            path_resolution: 'cwd_worktree',
+            fallback_reason: null,
+          }),
+        }));
+      } finally {
+        cwdSpy.mockRestore();
+      }
     });
 
     it('runDetectChangesTool falls back with warning when cwd belongs to a different git repo', async () => {
@@ -418,6 +471,7 @@ withTestKuzuDB('local-backend', (handle) => {
           git_repo_path: '/tmp/repo-under-test',
           git_diff_path: '/tmp/repo-under-test',
           path_resolution: 'registry_repo',
+          fallback_reason: 'different_repo',
         }),
         warnings: expect.arrayContaining([
           expect.stringContaining('different git repository'),
