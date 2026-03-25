@@ -24,6 +24,14 @@ vi.mock('../../src/storage/repo-manager.js', () => ({
   listRegisteredRepos: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('../../src/storage/git.js', () => ({
+  isGitRepo: vi.fn(),
+  getCurrentCommit: vi.fn(),
+  getGitRoot: vi.fn(),
+  getGitCommonDir: vi.fn(),
+  getGitIdentity: vi.fn(),
+}));
+
 // Also mock the search modules to avoid loading onnxruntime
 vi.mock('../../src/core/search/bm25-index.js', () => ({
   searchFTSFromKuzu: vi.fn().mockResolvedValue([]),
@@ -46,6 +54,7 @@ import {
 } from '../../src/mcp/local/tools/shared/query-safety.js';
 import { formatCypherAsMarkdown } from '../../src/mcp/local/tools/shared/cypher-format.js';
 import { searchFTSFromKuzu } from '../../src/core/search/bm25-index.js';
+import { getGitIdentity } from '../../src/storage/git.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 import { initKuzu, executeQuery, executeParameterized, isKuzuReady, closeKuzu } from '../../src/mcp/core/kuzu-adapter.js';
 import { execFileSync } from 'child_process';
@@ -394,7 +403,7 @@ describe('LocalBackend.callTool', () => {
     }));
   });
 
-  it('detect_changes reports git execution path metadata and warnings for cwd mismatch', async () => {
+  it('detect_changes reports git execution path metadata without warning for non-git cwd fallback', async () => {
     vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
 
     const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
@@ -402,13 +411,13 @@ describe('LocalBackend.callTool', () => {
     expect(result).toEqual(expect.objectContaining({
       metadata: expect.objectContaining({
         git_repo_path: '/tmp/test-project',
+        git_diff_path: '/tmp/test-project',
+        path_resolution: 'registry_repo',
         process_cwd: expect.any(String),
         scope: 'unstaged',
       }),
-      warnings: expect.arrayContaining([
-        expect.stringContaining('/tmp/test-project'),
-      ]),
     }));
+    expect(result.warnings).toBeUndefined();
   });
 
   it('detect_changes compare scope requires base_ref', async () => {
@@ -426,10 +435,77 @@ describe('LocalBackend.callTool', () => {
       error: 'Git diff failed: fatal: not a git repository',
       metadata: expect.objectContaining({
         git_repo_path: '/tmp/test-project',
+        git_diff_path: '/tmp/test-project',
+        path_resolution: 'registry_repo',
         process_cwd: expect.any(String),
         scope: 'unstaged',
       }),
-      warnings: expect.any(Array),
+    }));
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it('detect_changes prefers the active matching worktree path', async () => {
+    vi.mocked(getGitIdentity)
+      .mockReturnValueOnce({
+        topLevel: '/tmp/worktrees/feature',
+        commonDir: '/tmp/test-project/.git',
+      } as any)
+      .mockReturnValueOnce({
+        topLevel: '/tmp/test-project',
+        commonDir: '/tmp/test-project/.git',
+      } as any);
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+    const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
+
+    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--name-only'],
+      expect.objectContaining({
+        cwd: '/tmp/worktrees/feature',
+        encoding: 'utf-8',
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        git_repo_path: '/tmp/test-project',
+        git_diff_path: '/tmp/worktrees/feature',
+        path_resolution: 'cwd_worktree',
+      }),
+    }));
+  });
+
+  it('detect_changes falls back to registry repo path when cwd is in a different repo', async () => {
+    vi.mocked(getGitIdentity)
+      .mockReturnValueOnce({
+        topLevel: '/tmp/other-repo',
+        commonDir: '/tmp/other-repo/.git',
+      } as any)
+      .mockReturnValueOnce({
+        topLevel: '/tmp/test-project',
+        commonDir: '/tmp/test-project/.git',
+      } as any);
+    vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+    const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
+
+    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--name-only'],
+      expect.objectContaining({
+        cwd: '/tmp/test-project',
+        encoding: 'utf-8',
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        git_repo_path: '/tmp/test-project',
+        git_diff_path: '/tmp/test-project',
+        path_resolution: 'registry_repo',
+      }),
+      warnings: expect.arrayContaining([
+        expect.stringContaining('different git repository'),
+      ]),
     }));
   });
 

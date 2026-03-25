@@ -1,10 +1,56 @@
 import path from 'path';
 import { executeParameterized } from '../../../core/kuzu-adapter.js';
+import { getGitIdentity } from '../../../../storage/git.js';
 import type { ToolContext } from '../tool-context.js';
 
 export interface DetectChangesToolParams {
   scope?: string;
   base_ref?: string;
+}
+
+function resolveGitDiffPath(
+  repoPath: string,
+  processCwd: string,
+): {
+  gitDiffPath: string;
+  pathResolution: 'cwd_worktree' | 'registry_repo';
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const cwdIdentity = getGitIdentity(processCwd);
+  const repoIdentity = getGitIdentity(repoPath);
+
+  if (cwdIdentity && repoIdentity && cwdIdentity.commonDir === repoIdentity.commonDir) {
+    return {
+      gitDiffPath: cwdIdentity.topLevel,
+      pathResolution: 'cwd_worktree',
+      warnings,
+    };
+  }
+
+  if (cwdIdentity && repoIdentity && cwdIdentity.commonDir !== repoIdentity.commonDir) {
+    warnings.push(
+      `Git operations fell back to '${repoPath}' because process cwd '${processCwd}' is inside a different git repository.`,
+    );
+  } else if (!cwdIdentity && isAbsolutePathDifferent(repoPath, processCwd)) {
+    // Non-git cwd is a normal case; fall back silently.
+  } else if (!repoIdentity) {
+    warnings.push(
+      `Git identity could not be resolved for indexed repo path '${repoPath}'. Falling back to registry repo path.`,
+    );
+  } else if (!cwdIdentity && repoIdentity && processCwd !== repoPath) {
+    // No warning for non-git cwd fallback.
+  }
+
+  return {
+    gitDiffPath: repoPath,
+    pathResolution: 'registry_repo',
+    warnings,
+  };
+}
+
+function isAbsolutePathDifferent(left: string, right: string): boolean {
+  return path.resolve(left) !== path.resolve(right);
 }
 
 /**
@@ -17,20 +63,18 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
   const scope = params.scope || 'unstaged';
   const gitRepoPath = ctx.repo.repoPath;
   const processCwd = process.cwd();
+  const pathResolution = resolveGitDiffPath(gitRepoPath, processCwd);
   const metadata: Record<string, any> = {
     git_repo_path: gitRepoPath,
+    git_diff_path: pathResolution.gitDiffPath,
     process_cwd: processCwd,
+    path_resolution: pathResolution.pathResolution,
     scope,
   };
   if (params.base_ref) {
     metadata.base_ref = params.base_ref;
   }
-  const warnings: string[] = [];
-  if (path.resolve(gitRepoPath) !== path.resolve(processCwd)) {
-    warnings.push(
-      `Git operations ran in '${gitRepoPath}' instead of process cwd '${processCwd}'. In git worktrees this can affect which working tree is diffed.`,
-    );
-  }
+  const warnings = [...pathResolution.warnings];
   const { execFileSync } = await import('child_process');
 
   // Build git diff args based on scope (using execFileSync to avoid shell injection)
@@ -54,7 +98,7 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
 
   let changedFiles: string[];
   try {
-    const output = execFileSync('git', diffArgs, { cwd: gitRepoPath, encoding: 'utf-8' });
+    const output = execFileSync('git', diffArgs, { cwd: pathResolution.gitDiffPath, encoding: 'utf-8' });
     changedFiles = output.trim().split('\n').filter((f) => f.length > 0);
   } catch (err: any) {
     return { error: `Git diff failed: ${err.message}`, metadata, ...(warnings.length > 0 ? { warnings } : {}) };
@@ -74,7 +118,7 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
   const changedSymbols: any[] = [];
   for (const file of changedFiles) {
     const normalizedFile = file.replace(/\\/g, '/').replace(/^\.\//, '');
-    const absoluteFile = path.resolve(gitRepoPath, normalizedFile).replace(/\\/g, '/');
+    const absoluteFile = path.resolve(pathResolution.gitDiffPath, normalizedFile).replace(/\\/g, '/');
     const exactCandidates = Array.from(new Set([normalizedFile, absoluteFile]));
     try {
       let symbols = await executeParameterized(ctx.repo.id, `
@@ -96,7 +140,7 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
 
       for (const sym of symbols) {
         const symbolPath = String(sym.filePath || sym[3] || '').replace(/\\/g, '/').replace(/^\.\//, '');
-        const absoluteSymbolPath = path.resolve(gitRepoPath, symbolPath).replace(/\\/g, '/');
+        const absoluteSymbolPath = path.resolve(pathResolution.gitDiffPath, symbolPath).replace(/\\/g, '/');
         const suffixMatch = symbolPath === normalizedFile || symbolPath.endsWith(`/${normalizedFile}`);
         if (!exactCandidates.includes(symbolPath) && !exactCandidates.includes(absoluteSymbolPath) && !suffixMatch) continue;
         changedSymbols.push({
