@@ -6,7 +6,10 @@ import type { ToolContext } from '../tool-context.js';
 export interface DetectChangesToolParams {
   scope?: string;
   base_ref?: string;
+  cwd?: string;  // Optional: explicit working directory for git operations
 }
+
+export type FallbackReason = 'different_repo' | 'not_git_repo' | 'repo_identity_unresolved' | null;
 
 function resolveGitDiffPath(
   repoPath: string,
@@ -14,6 +17,7 @@ function resolveGitDiffPath(
 ): {
   gitDiffPath: string;
   pathResolution: 'cwd_worktree' | 'registry_repo';
+  fallbackReason: FallbackReason;
   warnings: string[];
 } {
   const warnings: string[] = [];
@@ -24,27 +28,35 @@ function resolveGitDiffPath(
     return {
       gitDiffPath: cwdIdentity.topLevel,
       pathResolution: 'cwd_worktree',
+      fallbackReason: null,
       warnings,
     };
   }
 
+  // Determine fallback reason
+  let fallbackReason: FallbackReason = null;
   if (cwdIdentity && repoIdentity && cwdIdentity.commonDir !== repoIdentity.commonDir) {
+    fallbackReason = 'different_repo';
     warnings.push(
       `Git operations fell back to '${repoPath}' because process cwd '${processCwd}' is inside a different git repository.`,
     );
   } else if (!cwdIdentity && isAbsolutePathDifferent(repoPath, processCwd)) {
+    fallbackReason = 'not_git_repo';
     // Non-git cwd is a normal case; fall back silently.
   } else if (!repoIdentity) {
+    fallbackReason = 'repo_identity_unresolved';
     warnings.push(
       `Git identity could not be resolved for indexed repo path '${repoPath}'. Falling back to registry repo path.`,
     );
   } else if (!cwdIdentity && repoIdentity && processCwd !== repoPath) {
+    fallbackReason = 'not_git_repo';
     // No warning for non-git cwd fallback.
   }
 
   return {
     gitDiffPath: repoPath,
     pathResolution: 'registry_repo',
+    fallbackReason,
     warnings,
   };
 }
@@ -62,13 +74,15 @@ export async function runDetectChangesTool(ctx: ToolContext, params: DetectChang
 
   const scope = params.scope || 'unstaged';
   const gitRepoPath = ctx.repo.repoPath;
-  const processCwd = process.cwd();
+  // Use explicit cwd if provided, otherwise fall back to process.cwd()
+  const processCwd = params.cwd || process.cwd();
   const pathResolution = resolveGitDiffPath(gitRepoPath, processCwd);
   const metadata: Record<string, any> = {
     git_repo_path: gitRepoPath,
     git_diff_path: pathResolution.gitDiffPath,
     process_cwd: processCwd,
     path_resolution: pathResolution.pathResolution,
+    fallback_reason: pathResolution.fallbackReason,
     scope,
   };
   if (params.base_ref) {
