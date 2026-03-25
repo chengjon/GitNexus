@@ -32,6 +32,7 @@ import {
 } from '../../src/mcp/local/tools/shared/query-safety.js';
 import { runImpactTool } from '../../src/mcp/local/tools/handlers/impact-handler.js';
 import { runDetectChangesTool } from '../../src/mcp/local/tools/handlers/detect-changes-handler.js';
+import { getGitIdentity } from '../../src/storage/git.js';
 import { withTestKuzuDB } from '../helpers/test-indexed-db.js';
 import { LOCAL_BACKEND_SEED_DATA } from '../fixtures/local-backend-seed.js';
 import { execFileSync } from 'child_process';
@@ -39,6 +40,14 @@ import { execFileSync } from 'child_process';
 vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
+
+vi.mock('../../src/storage/git.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/storage/git.js')>('../../src/storage/git.js');
+  return {
+    ...actual,
+    getGitIdentity: vi.fn(),
+  };
+});
 
 // ─── Block 1: Pool adapter tests ─────────────────────────────────────
 
@@ -313,6 +322,12 @@ withTestKuzuDB('local-backend', (handle) => {
     });
 
     it('runDetectChangesTool uses compare scope git args and returns summary shape', async () => {
+      vi.mocked(getGitIdentity)
+        .mockReturnValueOnce(null as any)
+        .mockReturnValueOnce({
+          topLevel: '/tmp/repo-under-test',
+          commonDir: '/tmp/repo-under-test/.git',
+        } as any);
       vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
 
       const repoPath = '/tmp/repo-under-test';
@@ -338,15 +353,75 @@ withTestKuzuDB('local-backend', (handle) => {
         }),
         metadata: expect.objectContaining({
           git_repo_path: repoPath,
+          git_diff_path: repoPath,
+          path_resolution: 'registry_repo',
           process_cwd: expect.any(String),
           scope: 'compare',
           base_ref: 'main',
         }),
-        warnings: expect.arrayContaining([
-          expect.stringContaining(repoPath),
-        ]),
         changed_symbols: expect.any(Array),
         affected_processes: expect.any(Array),
+      }));
+    });
+
+    it('runDetectChangesTool prefers a matching worktree top-level when cwd is inside it', async () => {
+      vi.mocked(getGitIdentity)
+        .mockReturnValueOnce({
+          topLevel: '/tmp/repo-worktrees/feature',
+          commonDir: '/tmp/repo-under-test/.git',
+        } as any)
+        .mockReturnValueOnce({
+          topLevel: '/tmp/repo-under-test',
+          commonDir: '/tmp/repo-under-test/.git',
+        } as any);
+      vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+      const result = await runDetectChangesTool(createHandlerContext('/tmp/repo-under-test') as any, {
+        scope: 'unstaged',
+      });
+
+      expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+        'git',
+        ['diff', '--name-only'],
+        expect.objectContaining({
+          cwd: '/tmp/repo-worktrees/feature',
+          encoding: 'utf-8',
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({
+        metadata: expect.objectContaining({
+          git_repo_path: '/tmp/repo-under-test',
+          git_diff_path: '/tmp/repo-worktrees/feature',
+          path_resolution: 'cwd_worktree',
+        }),
+      }));
+    });
+
+    it('runDetectChangesTool falls back with warning when cwd belongs to a different git repo', async () => {
+      vi.mocked(getGitIdentity)
+        .mockReturnValueOnce({
+          topLevel: '/tmp/other-repo',
+          commonDir: '/tmp/other-repo/.git',
+        } as any)
+        .mockReturnValueOnce({
+          topLevel: '/tmp/repo-under-test',
+          commonDir: '/tmp/repo-under-test/.git',
+        } as any);
+      vi.mocked(execFileSync).mockReturnValue('src/auth.ts\n' as any);
+
+      const result = await runDetectChangesTool(createHandlerContext('/tmp/repo-under-test') as any, {
+        scope: 'unstaged',
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        metadata: expect.objectContaining({
+          git_repo_path: '/tmp/repo-under-test',
+          git_diff_path: '/tmp/repo-under-test',
+          path_resolution: 'registry_repo',
+        }),
+        warnings: expect.arrayContaining([
+          expect.stringContaining('different git repository'),
+        ]),
       }));
     });
 
