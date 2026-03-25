@@ -38,6 +38,69 @@ https://github.com/user-attachments/assets/172685ba-8e54-4ea7-9ad1-e31a3398da72
 
 ---
 
+## Recent Major Updates
+
+GitNexus has gone through several substantial upgrade waves recently. The current state is materially stronger in runtime stability, MCP reliability, and codebase architecture than the earlier 1.4-era baseline.
+
+### 1. Native Runtime and Test-Foundation Stabilization
+
+- Introduced a centralized native runtime manager for Kuzu / embedder lifecycle policy
+- Split unit vs integration Vitest configs so native suites run under explicit constraints
+- Improved `doctor` diagnostics to surface runtime and language-support status
+- Reduced reliance on broad native-error suppression in tests and CI
+
+### 2. `LocalBackend` Handler-First Refactor
+
+- Broke up the old monolithic `gitnexus/src/mcp/local/local-backend.ts`
+- Added explicit seams:
+  - `runtime/` for repo discovery + Kuzu lifecycle
+  - `tools/handlers/` for tool behavior
+  - `tools/shared/` for query safety and formatting helpers
+  - `tool-context` / `tool-registry` for dispatch
+- Extracted handlers for:
+  - `query`
+  - `cypher`
+  - `context`
+  - `overview`
+  - `impact`
+  - `detect_changes`
+  - `rename`
+
+This refactor was not only structural: it also added regression coverage and several correctness hardening passes while the code was being split.
+
+### 3. `detect_changes` Worktree-Aware Git Resolution
+
+- `detect_changes` now supports an explicit `cwd` parameter
+- The tool now reports richer path metadata, including which path was actually used for `git diff`
+- Fallback reasons are explicit, so worktree ambiguity is diagnosable instead of silent
+- Worktree limitations are now surfaced in output instead of being buried as implicit behavior
+
+### 4. Safer MCP and Refactor Workflows
+
+- `gitnexus analyze` now auto-stops local `gitnexus mcp` holders that are blocking `.gitnexus/kuzu`
+- MCP lifecycle handling was improved to reduce orphaned local MCP processes on client disconnect
+- Rename flow was hardened:
+  - better path-traversal handling
+  - clearer warning surfaces when text-search coverage is skipped
+  - stronger preview/apply consistency
+  - less optimistic confidence labeling
+- Cypher formatting and validation were hardened so malformed inputs and table-breaking output are handled more safely
+
+### 5. Embeddings Ergonomics
+
+- Embeddings config can be stored in `~/.gitnexus/config.json`
+- Added `gitnexus config embeddings show|set|clear`
+- Improved local Ollama workflow guidance and embedding progress visibility
+
+If you are upgrading from an older checkout, the most important practical difference is this:
+
+- the MCP/CLI surface is more explicit and diagnosable
+- local indexing/runtime behavior is more stable
+- large internal MCP codepaths are now easier to change safely
+- `detect_changes` and `rename` are safer to trust in real development workflows
+
+---
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=abhigyanpatwari/GitNexus&type=date&legend=top-left)](https://www.star-history.com/#abhigyanpatwari/GitNexus&type=date&legend=top-left)

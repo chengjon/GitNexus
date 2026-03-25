@@ -6,6 +6,9 @@ All notable changes to GitNexus will be documented in this file.
 
 ### Added
 
+- `detect_changes` now accepts an explicit `cwd` parameter for git operations, making worktree-aware usage possible from MCP/CLI hosts whose `process.cwd()` does not reflect the user’s active worktree.
+- `detect_changes` responses now include richer metadata such as the git repo path, actual git diff path, process cwd, path-resolution mode, and structured fallback reasons.
+- New git identity helpers in `src/storage/git.ts` for resolving git top-level and git common-dir identity.
 - Embeddings configuration can now be stored in `~/.gitnexus/config.json` under an `embeddings` block instead of requiring shell env vars for every run.
 - New `gitnexus config embeddings` CLI commands:
   - `gitnexus config embeddings show`
@@ -13,12 +16,49 @@ All notable changes to GitNexus will be documented in this file.
   - `gitnexus config embeddings clear`
 - Ollama embeddings support for both indexing and MCP query embeddings, with verified local workflow using `qwen3-embedding:0.6b`.
 - Embedding progress reporting now includes embeddable node count, batch count, throughput, provider, and model.
+- New runtime/dispatch seams for the local MCP backend:
+  - `src/mcp/local/runtime/backend-runtime.ts`
+  - `src/mcp/local/tools/tool-context.ts`
+  - `src/mcp/local/tools/tool-registry.ts`
+- New handler modules for:
+  - `query`
+  - `cypher`
+  - `context`
+  - `overview`
+  - `impact`
+  - `detect_changes`
+  - `rename`
+- New shared local-MCP helper modules for query safety, cypher formatting, and cluster aggregation.
+- New targeted regression coverage for LocalBackend dispatch, handler extraction, cypher formatting boundaries, detect_changes worktree behavior, and rename preview/apply parity.
 
 ### Changed
 
+- `src/mcp/local/local-backend.ts` was refactored from a large monolithic implementation into a thin facade over runtime, registry, handlers, and shared helper modules.
+- `detect_changes` now resolves git diff execution paths more explicitly and surfaces worktree ambiguity as metadata/warnings rather than silent behavior.
+- `detect_changes` symbol matching was tightened from broad substring-style path matching toward exact-path-first matching with a safer fallback path.
+- Local rename behavior is now more explicit and safer:
+  - dry-run/apply semantics are aligned
+  - graph-covered files collect all matching lines needed for complete application
+  - broad same-file matches are downgraded from optimistic `graph` confidence to lower-confidence classifications
+  - skipped text-search coverage is surfaced additively to callers
+- Cypher tool behavior is stricter and safer:
+  - invalid/blank queries now return structured errors
+  - markdown formatting escapes table-breaking characters
+  - unexpected row shapes fall back more safely instead of throwing through the tool boundary
+- Query semantic-search probing now uses a non-aggregating embedding existence check instead of a `COUNT(*)` scan.
+- `query.process_symbols` is now explicitly documented and tested as unique-by-symbol-id in the current contract.
 - Embedding gating now uses embeddable node count instead of total graph node count.
 - `analyze --force --embeddings` now prints a follow-up hint recommending incremental refreshes without `--force` when embeddings already exist.
 - README, CLI skills, and generated AI context now document incremental embedding refreshes, local Ollama GPU setup guidance, and a `batchSize=64` starting point for local GPU workflows.
+
+### Fixed
+
+- Native runtime lifecycle handling and test infrastructure were stabilized through centralized runtime policy and split Vitest configurations.
+- `gitnexus analyze` now automatically stops local `gitnexus mcp` processes that are holding the target repo’s `.gitnexus/kuzu` file open, reducing Kuzu lock conflicts in multi-session usage.
+- MCP lifecycle handling was improved to reduce orphaned local MCP processes on client disconnect.
+- `impact` now coerces and sanitizes `minConfidence` before Cypher interpolation, and preserves real `0` confidence values instead of rewriting them through truthy fallback behavior.
+- Rename path traversal violations are now surfaced as user-visible errors instead of log-only continuation.
+- Repo IDs for same-name repositories are now assigned deterministically, avoiding refresh-order instability in long-lived multi-repo MCP sessions.
 
 ## [1.4.0] - 2026-03-13
 
