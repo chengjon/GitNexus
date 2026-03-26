@@ -38,7 +38,6 @@ import {
 
 import {
   GROUPING_SYSTEM_PROMPT,
-  GROUPING_USER_PROMPT,
   MODULE_SYSTEM_PROMPT,
   MODULE_USER_PROMPT,
   PARENT_SYSTEM_PROMPT,
@@ -46,14 +45,17 @@ import {
   OVERVIEW_SYSTEM_PROMPT,
   OVERVIEW_USER_PROMPT,
   fillTemplate,
-  formatFileListForGrouping,
-  formatDirectoryTree,
   formatCallEdges,
   formatProcesses,
 } from './prompts.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
+import {
+  buildModuleTree,
+  countModules,
+  flattenModuleTree,
+} from './module-tree/builder.js';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -222,11 +224,20 @@ export class WikiGenerator {
     this.onProgress('gather', 10, `Found ${sourceFiles.length} source files`);
 
     // Phase 1: Build module tree
-    const moduleTree = await this.buildModuleTree(enrichedFiles);
+    const moduleTree = await buildModuleTree({
+      files: enrichedFiles,
+      wikiDir: this.wikiDir,
+      llmConfig: this.llmConfig,
+      maxTokensPerModule: this.maxTokensPerModule,
+      onProgress: this.onProgress,
+      slugify: (name) => this.slugify(name),
+      estimateModuleTokens: async (filePaths) => this.estimateModuleTokens(filePaths),
+      streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+    });
     pagesGenerated = 0;
 
     // Phase 2: Generate module pages (parallel with concurrency limit)
-    const totalModules = this.countModules(moduleTree);
+    const totalModules = countModules(moduleTree);
     let modulesProcessed = 0;
 
     const reportProgress = (moduleName?: string) => {
@@ -240,7 +251,7 @@ export class WikiGenerator {
 
     // Flatten tree into layers: leaves first, then parents
     // Leaves can run in parallel; parents must wait for their children
-    const { leaves, parents } = this.flattenModuleTree(moduleTree);
+    const { leaves, parents } = flattenModuleTree(moduleTree);
 
     // Process all leaf modules in parallel
     pagesGenerated += await this.runParallel(leaves, async (node) => {
@@ -296,155 +307,6 @@ export class WikiGenerator {
 
     this.onProgress('done', 100, 'Wiki generation complete');
     return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
-  }
-
-  // ─── Phase 1: Build Module Tree ────────────────────────────────────
-
-  private async buildModuleTree(files: FileWithExports[]): Promise<ModuleTreeNode[]> {
-    // Check for existing immutable snapshot (resumability)
-    const snapshotPath = path.join(this.wikiDir, 'first_module_tree.json');
-    try {
-      const existing = await fs.readFile(snapshotPath, 'utf-8');
-      const parsed = JSON.parse(existing);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        this.onProgress('grouping', 25, 'Using existing module tree (resuming)');
-        return parsed;
-      }
-    } catch {
-      // No snapshot, generate new
-    }
-
-    this.onProgress('grouping', 15, 'Grouping files into modules (LLM)...');
-
-    const fileList = formatFileListForGrouping(files);
-    const dirTree = formatDirectoryTree(files.map(f => f.filePath));
-
-    const prompt = fillTemplate(GROUPING_USER_PROMPT, {
-      FILE_LIST: fileList,
-      DIRECTORY_TREE: dirTree,
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, GROUPING_SYSTEM_PROMPT,
-      this.streamOpts('Grouping files', 15),
-    );
-    const grouping = this.parseGroupingResponse(response.content, files);
-
-    // Convert to tree nodes
-    const tree: ModuleTreeNode[] = [];
-    for (const [moduleName, modulePaths] of Object.entries(grouping)) {
-      const slug = this.slugify(moduleName);
-      const node: ModuleTreeNode = { name: moduleName, slug, files: modulePaths };
-
-      // Token budget check — split if too large
-      const totalTokens = await this.estimateModuleTokens(modulePaths);
-      if (totalTokens > this.maxTokensPerModule && modulePaths.length > 3) {
-        node.children = this.splitBySubdirectory(moduleName, modulePaths);
-        node.files = []; // Parent doesn't own files directly when split
-      }
-
-      tree.push(node);
-    }
-
-    // Save immutable snapshot for resumability
-    await fs.writeFile(snapshotPath, JSON.stringify(tree, null, 2), 'utf-8');
-    this.onProgress('grouping', 28, `Created ${tree.length} modules`);
-
-    return tree;
-  }
-
-  /**
-   * Parse LLM grouping response. Validates all files are assigned.
-   */
-  private parseGroupingResponse(
-    content: string,
-    files: FileWithExports[],
-  ): Record<string, string[]> {
-    // Extract JSON from response (handle markdown fences)
-    let jsonStr = content.trim();
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (fenceMatch) {
-      jsonStr = fenceMatch[1].trim();
-    }
-
-    let parsed: Record<string, string[]>;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      // Fallback: group by top-level directory
-      return this.fallbackGrouping(files);
-    }
-
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return this.fallbackGrouping(files);
-    }
-
-    // Validate — ensure all files are assigned
-    const allFilePaths = new Set(files.map(f => f.filePath));
-    const assignedFiles = new Set<string>();
-    const validGrouping: Record<string, string[]> = {};
-
-    for (const [mod, paths] of Object.entries(parsed)) {
-      if (!Array.isArray(paths)) continue;
-      const validPaths = paths.filter(p => {
-        if (allFilePaths.has(p) && !assignedFiles.has(p)) {
-          assignedFiles.add(p);
-          return true;
-        }
-        return false;
-      });
-      if (validPaths.length > 0) {
-        validGrouping[mod] = validPaths;
-      }
-    }
-
-    // Assign unassigned files to a "Miscellaneous" module
-    const unassigned = files
-      .map(f => f.filePath)
-      .filter(fp => !assignedFiles.has(fp));
-    if (unassigned.length > 0) {
-      validGrouping['Other'] = unassigned;
-    }
-
-    return Object.keys(validGrouping).length > 0
-      ? validGrouping
-      : this.fallbackGrouping(files);
-  }
-
-  /**
-   * Fallback grouping by top-level directory when LLM parsing fails.
-   */
-  private fallbackGrouping(files: FileWithExports[]): Record<string, string[]> {
-    const groups = new Map<string, string[]>();
-    for (const f of files) {
-      const parts = f.filePath.replace(/\\/g, '/').split('/');
-      const topDir = parts.length > 1 ? parts[0] : 'Root';
-      let group = groups.get(topDir);
-      if (!group) { group = []; groups.set(topDir, group); }
-      group.push(f.filePath);
-    }
-    return Object.fromEntries(groups);
-  }
-
-  /**
-   * Split a large module into sub-modules by subdirectory.
-   */
-  private splitBySubdirectory(moduleName: string, files: string[]): ModuleTreeNode[] {
-    const subGroups = new Map<string, string[]>();
-    for (const fp of files) {
-      const parts = fp.replace(/\\/g, '/').split('/');
-      // Use the deepest common-ish directory
-      const subDir = parts.length > 2 ? parts.slice(0, 2).join('/') : parts[0];
-      let group = subGroups.get(subDir);
-      if (!group) { group = []; subGroups.set(subDir, group); }
-      group.push(fp);
-    }
-
-    return Array.from(subGroups.entries()).map(([subDir, subFiles]) => ({
-      name: `${moduleName} — ${path.basename(subDir)}`,
-      slug: this.slugify(`${moduleName}-${path.basename(subDir)}`),
-      files: subFiles,
-    }));
   }
 
   // ─── Phase 2: Generate Module Pages ─────────────────────────────────
@@ -800,39 +662,6 @@ export class WikiGenerator {
       }
     }
     return result;
-  }
-
-  private countModules(tree: ModuleTreeNode[]): number {
-    let count = 0;
-    for (const node of tree) {
-      count++;
-      if (node.children) {
-        count += node.children.length;
-      }
-    }
-    return count;
-  }
-
-  /**
-   * Flatten the module tree into leaf nodes and parent nodes.
-   * Leaves can be processed in parallel; parents must wait for children.
-   */
-  private flattenModuleTree(tree: ModuleTreeNode[]): { leaves: ModuleTreeNode[]; parents: ModuleTreeNode[] } {
-    const leaves: ModuleTreeNode[] = [];
-    const parents: ModuleTreeNode[] = [];
-
-    for (const node of tree) {
-      if (node.children && node.children.length > 0) {
-        for (const child of node.children) {
-          leaves.push(child);
-        }
-        parents.push(node);
-      } else {
-        leaves.push(node);
-      }
-    }
-
-    return { leaves, parents };
   }
 
   /**
