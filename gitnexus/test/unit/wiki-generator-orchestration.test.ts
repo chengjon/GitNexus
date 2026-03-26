@@ -249,7 +249,7 @@ describe('WikiGenerator orchestration', () => {
     );
   });
 
-  it('dispatches overview work through generateOverviewPage only when module pages regenerate', async () => {
+  it('dispatches overview work through generateOverviewPage during incremental updates when module pages regenerate', async () => {
     const parentNode = makeParentNode();
     const existingMeta = {
       fromCommit: 'old-commit',
@@ -281,8 +281,20 @@ describe('WikiGenerator orchestration', () => {
     await generator.run();
 
     expect(mocks.generateOverviewPage).toHaveBeenCalledTimes(1);
+  });
 
-    mocks.generateOverviewPage.mockClear();
+  it('does not dispatch overview work during incremental updates when no module pages regenerate', async () => {
+    const parentNode = makeParentNode();
+    const existingMeta = {
+      fromCommit: 'old-commit',
+      generatedAt: '2026-03-27T00:00:00.000Z',
+      model: 'mock-model',
+      moduleFiles: {
+        Backend: ['src/auth/login.ts'],
+      },
+      moduleTree: [parentNode],
+    };
+
     mocks.readFile.mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('meta.json')) {
         return JSON.stringify(existingMeta);
@@ -290,7 +302,7 @@ describe('WikiGenerator orchestration', () => {
       throw new Error(`unexpected read: ${filePath}`);
     });
     mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
-    mocks.execFileSync.mockReturnValue(Buffer.from(''));
+    mocks.execFileSync.mockReturnValue(Buffer.from('src/new-file.ts\n'));
 
     const { WikiGenerator: WikiGeneratorFailing } = await loadGenerator();
     const failingGenerator = new WikiGeneratorFailing(
