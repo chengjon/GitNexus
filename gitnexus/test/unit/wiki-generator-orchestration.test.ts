@@ -146,6 +146,7 @@ beforeEach(() => {
   mocks.formatProcesses.mockReturnValue('processes:none');
   mocks.generateLeafPage.mockResolvedValue(undefined);
   mocks.generateParentPage.mockResolvedValue(undefined);
+  mocks.generateOverviewPage.mockResolvedValue(undefined);
   mocks.generateHTMLViewer.mockResolvedValue(undefined);
   mocks.shouldIgnorePath.mockReturnValue(false);
   mocks.countModules.mockReturnValue(1);
@@ -281,6 +282,15 @@ describe('WikiGenerator orchestration', () => {
     await generator.run();
 
     expect(mocks.generateOverviewPage).toHaveBeenCalledTimes(1);
+    expect(mocks.generateOverviewPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moduleTree: [parentNode],
+        wikiDir: '/tmp/storage/wiki',
+        repoPath: '/tmp/repo',
+        llmConfig: { model: 'mock-model' },
+        streamOpts: expect.any(Function),
+      }),
+    );
   });
 
   it('does not dispatch overview work during incremental updates when no module pages regenerate', async () => {
@@ -312,8 +322,14 @@ describe('WikiGenerator orchestration', () => {
       { model: 'mock-model' } as any,
     );
 
-    await failingGenerator.run();
+    const result = await failingGenerator.run();
 
     expect(mocks.generateOverviewPage).not.toHaveBeenCalled();
+    expect(mocks.generateParentPage).not.toHaveBeenCalled();
+    expect(mocks.generateLeafPage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mode: 'incremental',
+      pagesGenerated: 0,
+    });
   });
 });
