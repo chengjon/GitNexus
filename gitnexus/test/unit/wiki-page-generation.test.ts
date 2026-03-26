@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
     outgoing: [{ from: 'a', to: 'ext' }],
     incoming: [{ from: 'ext', to: 'a' }],
   })),
+  getInterModuleEdgesForOverview: vi.fn(async () => []),
   getProcessesForFiles: vi.fn(async () => [{ name: 'CheckoutFlow' }]),
+  getAllProcesses: vi.fn(async () => []),
   fillTemplate: vi.fn((_template: string, values: Record<string, string>) => JSON.stringify(values)),
   formatCallEdges: vi.fn((edges: unknown) => `edges:${JSON.stringify(edges)}`),
   formatProcesses: vi.fn((processes: unknown) => `processes:${JSON.stringify(processes)}`),
@@ -27,6 +29,8 @@ vi.mock('../../src/core/wiki/graph-queries.js', () => ({
   getIntraModuleCallEdges: mocks.getIntraModuleCallEdges,
   getInterModuleCallEdges: mocks.getInterModuleCallEdges,
   getProcessesForFiles: mocks.getProcessesForFiles,
+  getInterModuleEdgesForOverview: mocks.getInterModuleEdgesForOverview,
+  getAllProcesses: mocks.getAllProcesses,
 }));
 
 vi.mock('../../src/core/wiki/prompts.js', () => ({
@@ -34,6 +38,8 @@ vi.mock('../../src/core/wiki/prompts.js', () => ({
   MODULE_USER_PROMPT: 'MODULE_USER_PROMPT',
   PARENT_SYSTEM_PROMPT: 'PARENT_SYSTEM_PROMPT',
   PARENT_USER_PROMPT: 'PARENT_USER_PROMPT',
+  OVERVIEW_SYSTEM_PROMPT: 'OVERVIEW_SYSTEM_PROMPT',
+  OVERVIEW_USER_PROMPT: 'OVERVIEW_USER_PROMPT',
   fillTemplate: mocks.fillTemplate,
   formatCallEdges: mocks.formatCallEdges,
   formatProcesses: mocks.formatProcesses,
@@ -63,6 +69,13 @@ async function loadParentModule(): Promise<{ generateParentPage: (options: unkno
   };
 }
 
+async function loadOverviewModule(): Promise<{ generateOverviewPage: (options: unknown) => Promise<void> }> {
+  const overviewModule = await import('../../src/core/wiki/pages/overview-page.js');
+  return {
+    generateOverviewPage: overviewModule.generateOverviewPage,
+  };
+}
+
 function makeLeafNode(): ModuleTreeNode {
   return {
     name: 'Auth',
@@ -76,6 +89,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.estimateTokens.mockReturnValue(50);
   mocks.readFile.mockResolvedValue('# Child\n\nOverview text\n### Architecture\nDetails');
+  mocks.getInterModuleEdgesForOverview.mockResolvedValue([]);
+  mocks.getAllProcesses.mockResolvedValue([]);
 });
 
 describe('wiki page generation contracts', () => {
@@ -185,6 +200,69 @@ describe('wiki page generation contracts', () => {
     expect(mocks.writeFile).toHaveBeenCalledWith(
       path.join('/tmp/wiki', 'backend.md'),
       expect.stringContaining('# Backend'),
+      'utf-8',
+    );
+  });
+
+  it('assembles the overview page prompt from module pages and writes overview.md', async () => {
+    const { generateOverviewPage } = await loadOverviewModule();
+    const longOverview = `# Users\n\n${'A'.repeat(620)}`;
+    const expectedUsersOverview = longOverview.slice(0, 600).trim();
+    const moduleTree: ModuleTreeNode[] = [
+      { name: 'Auth', slug: 'auth', files: ['src/auth/login.ts'] },
+      { name: 'Users', slug: 'users', files: ['src/users/profile.ts'] },
+      { name: 'Billing', slug: 'billing', files: ['src/billing/invoice.ts'] },
+    ];
+    const extractModuleFiles = vi.fn(() => ({
+      Auth: ['src/auth/login.ts'],
+      Users: ['src/users/profile.ts'],
+      Billing: ['src/billing/invoice.ts'],
+    }));
+    const readProjectInfo = vi.fn(async () => 'Project info text');
+
+    mocks.readFile
+      .mockResolvedValueOnce('# Auth\n\nAuth summary\n### Architecture\nHidden details')
+      .mockResolvedValueOnce(longOverview)
+      .mockRejectedValueOnce(new Error('missing'));
+    mocks.getInterModuleEdgesForOverview.mockResolvedValue([]);
+    mocks.getAllProcesses.mockResolvedValue([{ name: 'BootstrapFlow' }]);
+
+    await generateOverviewPage({
+      moduleTree,
+      wikiDir: '/tmp/wiki',
+      repoPath: '/tmp/sample-repo',
+      llmConfig: { model: 'mock-model' },
+      streamOpts: () => ({}),
+      readProjectInfo,
+      extractModuleFiles,
+    } as any);
+
+    expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'auth.md'), 'utf-8');
+    expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'users.md'), 'utf-8');
+    expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'billing.md'), 'utf-8');
+    expect(extractModuleFiles).toHaveBeenCalledWith(moduleTree);
+    expect(mocks.getInterModuleEdgesForOverview).toHaveBeenCalledWith({
+      Auth: ['src/auth/login.ts'],
+      Users: ['src/users/profile.ts'],
+      Billing: ['src/billing/invoice.ts'],
+    });
+    expect(mocks.getAllProcesses).toHaveBeenCalledWith(5);
+
+    const promptValues = mocks.fillTemplate.mock.calls[0]?.[1];
+    expect(promptValues.PROJECT_INFO).toBe('Project info text');
+    expect(promptValues.MODULE_SUMMARIES).toContain('#### Auth');
+    expect(promptValues.MODULE_SUMMARIES).toContain('Auth summary');
+    expect(promptValues.MODULE_SUMMARIES).not.toContain('Hidden details');
+    expect(promptValues.MODULE_SUMMARIES).toContain('#### Users');
+    expect(promptValues.MODULE_SUMMARIES).toContain(expectedUsersOverview);
+    expect(promptValues.MODULE_SUMMARIES).toContain('#### Billing');
+    expect(promptValues.MODULE_SUMMARIES).toContain('(Documentation pending)');
+    expect(promptValues.MODULE_EDGES).toBe('No inter-module call edges detected');
+    expect(promptValues.TOP_PROCESSES).toContain('processes:');
+    expect(mocks.callLLM.mock.calls[0]?.[2]).toBe('OVERVIEW_SYSTEM_PROMPT');
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      path.join('/tmp/wiki', 'overview.md'),
+      expect.stringContaining('# sample-repo — Wiki'),
       'utf-8',
     );
   });
