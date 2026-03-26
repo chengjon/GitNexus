@@ -248,7 +248,7 @@ describe('wiki page generation contracts', () => {
     expect(promptValues.MODULE_SUMMARIES).not.toContain('Hidden details');
     expect(promptValues.MODULE_SUMMARIES).toContain(`#### Users\n${expectedUsersOverview}\n\n#### Billing`);
     expect(promptValues.MODULE_SUMMARIES).not.toContain('TRIMMED_SUFFIX');
-    expect(promptValues.MODULE_SUMMARIES).toContain('(Documentation pending)');
+    expect(promptValues.MODULE_SUMMARIES).toContain('#### Billing\n(Documentation pending)');
   });
 
   it('assembles overview prompt inputs from project info and graph data', async () => {
@@ -310,7 +310,7 @@ describe('wiki page generation contracts', () => {
     expect(mocks.callLLM.mock.calls[0]?.[2]).toBe('OVERVIEW_SYSTEM_PROMPT');
     expect(mocks.writeFile).toHaveBeenCalledWith(
       path.join('/tmp/wiki', 'overview.md'),
-      expect.stringContaining('# sample-repo — Wiki'),
+      expect.stringMatching(/^# sample-repo — Wiki/),
       'utf-8',
     );
   });
