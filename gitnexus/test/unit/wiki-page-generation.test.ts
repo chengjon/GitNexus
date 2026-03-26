@@ -40,11 +40,12 @@ vi.mock('../../src/core/wiki/prompts.js', () => ({
 }));
 
 vi.mock('fs/promises', () => ({
+  __esModule: true,
   readFile: mocks.readFile,
   writeFile: mocks.writeFile,
   default: {
-    writeFile: mocks.writeFile,
     readFile: mocks.readFile,
+    writeFile: mocks.writeFile,
   },
 }));
 
@@ -71,6 +72,7 @@ function makeLeafNode(): ModuleTreeNode {
 }
 
 beforeEach(() => {
+  vi.resetModules();
   vi.clearAllMocks();
   mocks.estimateTokens.mockReturnValue(50);
   mocks.readFile.mockResolvedValue('# Child\n\nOverview text\n### Architecture\nDetails');
@@ -107,12 +109,7 @@ describe('wiki page generation contracts', () => {
       INCOMING_CALLS: expect.stringContaining('edges:'),
       PROCESSES: expect.stringContaining('processes:'),
     });
-    expect(mocks.callLLM).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.anything(),
-      'MODULE_SYSTEM_PROMPT',
-      expect.anything(),
-    );
+    expect(mocks.callLLM.mock.calls[0]?.[2]).toBe('MODULE_SYSTEM_PROMPT');
   });
 
   it('uses truncation when source token budget is exceeded', async () => {
@@ -179,16 +176,12 @@ describe('wiki page generation contracts', () => {
     });
     expect(promptValues.CHILDREN_DOCS).toContain('#### Auth');
     expect(promptValues.CHILDREN_DOCS).toContain('Auth overview');
+    expect(promptValues.CHILDREN_DOCS).toContain('# Auth');
     expect(promptValues.CHILDREN_DOCS).not.toContain('### Architecture');
     expect(promptValues.CHILDREN_DOCS).not.toContain('Detailed');
     expect(promptValues.CHILDREN_DOCS).toContain('#### Billing');
     expect(promptValues.CHILDREN_DOCS).toContain('(Documentation not yet generated)');
-    expect(mocks.callLLM).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.anything(),
-      'PARENT_SYSTEM_PROMPT',
-      expect.anything(),
-    );
+    expect(mocks.callLLM.mock.calls[0]?.[2]).toBe('PARENT_SYSTEM_PROMPT');
     expect(mocks.writeFile).toHaveBeenCalledWith(
       path.join('/tmp/wiki', 'backend.md'),
       expect.stringContaining('# Backend'),
