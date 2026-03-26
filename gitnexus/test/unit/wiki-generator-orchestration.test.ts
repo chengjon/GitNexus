@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   formatProcesses: vi.fn(() => 'processes:none'),
   generateLeafPage: vi.fn(async () => undefined),
   generateParentPage: vi.fn(async () => undefined),
+  generateOverviewPage: vi.fn(async () => undefined),
   generateHTMLViewer: vi.fn(async () => undefined),
   shouldIgnorePath: vi.fn(() => false),
   buildModuleTree: vi.fn(async () => []),
@@ -83,6 +84,10 @@ vi.mock('../../src/core/wiki/pages/leaf-page.js', () => ({
 vi.mock('../../src/core/wiki/pages/parent-page.js', () => ({
   generateParentPage: mocks.generateParentPage,
 }));
+
+vi.mock('../../src/core/wiki/pages/overview-page.js', () => ({
+  generateOverviewPage: mocks.generateOverviewPage,
+}), { virtual: true });
 
 vi.mock('../../src/core/wiki/html-viewer.js', () => ({
   generateHTMLViewer: mocks.generateHTMLViewer,
@@ -215,5 +220,89 @@ describe('WikiGenerator orchestration', () => {
     );
     expect(mocks.generateLeafPage).not.toHaveBeenCalled();
     expect(mocks.unlink).toHaveBeenCalledWith('/tmp/storage/wiki/backend.md');
+  });
+
+  it('dispatches overview work through generateOverviewPage during full generation', async () => {
+    const parentNode = makeParentNode();
+    mocks.buildModuleTree.mockResolvedValue([parentNode]);
+    mocks.flattenModuleTree.mockReturnValue({ leaves: [], parents: [parentNode] });
+
+    const { WikiGenerator } = await loadGenerator();
+    const generator = new WikiGenerator(
+      '/tmp/repo',
+      '/tmp/storage',
+      '/tmp/kuzu',
+      { model: 'mock-model' } as any,
+    );
+
+    await generator.run();
+
+    expect(mocks.generateOverviewPage).toHaveBeenCalledTimes(1);
+    expect(mocks.generateOverviewPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moduleTree: [parentNode],
+        wikiDir: '/tmp/storage/wiki',
+        repoPath: '/tmp/repo',
+        llmConfig: { model: 'mock-model' },
+        streamOpts: expect.any(Function),
+      }),
+    );
+  });
+
+  it('dispatches overview work through generateOverviewPage only when module pages regenerate', async () => {
+    const parentNode = makeParentNode();
+    const existingMeta = {
+      fromCommit: 'old-commit',
+      generatedAt: '2026-03-27T00:00:00.000Z',
+      model: 'mock-model',
+      moduleFiles: {
+        Backend: ['src/auth/login.ts'],
+      },
+      moduleTree: [parentNode],
+    };
+
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('meta.json')) {
+        return JSON.stringify(existingMeta);
+      }
+      throw new Error(`unexpected read: ${filePath}`);
+    });
+    mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
+    mocks.execFileSync.mockReturnValue(Buffer.from('src/auth/login.ts\n'));
+
+    const { WikiGenerator } = await loadGenerator();
+    const generator = new WikiGenerator(
+      '/tmp/repo',
+      '/tmp/storage',
+      '/tmp/kuzu',
+      { model: 'mock-model' } as any,
+    );
+
+    await generator.run();
+
+    expect(mocks.generateOverviewPage).toHaveBeenCalledTimes(1);
+
+    vi.clearAllMocks();
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('meta.json')) {
+        return JSON.stringify(existingMeta);
+      }
+      throw new Error(`unexpected read: ${filePath}`);
+    });
+    mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
+    mocks.execFileSync.mockReturnValue(Buffer.from('src/auth/login.ts\n'));
+    mocks.generateParentPage.mockRejectedValueOnce(new Error('fail'));
+
+    const { WikiGenerator: WikiGeneratorFailing } = await loadGenerator();
+    const failingGenerator = new WikiGeneratorFailing(
+      '/tmp/repo',
+      '/tmp/storage',
+      '/tmp/kuzu',
+      { model: 'mock-model' } as any,
+    );
+
+    await failingGenerator.run();
+
+    expect(mocks.generateOverviewPage).not.toHaveBeenCalled();
   });
 });
