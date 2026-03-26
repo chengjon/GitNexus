@@ -207,6 +207,7 @@ describe('wiki page generation contracts', () => {
   it('assembles overview module summaries with trim and pending fallbacks', async () => {
     const { generateOverviewPage } = await loadOverviewModule();
     const longOverview = `# Users\n\n${'A'.repeat(700)}\nTRIMMED_SUFFIX`;
+    const expectedUsersOverview = longOverview.slice(0, 600).trim();
     const moduleTree: ModuleTreeNode[] = [
       { name: 'Auth', slug: 'auth', files: ['src/auth/login.ts'] },
       { name: 'Users', slug: 'users', files: ['src/users/profile.ts'] },
@@ -245,8 +246,7 @@ describe('wiki page generation contracts', () => {
     expect(promptValues.MODULE_SUMMARIES).toContain('Auth summary');
     expect(promptValues.MODULE_SUMMARIES).not.toContain('Hidden details');
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Users');
-    expect(promptValues.MODULE_SUMMARIES).toContain('# Users');
-    expect(promptValues.MODULE_SUMMARIES).toContain('AAAA');
+    expect(promptValues.MODULE_SUMMARIES).toContain(expectedUsersOverview);
     expect(promptValues.MODULE_SUMMARIES).not.toContain('TRIMMED_SUFFIX');
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Billing');
     expect(promptValues.MODULE_SUMMARIES).toContain('(Documentation pending)');
@@ -277,7 +277,9 @@ describe('wiki page generation contracts', () => {
     } as any);
 
     expect(extractModuleFiles).toHaveBeenCalledWith(moduleTree);
-    expect(mocks.getInterModuleEdgesForOverview).toHaveBeenCalledTimes(1);
+    expect(mocks.getInterModuleEdgesForOverview).toHaveBeenCalledWith({
+      Auth: ['src/auth/login.ts'],
+    });
     expect(mocks.getAllProcesses).toHaveBeenCalledWith(5);
 
     expect(mocks.fillTemplate.mock.calls[0]?.[0]).toBe('OVERVIEW_USER_PROMPT');
