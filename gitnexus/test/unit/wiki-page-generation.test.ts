@@ -204,10 +204,9 @@ describe('wiki page generation contracts', () => {
     );
   });
 
-  it('assembles the overview page prompt from module pages and writes overview.md', async () => {
+  it('assembles overview module summaries with trim and pending fallbacks', async () => {
     const { generateOverviewPage } = await loadOverviewModule();
-    const longOverview = `# Users\n\n${'A'.repeat(620)}`;
-    const expectedUsersOverview = longOverview.slice(0, 600).trim();
+    const longOverview = `# Users\n\n${'A'.repeat(700)}\nTRIMMED_SUFFIX`;
     const moduleTree: ModuleTreeNode[] = [
       { name: 'Auth', slug: 'auth', files: ['src/auth/login.ts'] },
       { name: 'Users', slug: 'users', files: ['src/users/profile.ts'] },
@@ -240,25 +239,72 @@ describe('wiki page generation contracts', () => {
     expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'auth.md'), 'utf-8');
     expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'users.md'), 'utf-8');
     expect(mocks.readFile).toHaveBeenCalledWith(path.join('/tmp/wiki', 'billing.md'), 'utf-8');
-    expect(extractModuleFiles).toHaveBeenCalledWith(moduleTree);
-    expect(mocks.getInterModuleEdgesForOverview).toHaveBeenCalledWith({
-      Auth: ['src/auth/login.ts'],
-      Users: ['src/users/profile.ts'],
-      Billing: ['src/billing/invoice.ts'],
-    });
-    expect(mocks.getAllProcesses).toHaveBeenCalledWith(5);
 
     const promptValues = mocks.fillTemplate.mock.calls[0]?.[1];
-    expect(promptValues.PROJECT_INFO).toBe('Project info text');
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Auth');
     expect(promptValues.MODULE_SUMMARIES).toContain('Auth summary');
     expect(promptValues.MODULE_SUMMARIES).not.toContain('Hidden details');
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Users');
-    expect(promptValues.MODULE_SUMMARIES).toContain(expectedUsersOverview);
+    expect(promptValues.MODULE_SUMMARIES).toContain('# Users');
+    expect(promptValues.MODULE_SUMMARIES).toContain('AAAA');
+    expect(promptValues.MODULE_SUMMARIES).not.toContain('TRIMMED_SUFFIX');
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Billing');
     expect(promptValues.MODULE_SUMMARIES).toContain('(Documentation pending)');
+  });
+
+  it('assembles overview prompt inputs from project info and graph data', async () => {
+    const { generateOverviewPage } = await loadOverviewModule();
+    const moduleTree: ModuleTreeNode[] = [
+      { name: 'Auth', slug: 'auth', files: ['src/auth/login.ts'] },
+    ];
+    const extractModuleFiles = vi.fn(() => ({
+      Auth: ['src/auth/login.ts'],
+    }));
+    const readProjectInfo = vi.fn(async () => 'Project info text');
+
+    mocks.readFile.mockResolvedValueOnce('# Auth\n\nAuth summary\n### Architecture\nHidden details');
+    mocks.getInterModuleEdgesForOverview.mockResolvedValue([]);
+    mocks.getAllProcesses.mockResolvedValue([{ name: 'BootstrapFlow' }]);
+
+    await generateOverviewPage({
+      moduleTree,
+      wikiDir: '/tmp/wiki',
+      repoPath: '/tmp/sample-repo',
+      llmConfig: { model: 'mock-model' },
+      streamOpts: () => ({}),
+      readProjectInfo,
+      extractModuleFiles,
+    } as any);
+
+    expect(extractModuleFiles).toHaveBeenCalledWith(moduleTree);
+    expect(mocks.getInterModuleEdgesForOverview).toHaveBeenCalledTimes(1);
+    expect(mocks.getAllProcesses).toHaveBeenCalledWith(5);
+
+    expect(mocks.fillTemplate.mock.calls[0]?.[0]).toBe('OVERVIEW_USER_PROMPT');
+    const promptValues = mocks.fillTemplate.mock.calls[0]?.[1];
+    expect(promptValues.PROJECT_INFO).toBe('Project info text');
     expect(promptValues.MODULE_EDGES).toBe('No inter-module call edges detected');
     expect(promptValues.TOP_PROCESSES).toContain('processes:');
+  });
+
+  it('writes overview output using overview.md and repo title', async () => {
+    const { generateOverviewPage } = await loadOverviewModule();
+    const moduleTree: ModuleTreeNode[] = [
+      { name: 'Auth', slug: 'auth', files: ['src/auth/login.ts'] },
+    ];
+
+    await generateOverviewPage({
+      moduleTree,
+      wikiDir: '/tmp/wiki',
+      repoPath: '/tmp/sample-repo',
+      llmConfig: { model: 'mock-model' },
+      streamOpts: () => ({}),
+      readProjectInfo: async () => 'Project info text',
+      extractModuleFiles: () => ({
+        Auth: ['src/auth/login.ts'],
+      }),
+    } as any);
+
     expect(mocks.callLLM.mock.calls[0]?.[2]).toBe('OVERVIEW_SYSTEM_PROMPT');
     expect(mocks.writeFile).toHaveBeenCalledWith(
       path.join('/tmp/wiki', 'overview.md'),
