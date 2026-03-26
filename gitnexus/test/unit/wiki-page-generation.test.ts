@@ -280,12 +280,13 @@ describe('wiki page generation contracts', () => {
       Auth: ['src/auth/login.ts'],
     });
     expect(mocks.getAllProcesses).toHaveBeenCalledWith(5);
+    expect(mocks.formatProcesses).toHaveBeenCalledWith([{ name: 'BootstrapFlow' }]);
 
     expect(mocks.fillTemplate.mock.calls[0]?.[0]).toBe('OVERVIEW_USER_PROMPT');
     const promptValues = mocks.fillTemplate.mock.calls[0]?.[1];
     expect(promptValues.PROJECT_INFO).toBe('Project info text');
     expect(promptValues.MODULE_EDGES).toBe('No inter-module call edges detected');
-    expect(promptValues.TOP_PROCESSES).toContain('processes:');
+    expect(promptValues.TOP_PROCESSES).toBe('processes:[{"name":"BootstrapFlow"}]');
   });
 
   it('writes overview output using overview.md and repo title', async () => {
