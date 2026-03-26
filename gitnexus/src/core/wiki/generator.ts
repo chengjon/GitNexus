@@ -53,6 +53,7 @@ import {
 } from './prompts.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
+import type { ModuleTreeNode } from './module-tree/types.js';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -71,13 +72,6 @@ export interface WikiMeta {
   model: string;
   moduleFiles: Record<string, string[]>;
   moduleTree: ModuleTreeNode[];
-}
-
-export interface ModuleTreeNode {
-  name: string;
-  slug: string;
-  files: string[];
-  children?: ModuleTreeNode[];
 }
 
 export type ProgressCallback = (phase: string, percent: number, detail?: string) => void;
