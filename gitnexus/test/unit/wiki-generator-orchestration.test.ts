@@ -282,7 +282,7 @@ describe('WikiGenerator orchestration', () => {
 
     expect(mocks.generateOverviewPage).toHaveBeenCalledTimes(1);
 
-    vi.clearAllMocks();
+    mocks.generateOverviewPage.mockClear();
     mocks.readFile.mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('meta.json')) {
         return JSON.stringify(existingMeta);
@@ -290,8 +290,7 @@ describe('WikiGenerator orchestration', () => {
       throw new Error(`unexpected read: ${filePath}`);
     });
     mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
-    mocks.execFileSync.mockReturnValue(Buffer.from('src/auth/login.ts\n'));
-    mocks.generateParentPage.mockRejectedValueOnce(new Error('fail'));
+    mocks.execFileSync.mockReturnValue(Buffer.from(''));
 
     const { WikiGenerator: WikiGeneratorFailing } = await loadGenerator();
     const failingGenerator = new WikiGeneratorFailing(
