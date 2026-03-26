@@ -20,8 +20,6 @@ import {
   getFilesWithExports,
   getAllFiles,
   getInterFileCallEdges,
-  getIntraModuleCallEdges,
-  getProcessesForFiles,
   getAllProcesses,
   getInterModuleEdgesForOverview,
   type FileWithExports,
@@ -37,15 +35,13 @@ import {
 
 import {
   GROUPING_SYSTEM_PROMPT,
-  PARENT_SYSTEM_PROMPT,
-  PARENT_USER_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
   OVERVIEW_USER_PROMPT,
   fillTemplate,
-  formatCallEdges,
   formatProcesses,
 } from './prompts.js';
 import { generateLeafPage } from './pages/leaf-page.js';
+import { generateParentPage } from './pages/parent-page.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
@@ -286,7 +282,12 @@ export class WikiGenerator {
         continue;
       }
       try {
-        await this.generateParentPage(node);
+        await generateParentPage({
+          node,
+          wikiDir: this.wikiDir,
+          llmConfig: this.llmConfig,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+        });
         pagesGenerated++;
         reportProgress(node.name);
       } catch (err: any) {
@@ -314,50 +315,6 @@ export class WikiGenerator {
 
     this.onProgress('done', 100, 'Wiki generation complete');
     return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
-  }
-
-  // ─── Phase 2: Generate Module Pages ─────────────────────────────────
-
-  /**
-   * Generate a parent module page from children's documentation.
-   */
-  private async generateParentPage(node: ModuleTreeNode): Promise<void> {
-    if (!node.children || node.children.length === 0) return;
-
-    // Read children's overview sections
-    const childDocs: string[] = [];
-    for (const child of node.children) {
-      const childPage = path.join(this.wikiDir, `${child.slug}.md`);
-      try {
-        const content = await fs.readFile(childPage, 'utf-8');
-        // Extract overview section (first ~500 chars or up to "### Architecture")
-        const overviewEnd = content.indexOf('### Architecture');
-        const overview = overviewEnd > 0 ? content.slice(0, overviewEnd).trim() : content.slice(0, 800).trim();
-        childDocs.push(`#### ${child.name}\n${overview}`);
-      } catch {
-        childDocs.push(`#### ${child.name}\n(Documentation not yet generated)`);
-      }
-    }
-
-    // Get cross-child call edges
-    const allChildFiles = node.children.flatMap(c => c.files);
-    const crossCalls = await getIntraModuleCallEdges(allChildFiles);
-    const processes = await getProcessesForFiles(allChildFiles, 3);
-
-    const prompt = fillTemplate(PARENT_USER_PROMPT, {
-      MODULE_NAME: node.name,
-      CHILDREN_DOCS: childDocs.join('\n\n'),
-      CROSS_MODULE_CALLS: formatCallEdges(crossCalls),
-      CROSS_PROCESSES: formatProcesses(processes),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, PARENT_SYSTEM_PROMPT,
-      this.streamOpts(node.name),
-    );
-
-    const pageContent = `# ${node.name}\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, `${node.slug}.md`), pageContent, 'utf-8');
   }
 
   // ─── Phase 3: Generate Overview ─────────────────────────────────────
@@ -486,7 +443,12 @@ export class WikiGenerator {
     pagesGenerated += await this.runParallel(affectedNodes, async (node) => {
       try {
         if (node.children && node.children.length > 0) {
-          await this.generateParentPage(node);
+          await generateParentPage({
+            node,
+            wikiDir: this.wikiDir,
+            llmConfig: this.llmConfig,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          });
         } else {
           await generateLeafPage({
             node,
