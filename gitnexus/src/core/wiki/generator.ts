@@ -20,14 +20,11 @@ import {
   getFilesWithExports,
   getAllFiles,
   getInterFileCallEdges,
-  getAllProcesses,
-  getInterModuleEdgesForOverview,
   type FileWithExports,
 } from './graph-queries.js';
 import { generateHTMLViewer } from './html-viewer.js';
 
 import {
-  callLLM,
   estimateTokens,
   type LLMConfig,
   type CallLLMOptions,
@@ -35,13 +32,10 @@ import {
 
 import {
   GROUPING_SYSTEM_PROMPT,
-  OVERVIEW_SYSTEM_PROMPT,
-  OVERVIEW_USER_PROMPT,
-  fillTemplate,
-  formatProcesses,
 } from './prompts.js';
 import { generateLeafPage } from './pages/leaf-page.js';
 import { generateParentPage } from './pages/parent-page.js';
+import { generateOverviewPage } from './pages/overview-page.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
@@ -298,7 +292,15 @@ export class WikiGenerator {
 
     // Phase 3: Generate overview
     this.onProgress('overview', 88, 'Generating overview page...');
-    await this.generateOverview(moduleTree);
+    await generateOverviewPage({
+      moduleTree,
+      wikiDir: this.wikiDir,
+      repoPath: this.repoPath,
+      llmConfig: this.llmConfig,
+      streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+      readProjectInfo: () => this.readProjectInfo(),
+      extractModuleFiles: (tree) => this.extractModuleFiles(tree),
+    });
     pagesGenerated++;
 
     // Save metadata
@@ -315,53 +317,6 @@ export class WikiGenerator {
 
     this.onProgress('done', 100, 'Wiki generation complete');
     return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
-  }
-
-  // ─── Phase 3: Generate Overview ─────────────────────────────────────
-
-  private async generateOverview(moduleTree: ModuleTreeNode[]): Promise<void> {
-    // Read module overview sections
-    const moduleSummaries: string[] = [];
-    for (const node of moduleTree) {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      try {
-        const content = await fs.readFile(pagePath, 'utf-8');
-        const overviewEnd = content.indexOf('### Architecture');
-        const overview = overviewEnd > 0 ? content.slice(0, overviewEnd).trim() : content.slice(0, 600).trim();
-        moduleSummaries.push(`#### ${node.name}\n${overview}`);
-      } catch {
-        moduleSummaries.push(`#### ${node.name}\n(Documentation pending)`);
-      }
-    }
-
-    // Get inter-module edges for architecture diagram
-    const moduleFiles = this.extractModuleFiles(moduleTree);
-    const moduleEdges = await getInterModuleEdgesForOverview(moduleFiles);
-
-    // Get top processes for key workflows
-    const topProcesses = await getAllProcesses(5);
-
-    // Read project config
-    const projectInfo = await this.readProjectInfo();
-
-    const edgesText = moduleEdges.length > 0
-      ? moduleEdges.map(e => `${e.from} → ${e.to} (${e.count} calls)`).join('\n')
-      : 'No inter-module call edges detected';
-
-    const prompt = fillTemplate(OVERVIEW_USER_PROMPT, {
-      PROJECT_INFO: projectInfo,
-      MODULE_SUMMARIES: moduleSummaries.join('\n\n'),
-      MODULE_EDGES: edgesText,
-      TOP_PROCESSES: formatProcesses(topProcesses),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, OVERVIEW_SYSTEM_PROMPT,
-      this.streamOpts('Generating overview', 88),
-    );
-
-    const pageContent = `# ${path.basename(this.repoPath)} — Wiki\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, 'overview.md'), pageContent, 'utf-8');
   }
 
   // ─── Incremental Updates ────────────────────────────────────────────
@@ -475,7 +430,15 @@ export class WikiGenerator {
     // Regenerate overview if any pages changed
     if (pagesGenerated > 0) {
       this.onProgress('incremental', 85, 'Updating overview...');
-      await this.generateOverview(moduleTree);
+      await generateOverviewPage({
+        moduleTree,
+        wikiDir: this.wikiDir,
+        repoPath: this.repoPath,
+        llmConfig: this.llmConfig,
+        streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+        readProjectInfo: () => this.readProjectInfo(),
+        extractModuleFiles: (tree) => this.extractModuleFiles(tree),
+      });
       pagesGenerated++;
     }
 
