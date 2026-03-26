@@ -244,11 +244,10 @@ describe('wiki page generation contracts', () => {
     const promptValues = mocks.fillTemplate.mock.calls[0]?.[1];
     expect(promptValues.MODULE_SUMMARIES).toContain('#### Auth');
     expect(promptValues.MODULE_SUMMARIES).toContain('Auth summary');
+    expect(promptValues.MODULE_SUMMARIES).not.toContain('### Architecture');
     expect(promptValues.MODULE_SUMMARIES).not.toContain('Hidden details');
-    expect(promptValues.MODULE_SUMMARIES).toContain('#### Users');
-    expect(promptValues.MODULE_SUMMARIES).toContain(expectedUsersOverview);
+    expect(promptValues.MODULE_SUMMARIES).toContain(`#### Users\n${expectedUsersOverview}\n\n#### Billing`);
     expect(promptValues.MODULE_SUMMARIES).not.toContain('TRIMMED_SUFFIX');
-    expect(promptValues.MODULE_SUMMARIES).toContain('#### Billing');
     expect(promptValues.MODULE_SUMMARIES).toContain('(Documentation pending)');
   });
 
