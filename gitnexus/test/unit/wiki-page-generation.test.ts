@@ -179,6 +179,7 @@ describe('wiki page generation contracts', () => {
     });
     expect(promptValues.CHILDREN_DOCS).toContain('#### Auth');
     expect(promptValues.CHILDREN_DOCS).toContain('Auth overview');
+    expect(promptValues.CHILDREN_DOCS).not.toContain('### Architecture');
     expect(promptValues.CHILDREN_DOCS).not.toContain('Detailed');
     expect(promptValues.CHILDREN_DOCS).toContain('#### Billing');
     expect(promptValues.CHILDREN_DOCS).toContain('(Documentation not yet generated)');
