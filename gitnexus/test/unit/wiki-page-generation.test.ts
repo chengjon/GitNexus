@@ -40,22 +40,24 @@ vi.mock('../../src/core/wiki/prompts.js', () => ({
 }));
 
 vi.mock('fs/promises', () => ({
+  readFile: mocks.readFile,
+  writeFile: mocks.writeFile,
   default: {
     writeFile: mocks.writeFile,
     readFile: mocks.readFile,
   },
 }));
 
-type PageModuleExports = {
-  generateLeafPage: (options: unknown) => Promise<void>;
-  generateParentPage: (options: unknown) => Promise<void>;
-};
-
-async function loadPageModules(): Promise<PageModuleExports> {
+async function loadLeafModule(): Promise<{ generateLeafPage: (options: unknown) => Promise<void> }> {
   const leafModule = await import('../../src/core/wiki/pages/leaf-page.js');
-  const parentModule = await import('../../src/core/wiki/pages/parent-page.js');
   return {
     generateLeafPage: leafModule.generateLeafPage,
+  };
+}
+
+async function loadParentModule(): Promise<{ generateParentPage: (options: unknown) => Promise<void> }> {
+  const parentModule = await import('../../src/core/wiki/pages/parent-page.js');
+  return {
     generateParentPage: parentModule.generateParentPage,
   };
 }
@@ -76,7 +78,7 @@ beforeEach(() => {
 
 describe('wiki page generation contracts', () => {
   it('assembles the leaf page prompt from source and graph data', async () => {
-    const { generateLeafPage } = await loadPageModules();
+    const { generateLeafPage } = await loadLeafModule();
     const readSourceFiles = vi.fn(async () => 'export const login = () => true;');
     const truncateSource = vi.fn((source: string) => source);
 
@@ -105,10 +107,16 @@ describe('wiki page generation contracts', () => {
       INCOMING_CALLS: expect.stringContaining('edges:'),
       PROCESSES: expect.stringContaining('processes:'),
     });
+    expect(mocks.callLLM).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      'MODULE_SYSTEM_PROMPT',
+      expect.anything(),
+    );
   });
 
   it('uses truncation when source token budget is exceeded', async () => {
-    const { generateLeafPage } = await loadPageModules();
+    const { generateLeafPage } = await loadLeafModule();
     const readSourceFiles = vi.fn(async () => 'VERY_LONG_SOURCE');
     const truncateSource = vi.fn(() => 'TRUNCATED_SOURCE');
     mocks.estimateTokens.mockReturnValue(5000);
@@ -130,7 +138,7 @@ describe('wiki page generation contracts', () => {
   });
 
   it('assembles the parent page prompt from child docs and graph data', async () => {
-    const { generateParentPage } = await loadPageModules();
+    const { generateParentPage } = await loadParentModule();
     const node: ModuleTreeNode = {
       name: 'Backend',
       slug: 'backend',
@@ -171,12 +179,24 @@ describe('wiki page generation contracts', () => {
     });
     expect(promptValues.CHILDREN_DOCS).toContain('#### Auth');
     expect(promptValues.CHILDREN_DOCS).toContain('Auth overview');
+    expect(promptValues.CHILDREN_DOCS).not.toContain('Detailed');
     expect(promptValues.CHILDREN_DOCS).toContain('#### Billing');
     expect(promptValues.CHILDREN_DOCS).toContain('(Documentation not yet generated)');
+    expect(mocks.callLLM).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      'PARENT_SYSTEM_PROMPT',
+      expect.anything(),
+    );
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      path.join('/tmp/wiki', 'backend.md'),
+      expect.stringContaining('# Backend'),
+      'utf-8',
+    );
   });
 
   it('writes generated page output using slug.md naming', async () => {
-    const { generateLeafPage } = await loadPageModules();
+    const { generateLeafPage } = await loadLeafModule();
 
     await generateLeafPage({
       node: makeLeafNode(),
