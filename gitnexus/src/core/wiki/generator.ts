@@ -21,7 +21,6 @@ import {
   getAllFiles,
   getInterFileCallEdges,
   getIntraModuleCallEdges,
-  getInterModuleCallEdges,
   getProcessesForFiles,
   getAllProcesses,
   getInterModuleEdgesForOverview,
@@ -38,8 +37,6 @@ import {
 
 import {
   GROUPING_SYSTEM_PROMPT,
-  MODULE_SYSTEM_PROMPT,
-  MODULE_USER_PROMPT,
   PARENT_SYSTEM_PROMPT,
   PARENT_USER_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
@@ -48,6 +45,7 @@ import {
   formatCallEdges,
   formatProcesses,
 } from './prompts.js';
+import { generateLeafPage } from './pages/leaf-page.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
@@ -261,7 +259,16 @@ export class WikiGenerator {
         return 0;
       }
       try {
-        await this.generateLeafPage(node);
+        await generateLeafPage({
+          node,
+          wikiDir: this.wikiDir,
+          repoPath: this.repoPath,
+          llmConfig: this.llmConfig,
+          maxTokensPerModule: this.maxTokensPerModule,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+          truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+        });
         reportProgress(node.name);
         return 1;
       } catch (err: any) {
@@ -310,48 +317,6 @@ export class WikiGenerator {
   }
 
   // ─── Phase 2: Generate Module Pages ─────────────────────────────────
-
-  /**
-   * Generate a leaf module page from source code + graph data.
-   */
-  private async generateLeafPage(node: ModuleTreeNode): Promise<void> {
-    const filePaths = node.files;
-
-    // Read source files from disk
-    const sourceCode = await this.readSourceFiles(filePaths);
-
-    // Token budget check — if too large, summarize in batches
-    const totalTokens = estimateTokens(sourceCode);
-    let finalSourceCode = sourceCode;
-    if (totalTokens > this.maxTokensPerModule) {
-      finalSourceCode = this.truncateSource(sourceCode, this.maxTokensPerModule);
-    }
-
-    // Get graph data
-    const [intraCalls, interCalls, processes] = await Promise.all([
-      getIntraModuleCallEdges(filePaths),
-      getInterModuleCallEdges(filePaths),
-      getProcessesForFiles(filePaths, 5),
-    ]);
-
-    const prompt = fillTemplate(MODULE_USER_PROMPT, {
-      MODULE_NAME: node.name,
-      SOURCE_CODE: finalSourceCode,
-      INTRA_CALLS: formatCallEdges(intraCalls),
-      OUTGOING_CALLS: formatCallEdges(interCalls.outgoing),
-      INCOMING_CALLS: formatCallEdges(interCalls.incoming),
-      PROCESSES: formatProcesses(processes),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, MODULE_SYSTEM_PROMPT,
-      this.streamOpts(node.name),
-    );
-
-    // Write page with front matter
-    const pageContent = `# ${node.name}\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, `${node.slug}.md`), pageContent, 'utf-8');
-  }
 
   /**
    * Generate a parent module page from children's documentation.
@@ -523,7 +488,16 @@ export class WikiGenerator {
         if (node.children && node.children.length > 0) {
           await this.generateParentPage(node);
         } else {
-          await this.generateLeafPage(node);
+          await generateLeafPage({
+            node,
+            wikiDir: this.wikiDir,
+            repoPath: this.repoPath,
+            llmConfig: this.llmConfig,
+            maxTokensPerModule: this.maxTokensPerModule,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+            truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+          });
         }
         incProcessed++;
         const percent = 20 + Math.round((incProcessed / affectedNodes.length) * 60);

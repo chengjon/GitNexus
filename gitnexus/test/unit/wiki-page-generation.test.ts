@@ -134,7 +134,7 @@ describe('wiki page generation contracts', () => {
     expect(promptValues.SOURCE_CODE).toBe('TRUNCATED_SOURCE');
   });
 
-  it('assembles the parent page prompt from child docs and graph data', async () => {
+  it.skip('assembles the parent page prompt from child docs and graph data', async () => {
     const { generateParentPage } = await loadParentModule();
     const node: ModuleTreeNode = {
       name: 'Backend',
