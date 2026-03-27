@@ -141,11 +141,8 @@ Dependencies it should receive explicitly:
 - `existingMeta`
 - `currentCommit`
 - `wikiDir`
-- `repoPath`
 - `llmConfig`
-- `maxTokensPerModule`
 - `onProgress`
-- `streamOpts`
 - `getChangedFiles`
 - `slugify`
 - `findNodeBySlug`
@@ -155,8 +152,8 @@ Dependencies it should receive explicitly:
 - `generateParentPage`
 - `generateOverviewPage`
 - `runParallel`
-- `readSourceFiles`
-- `truncateSource`
+
+Keep the helper API trimmed to fields it actually consumes. Page-generation implementation specifics should stay encapsulated behind the injected page helper functions, not duplicated in the incremental-update options contract.
 
 `failedModules` should remain owned by `WikiGenerator` state during execution, but `runIncrementalUpdate` should still return a final `failedModules` array snapshot in its result. This preserves the existing outward return contract while avoiding a second mutable source of truth inside the helper API.
 
