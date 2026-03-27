@@ -119,6 +119,8 @@ Modify:
 - `gitnexus/src/core/wiki/generator.ts`
 - `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
+In the current worktree, `gitnexus/test/unit/wiki-generator-orchestration.test.ts` already exists and should be extended rather than replaced.
+
 Add focused tests:
 
 - `gitnexus/test/unit/wiki-generator-support.test.ts`
@@ -153,6 +155,8 @@ Own only:
 
 - `runWikiGeneration`
 
+Use the repo's existing TS/ESM convention for source imports: source files are `.ts`, but intra-repo import specifiers should use `.js`.
+
 Suggested shape:
 
 ```ts
@@ -162,8 +166,12 @@ export interface RunWikiGenerationOptions {
   wikiDir: string;
   kuzuPath: string;
   onProgress: ProgressCallback;
+  prepareWikiDir: () => Promise<void>;
+  cleanupForceMode: () => Promise<void>;
   loadWikiMeta: () => Promise<WikiMeta | null>;
   getCurrentCommit: () => string;
+  initWikiDb: (kuzuPath: string) => Promise<void>;
+  closeWikiDb: () => Promise<void>;
   ensureHTMLViewer: () => Promise<void>;
   fullGeneration: (currentCommit: string) => Promise<{ pagesGenerated: number; mode: 'full'; failedModules: string[] }>;
   runIncrementalUpdate: (existingMeta: WikiMeta, currentCommit: string) => Promise<{ pagesGenerated: number; mode: 'incremental'; failedModules: string[] }>;
@@ -208,10 +216,26 @@ The extraction must preserve:
 - still short-circuits to `up-to-date` when commit matches and force mode is off
 - still regenerates the HTML viewer on up-to-date short-circuit
 - still performs force-mode snapshot/page cleanup before running generation
+  - deletes `first_module_tree.json`
+  - deletes all existing `*.md` files in `wikiDir`, including `overview.md`
 - still initializes and closes wiki DB around generation
-- still dispatches to incremental mode only when existing metadata exists and force mode is off
-- still calls `ensureHTMLViewer()` after wiki content changes
+- still dispatches to incremental mode only when:
+  - `existingMeta` exists
+  - `forceMode` is off
+  - `existingMeta.fromCommit` is truthy
+- still calls `ensureHTMLViewer()` on all non-up-to-date paths after generation work completes, even when `pagesGenerated` ends up `0`; `ensureHTMLViewer()` itself may early-return if no `*.md` files exist
 - still returns the same result shape
+
+Ordering must remain:
+
+1. prepare `wikiDir`
+2. load metadata + current commit
+3. up-to-date short-circuit
+4. force-mode cleanup
+5. init wiki DB
+6. run full or incremental generation
+7. close wiki DB
+8. call `ensureHTMLViewer()`
 
 No user-visible wiki behavior should change intentionally in this slice.
 
@@ -244,13 +268,15 @@ Cover:
 - force-mode cleanup path
 - incremental vs full branch selection
 - graph init/close lifecycle
-- post-generation `ensureHTMLViewer()` behavior
+- post-generation `ensureHTMLViewer()` behavior on all non-up-to-date paths
 
 Use pure mocks; no real graph or filesystem writes.
 
+`runWikiGeneration(...)` should receive shell side effects as injected callbacks (`prepareWikiDir`, `cleanupForceMode`, `initWikiDb`, `closeWikiDb`) rather than importing them directly, so the pipeline tests stay pure and deterministic.
+
 ### 9.3 Existing Orchestration Test
 
-Extend `gitnexus/test/unit/wiki-generator-orchestration.test.ts` so it verifies:
+Extend the existing `gitnexus/test/unit/wiki-generator-orchestration.test.ts` so it verifies:
 
 - `WikiGenerator.run()` dispatches through `runWikiGeneration(...)`
 
@@ -258,7 +284,7 @@ This should remain a thin wiring assertion, not a duplication of pipeline behavi
 
 ### 9.4 Existing Regression Verification
 
-Retain or rerun existing wiki-focused verification.
+Retain or rerun the current worktree's existing wiki-focused verification.
 
 At minimum, verify:
 
