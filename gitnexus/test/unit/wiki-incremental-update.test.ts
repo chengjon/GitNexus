@@ -113,13 +113,15 @@ describe('runIncrementalUpdate contracts', () => {
     const options = makeBaseOptions({
       getChangedFiles: vi.fn(() => []),
     });
+    const deps = makeDeps();
 
-    const result = await runIncrementalUpdate(options as any, makeDeps() as any);
+    const result = await runIncrementalUpdate(options as any, deps as any);
 
     expect(options.saveWikiMeta).toHaveBeenCalledWith(expect.objectContaining({
       fromCommit: 'new-commit',
       model: 'mock-model',
     }));
+    expect(deps.generateOverviewPage).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       pagesGenerated: 0,
       mode: 'incremental',
@@ -144,6 +146,9 @@ describe('runIncrementalUpdate contracts', () => {
 
     expect(options.deleteSnapshot).toHaveBeenCalledTimes(1);
     expect(options.fullGeneration).toHaveBeenCalledWith('new-commit');
+    expect(options.deleteSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      options.fullGeneration.mock.invocationCallOrder[0],
+    );
     expect(result).toMatchObject({
       pagesGenerated: 7,
       mode: 'incremental',
