@@ -121,6 +121,8 @@ describe('runIncrementalUpdate contracts', () => {
       fromCommit: 'new-commit',
       model: 'mock-model',
     }));
+    expect(deps.generateParentPage).not.toHaveBeenCalled();
+    expect(deps.generateLeafPage).not.toHaveBeenCalled();
     expect(deps.generateOverviewPage).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       pagesGenerated: 0,
@@ -138,6 +140,7 @@ describe('runIncrementalUpdate contracts', () => {
       'src/new/d.ts',
       'src/new/e.ts',
       'src/new/f.ts',
+      'src/new/g.ts',
     ];
     const deleteSnapshot = vi.fn(async () => {
       await mocks.unlink('/tmp/wiki/first_module_tree.json');
