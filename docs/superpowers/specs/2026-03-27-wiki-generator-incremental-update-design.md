@@ -134,6 +134,8 @@ export interface IncrementalUpdateResult {
 }
 ```
 
+The helper should always return `mode: 'incremental'`, including the branch that falls back to `fullGeneration(currentCommit)`. In that fallback path, it should preserve `pagesGenerated` and `failedModules` from the full-generation result, but normalize the outward mode back to incremental to preserve current `run()` behavior.
+
 Dependencies it should receive explicitly:
 
 - `existingMeta`
@@ -142,7 +144,6 @@ Dependencies it should receive explicitly:
 - `repoPath`
 - `llmConfig`
 - `maxTokensPerModule`
-- `failedModules`
 - `onProgress`
 - `streamOpts`
 - `getChangedFiles`
@@ -156,6 +157,8 @@ Dependencies it should receive explicitly:
 - `runParallel`
 - `readSourceFiles`
 - `truncateSource`
+
+`failedModules` should remain owned by `WikiGenerator` state during execution, but `runIncrementalUpdate` should still return a final `failedModules` array snapshot in its result. This preserves the existing outward return contract while avoiding a second mutable source of truth inside the helper API.
 
 ### `generator.ts`
 
@@ -179,7 +182,15 @@ The extraction must preserve:
 - overview regeneration happens only when `pagesGenerated > 0`
 - metadata save at the end still writes updated `fromCommit`, `generatedAt`, and `model`
 - `failedModules` tracking remains unchanged
-- progress messages and percent ranges remain behaviorally unchanged
+- progress messages and percent ranges remain behaviorally unchanged:
+  - `incremental` starts at `5` for detection
+  - `incremental` moves to `10` after changed-file count
+  - `incremental` moves to `15` for full-generation fallback messaging when triggered
+  - `incremental` moves to `20` before module regeneration
+  - regeneration progress still spans `20..80`
+  - overview update still reports at `85`
+  - metadata save still reports at `95`
+  - completion still reports at `100`
 
 No user-visible wiki behavior should change intentionally in this slice.
 
@@ -200,6 +211,12 @@ Cover the main branches:
 - metadata save happens with updated commit/timestamp/model
 
 Use narrow inline fixtures and mocks. This should test the extracted flow logic, not real git or LLM behavior.
+
+These tests should stay pure/unit-level:
+
+- no real git commands
+- no real LLM calls
+- no real filesystem writes outside mocks or temporary in-memory stand-ins
 
 ### 9.2 Orchestration Test
 
