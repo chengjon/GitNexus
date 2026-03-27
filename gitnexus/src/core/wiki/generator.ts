@@ -35,6 +35,7 @@ import {
 } from './prompts.js';
 import { extractModuleFiles, readProjectInfo } from './generator-support.js';
 import { runIncrementalUpdate } from './incremental-update.js';
+import { runWikiGeneration } from './run-pipeline.js';
 import { generateLeafPage } from './pages/leaf-page.js';
 import { generateParentPage } from './pages/parent-page.js';
 import { generateOverviewPage } from './pages/overview-page.js';
@@ -130,100 +131,86 @@ export class WikiGenerator {
    * Main entry point. Runs the full pipeline or incremental update.
    */
   async run(): Promise<{ pagesGenerated: number; mode: 'full' | 'incremental' | 'up-to-date'; failedModules: string[] }> {
-    await fs.mkdir(this.wikiDir, { recursive: true });
-
-    const existingMeta = await this.loadWikiMeta();
-    const currentCommit = this.getCurrentCommit();
-    const forceMode = this.options.force;
-
-    // Up-to-date check (skip if --force)
-    if (!forceMode && existingMeta && existingMeta.fromCommit === currentCommit) {
-      // Still regenerate the HTML viewer in case it's missing
-      await this.ensureHTMLViewer();
-      return { pagesGenerated: 0, mode: 'up-to-date', failedModules: [] };
-    }
-
-    // Force mode: delete snapshot to force full re-grouping
-    if (forceMode) {
-      try { await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json')); } catch {}
-      // Delete existing module pages so they get regenerated
-      const existingFiles = await fs.readdir(this.wikiDir).catch(() => [] as string[]);
-      for (const f of existingFiles) {
-        if (f.endsWith('.md')) {
-          try { await fs.unlink(path.join(this.wikiDir, f)); } catch {}
-        }
-      }
-    }
-
-    // Init graph
-    this.onProgress('init', 2, 'Connecting to knowledge graph...');
-    await initWikiDb(this.kuzuPath);
-
-    let result: { pagesGenerated: number; mode: 'full' | 'incremental' | 'up-to-date'; failedModules: string[] };
-    try {
-      if (!forceMode && existingMeta && existingMeta.fromCommit) {
-        result = await runIncrementalUpdate({
-          existingMeta,
-          currentCommit,
-          wikiDir: this.wikiDir,
-          llmConfig: this.llmConfig,
-          failedModules: this.failedModules,
-          onProgress: this.onProgress,
-          getChangedFiles: (fromCommit, toCommit) => this.getChangedFiles(fromCommit, toCommit),
-          slugify: (name) => this.slugify(name),
-          findNodeBySlug: (tree, slug) => this.findNodeBySlug(tree, slug),
-          saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
-          deleteSnapshot: async () => {
+    return runWikiGeneration({
+      forceMode: !!this.options.force,
+      repoPath: this.repoPath,
+      wikiDir: this.wikiDir,
+      kuzuPath: this.kuzuPath,
+      onProgress: this.onProgress,
+      prepareWikiDir: async () => {
+        await fs.mkdir(this.wikiDir, { recursive: true });
+      },
+      cleanupForceMode: async () => {
+        try {
+          await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+        } catch {}
+        const existingFiles = await fs.readdir(this.wikiDir).catch(() => [] as string[]);
+        for (const file of existingFiles) {
+          if (file.endsWith('.md')) {
             try {
-              await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+              await fs.unlink(path.join(this.wikiDir, file));
             } catch {}
-          },
-          fullGeneration: async (commit) => this.fullGeneration(commit),
-          runParallel: async (items, fn) => this.runParallel(items, fn),
-        }, {
-          generateLeafPage: async (node) => {
-            await generateLeafPage({
-              node,
-              wikiDir: this.wikiDir,
-              repoPath: this.repoPath,
-              llmConfig: this.llmConfig,
-              maxTokensPerModule: this.maxTokensPerModule,
-              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-              readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
-              truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
-            });
-          },
-          generateParentPage: async (node) => {
-            await generateParentPage({
-              node,
-              wikiDir: this.wikiDir,
-              llmConfig: this.llmConfig,
-              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-            });
-          },
-          generateOverviewPage: async (moduleTree) => {
-            await generateOverviewPage({
-              moduleTree,
-              wikiDir: this.wikiDir,
-              repoPath: this.repoPath,
-              llmConfig: this.llmConfig,
-              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-              readProjectInfo: () => readProjectInfo(this.repoPath),
-              extractModuleFiles: (tree) => extractModuleFiles(tree),
-            });
-          },
-        });
-      } else {
-        result = await this.fullGeneration(currentCommit);
-      }
-    } finally {
-      await closeWikiDb();
-    }
-
-    // Always generate the HTML viewer after wiki content changes
-    await this.ensureHTMLViewer();
-
-    return result;
+          }
+        }
+      },
+      loadWikiMeta: async () => this.loadWikiMeta(),
+      getCurrentCommit: () => this.getCurrentCommit(),
+      initWikiDb: async (kuzuPath) => initWikiDb(kuzuPath),
+      closeWikiDb: async () => closeWikiDb(),
+      ensureHTMLViewer: async () => this.ensureHTMLViewer(),
+      fullGeneration: async (currentCommit) => this.fullGeneration(currentCommit),
+      runIncrementalUpdate: async (existingMeta, currentCommit) => runIncrementalUpdate({
+        existingMeta,
+        currentCommit,
+        wikiDir: this.wikiDir,
+        llmConfig: this.llmConfig,
+        failedModules: this.failedModules,
+        onProgress: this.onProgress,
+        getChangedFiles: (fromCommit, toCommit) => this.getChangedFiles(fromCommit, toCommit),
+        slugify: (name) => this.slugify(name),
+        findNodeBySlug: (tree, slug) => this.findNodeBySlug(tree, slug),
+        saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
+        deleteSnapshot: async () => {
+          try {
+            await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+          } catch {}
+        },
+        fullGeneration: async (commit) => this.fullGeneration(commit),
+        runParallel: async (items, fn) => this.runParallel(items, fn),
+      }, {
+        generateLeafPage: async (node) => {
+          await generateLeafPage({
+            node,
+            wikiDir: this.wikiDir,
+            repoPath: this.repoPath,
+            llmConfig: this.llmConfig,
+            maxTokensPerModule: this.maxTokensPerModule,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+            truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+          });
+        },
+        generateParentPage: async (node) => {
+          await generateParentPage({
+            node,
+            wikiDir: this.wikiDir,
+            llmConfig: this.llmConfig,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          });
+        },
+        generateOverviewPage: async (moduleTree) => {
+          await generateOverviewPage({
+            moduleTree,
+            wikiDir: this.wikiDir,
+            repoPath: this.repoPath,
+            llmConfig: this.llmConfig,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            readProjectInfo: () => readProjectInfo(this.repoPath),
+            extractModuleFiles: (tree) => extractModuleFiles(tree),
+          });
+        },
+      }),
+    });
   }
 
   // ─── HTML Viewer ─────────────────────────────────────────────────────
