@@ -363,26 +363,31 @@ describe('WikiGenerator orchestration', () => {
       runIncrementalUpdate,
     }), { virtual: true });
 
-    const { WikiGenerator } = await loadGenerator();
-    const generator = new WikiGenerator(
-      '/tmp/repo',
-      '/tmp/storage',
-      '/tmp/kuzu',
-      { model: 'mock-model' } as any,
-    );
+    try {
+      const { WikiGenerator } = await loadGenerator();
+      const generator = new WikiGenerator(
+        '/tmp/repo',
+        '/tmp/storage',
+        '/tmp/kuzu',
+        { model: 'mock-model' } as any,
+        { force: false },
+      );
 
-    await generator.run();
+      await generator.run();
 
-    expect(runIncrementalUpdate).toHaveBeenCalledTimes(1);
-    expect(runIncrementalUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        existingMeta,
-        currentCommit: 'new-commit',
-        wikiDir: '/tmp/storage/wiki',
-        repoPath: '/tmp/repo',
-        llmConfig: { model: 'mock-model' },
-      }),
-      expect.any(Object),
-    );
+      expect(runIncrementalUpdate).toHaveBeenCalledTimes(1);
+      expect(runIncrementalUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingMeta,
+          currentCommit: 'new-commit',
+          wikiDir: '/tmp/storage/wiki',
+          repoPath: '/tmp/repo',
+          llmConfig: { model: 'mock-model' },
+        }),
+        expect.any(Object),
+      );
+    } finally {
+      vi.doUnmock('../../src/core/wiki/incremental-update.js');
+    }
   });
 });
