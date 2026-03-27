@@ -99,4 +99,18 @@ describe('runWikiGeneration contracts', () => {
       options.closeWikiDb.mock.invocationCallOrder[0],
     );
   });
+
+  it('still closes the wiki db when generation throws', async () => {
+    const { runWikiGeneration } = await loadRunPipelineModule();
+    const options = makeBaseOptions({
+      fullGeneration: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(runWikiGeneration(options as any)).rejects.toThrow('boom');
+
+    expect(options.initWikiDb).toHaveBeenCalledWith('/tmp/kuzu');
+    expect(options.closeWikiDb).toHaveBeenCalledTimes(1);
+  });
 });

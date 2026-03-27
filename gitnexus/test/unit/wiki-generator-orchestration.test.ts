@@ -447,6 +447,9 @@ describe('WikiGenerator orchestration', () => {
         fullGeneration: expect.any(Function),
         runIncrementalUpdate: expect.any(Function),
       }));
+      const forwardedOptions = runWikiGeneration.mock.calls[0]?.[0];
+      expect(await forwardedOptions?.loadWikiMeta()).toEqual(existingMeta);
+      expect(forwardedOptions?.getCurrentCommit()).toBe('new-commit');
     } finally {
       vi.doUnmock('../../src/core/wiki/run-pipeline.js');
     }
