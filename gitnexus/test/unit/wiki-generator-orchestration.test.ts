@@ -393,4 +393,62 @@ describe('WikiGenerator orchestration', () => {
       vi.doUnmock('../../src/core/wiki/incremental-update.js');
     }
   });
+
+  it('delegates run() through runWikiGeneration with resolved shell dependencies', async () => {
+    const existingMeta = {
+      fromCommit: 'old-commit',
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      model: 'mock-model',
+      moduleFiles: {},
+      moduleTree: [],
+    };
+
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('meta.json')) {
+        return JSON.stringify(existingMeta);
+      }
+      throw new Error(`unexpected read: ${filePath}`);
+    });
+    mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
+
+    vi.resetModules();
+    const runWikiGeneration = vi.fn(async () => ({
+      pagesGenerated: 0,
+      mode: 'up-to-date' as const,
+      failedModules: [],
+    }));
+    vi.doMock('../../src/core/wiki/run-pipeline.js', () => ({
+      runWikiGeneration,
+    }));
+
+    try {
+      const { WikiGenerator } = await loadGenerator();
+      const generator = new WikiGenerator(
+        '/tmp/repo',
+        '/tmp/storage',
+        '/tmp/kuzu',
+        { model: 'mock-model' } as any,
+        { force: false },
+      );
+
+      await generator.run();
+
+      expect(runWikiGeneration).toHaveBeenCalledTimes(1);
+      expect(runWikiGeneration).toHaveBeenCalledWith(expect.objectContaining({
+        forceMode: false,
+        repoPath: '/tmp/repo',
+        wikiDir: '/tmp/storage/wiki',
+        kuzuPath: '/tmp/kuzu',
+        loadWikiMeta: expect.any(Function),
+        getCurrentCommit: expect.any(Function),
+        prepareWikiDir: expect.any(Function),
+        cleanupForceMode: expect.any(Function),
+        ensureHTMLViewer: expect.any(Function),
+        fullGeneration: expect.any(Function),
+        runIncrementalUpdate: expect.any(Function),
+      }));
+    } finally {
+      vi.doUnmock('../../src/core/wiki/run-pipeline.js');
+    }
+  });
 });
