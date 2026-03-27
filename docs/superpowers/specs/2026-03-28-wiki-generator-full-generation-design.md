@@ -111,6 +111,10 @@ Add focused tests:
 
 - `gitnexus/test/unit/wiki-full-generation.test.ts`
 
+Reused unchanged dependency:
+
+- `gitnexus/src/core/wiki/generator-support.ts`
+
 Optional follow-up only:
 
 - move remaining utility helpers later if they still form a coherent hotspot
@@ -128,7 +132,6 @@ Suggested shape:
 ```ts
 export interface RunFullGenerationOptions {
   currentCommit: string;
-  repoPath: string;
   wikiDir: string;
   llmConfig: LLMConfig;
   maxTokensPerModule: number;
@@ -157,12 +160,26 @@ export async function runFullGeneration(
 
 The helper should directly import:
 
-- `getFilesWithExports`
-- `getAllFiles`
-- `buildModuleTree`
-- `countModules`
-- `flattenModuleTree`
-- `shouldIgnorePath`
+- from `./graph-queries.js`:
+  - `getFilesWithExports`
+  - `getAllFiles`
+- from `./module-tree/builder.js`:
+  - `buildModuleTree`
+  - `countModules`
+  - `flattenModuleTree`
+- from `./generator-support.js`:
+  - `extractModuleFiles`
+- from `../../config/ignore-service.js`:
+  - `shouldIgnorePath`
+
+`extractModuleFiles` is not moved in this slice. `full-generation.ts` should directly reuse the existing `generator-support.ts` export as a stable dependency rather than receiving it via options.
+
+Generation-count ownership remains on `runFullGeneration(...)`, not on the page helpers:
+
+- `generateLeafPage` / `generateParentPage` / `generateOverviewPage` stay `Promise<void>`
+- `runFullGeneration(...)` performs the existing-page short-circuit itself
+- `runFullGeneration(...)` returns `0|1` from its internal orchestration callbacks to `runParallel(...)`
+- `pagesGenerated` is accumulated only from those orchestration-level `0|1` decisions
 
 ### `generator.ts`
 
@@ -171,6 +188,7 @@ After extraction, `WikiGenerator` should:
 - import `runFullGeneration`
 - keep `fullGeneration()` as a thin wrapper method so existing callers do not change
 - continue owning `estimateModuleTokens`, `fileExists`, `saveModuleTree`, `saveWikiMeta`, `runParallel`, `streamOpts`, and page-helper wrappers
+- keep overview-page ownership on the already-extracted top-level `generateOverviewPage(...)` helper from `./pages/overview-page.js`, but pass it into `runFullGeneration(...)` via `FullGenerationDeps`
 
 This slice should reduce `generator.ts` body size without changing its public or internal call boundaries.
 
@@ -199,27 +217,47 @@ The extraction must preserve:
   - leaf processing stays parallel
   - parent processing stays sequential
   - existing-page short-circuit still uses `fileExists(...)`
+  - `runFullGeneration(...)` continues to own output path computation for that short-circuit (`${node.slug}.md` under `wikiDir`)
   - failures still append to `failedModules`
+  - `pagesGenerated` increments only for newly generated leaf/parent pages, not for existing-page short-circuit paths
 
 - phase 3 overview:
-  - still calls `generateOverviewPage(...)`
-  - still increments `pagesGenerated`
+  - `runFullGeneration(...)` still owns the orchestration decision to trigger overview generation
+  - it does so by calling the injected `generateOverviewPage(...)` dependency
+  - overview generation still increments `pagesGenerated` by `1`
 
 - finalize:
   - still calls `saveModuleTree(...)`
   - still calls `saveWikiMeta(...)`
   - metadata still uses `extractModuleFiles(moduleTree)` from generator-support
   - final return shape stays `{ pagesGenerated, mode: 'full', failedModules: [...] }`
+  - `failedModules` continues to be the mutable array owned by the caller during execution, and the return value remains a snapshot copy (`[...failedModules]`) rather than the same reference
 
 ### 8.2 Progress behavior
 
-Preserve the existing progress shape:
+Preserve the existing core progress shape:
 
 - gather `5` and `10`
 - modules progress spanning `30..85`
 - overview `88`
 - finalize `95`
 - done `100`
+
+`ProgressCallback` shape remains:
+
+```ts
+(phase: string, percent: number, detail?: string) => void
+```
+
+Expected phase names in this flow remain:
+
+- `gather`
+- `modules`
+- `overview`
+- `finalize`
+- `done`
+
+For this slice's focused tests, verify core phases only. Do not require a strict sequence over downstream helper-emitted `stream` callbacks (or outer-shell phases such as `init` / `html`), because those are not owned by `runFullGeneration(...)` itself.
 
 ### 8.3 Call boundaries
 
@@ -244,6 +282,7 @@ Cover:
 - existing-page short-circuit behavior
 - overview + metadata save on success
 - `failedModules` accumulation on page-generation failures
+- progress phase sequence and expected percent windows for core phases only (`gather`, `modules`, `overview`, `finalize`, `done`, with module progress spanning `30..85`)
 
 Use pure mocks only: no real graph, no real filesystem writes, no real page generation.
 
@@ -306,6 +345,8 @@ This slice is successful when:
 - `fullGeneration()` remains as a thin wrapper in `generator.ts`
 - focused full-generation tests exist
 - existing wiki regressions still pass
+
+`failedModules` continues to start from the `WikiGenerator` instance-owned array, which is expected to be empty at the start of a normal full-generation run and to accumulate only failures encountered during that run.
 
 ## 12. Implementation Guidance
 
