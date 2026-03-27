@@ -332,4 +332,57 @@ describe('WikiGenerator orchestration', () => {
       pagesGenerated: 0,
     });
   });
+
+  it('dispatches incremental updates through runIncrementalUpdate when metadata exists and force mode is off', async () => {
+    const parentNode = makeParentNode();
+    const existingMeta = {
+      fromCommit: 'old-commit',
+      generatedAt: '2026-03-27T00:00:00.000Z',
+      model: 'mock-model',
+      moduleFiles: {
+        Backend: ['src/auth/login.ts'],
+      },
+      moduleTree: [parentNode],
+    };
+
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('meta.json')) {
+        return JSON.stringify(existingMeta);
+      }
+      throw new Error(`unexpected read: ${filePath}`);
+    });
+    mocks.execSync.mockReturnValue(Buffer.from('new-commit\n'));
+
+    vi.resetModules();
+    const runIncrementalUpdate = vi.fn(async () => ({
+      pagesGenerated: 0,
+      mode: 'incremental' as const,
+      failedModules: [],
+    }));
+    vi.doMock('../../src/core/wiki/incremental-update.js', () => ({
+      runIncrementalUpdate,
+    }), { virtual: true });
+
+    const { WikiGenerator } = await loadGenerator();
+    const generator = new WikiGenerator(
+      '/tmp/repo',
+      '/tmp/storage',
+      '/tmp/kuzu',
+      { model: 'mock-model' } as any,
+    );
+
+    await generator.run();
+
+    expect(runIncrementalUpdate).toHaveBeenCalledTimes(1);
+    expect(runIncrementalUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingMeta,
+        currentCommit: 'new-commit',
+        wikiDir: '/tmp/storage/wiki',
+        repoPath: '/tmp/repo',
+        llmConfig: { model: 'mock-model' },
+      }),
+      expect.any(Object),
+    );
+  });
 });
