@@ -139,12 +139,17 @@ describe('runIncrementalUpdate contracts', () => {
       'src/new/e.ts',
       'src/new/f.ts',
     ];
+    const deleteSnapshot = vi.fn(async () => {
+      await mocks.unlink('/tmp/wiki/first_module_tree.json');
+    });
     const options = makeBaseOptions({
       getChangedFiles: vi.fn(() => changedFiles),
+      deleteSnapshot,
     });
     const result = await runIncrementalUpdate(options as any, makeDeps() as any);
 
     expect(options.deleteSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.unlink).toHaveBeenCalledWith('/tmp/wiki/first_module_tree.json');
     expect(options.fullGeneration).toHaveBeenCalledWith('new-commit');
     expect(options.deleteSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       options.fullGeneration.mock.invocationCallOrder[0],
