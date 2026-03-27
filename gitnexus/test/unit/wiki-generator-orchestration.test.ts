@@ -381,10 +381,13 @@ describe('WikiGenerator orchestration', () => {
           existingMeta,
           currentCommit: 'new-commit',
           wikiDir: '/tmp/storage/wiki',
-          repoPath: '/tmp/repo',
           llmConfig: { model: 'mock-model' },
         }),
-        expect.any(Object),
+        expect.objectContaining({
+          generateLeafPage: expect.any(Function),
+          generateParentPage: expect.any(Function),
+          generateOverviewPage: expect.any(Function),
+        }),
       );
     } finally {
       vi.doUnmock('../../src/core/wiki/incremental-update.js');

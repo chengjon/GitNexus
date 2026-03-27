@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
-import type { LLMConfig, CallLLMOptions } from './llm-client.js';
+import type { LLMConfig } from './llm-client.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
 import type { ProgressCallback, WikiMeta } from './generator.js';
 
@@ -16,12 +16,9 @@ export interface RunIncrementalUpdateOptions {
   existingMeta: WikiMeta;
   currentCommit: string;
   wikiDir: string;
-  repoPath: string;
   llmConfig: LLMConfig;
-  maxTokensPerModule: number;
   failedModules: string[];
   onProgress: ProgressCallback;
-  streamOpts: (label: string, fixedPercent?: number) => CallLLMOptions;
   getChangedFiles: (fromCommit: string, toCommit: string) => string[];
   slugify: (name: string) => string;
   findNodeBySlug: (tree: ModuleTreeNode[], slug: string) => ModuleTreeNode | null;

@@ -198,4 +198,29 @@ describe('runIncrementalUpdate contracts', () => {
       mode: 'incremental',
     });
   });
+
+  it('adds unmapped files to Other and saves updated metadata after successful regeneration', async () => {
+    const { runIncrementalUpdate } = await loadIncrementalModule();
+    const options = makeBaseOptions({
+      getChangedFiles: vi.fn(() => ['src/core/util.ts', 'src/new-file.ts']),
+      findNodeBySlug: vi.fn((tree: ModuleTreeNode[], slug: string) => tree.find((node) => node.slug === slug) ?? null),
+    });
+    const deps = makeDeps();
+
+    const result = await runIncrementalUpdate(options as any, deps as any);
+
+    expect(options.saveWikiMeta).toHaveBeenCalledWith(expect.objectContaining({
+      fromCommit: 'new-commit',
+      model: 'mock-model',
+      moduleFiles: expect.objectContaining({
+        Other: ['src/new-file.ts'],
+      }),
+    }));
+    expect(deps.generateLeafPage).toHaveBeenCalledWith(expect.objectContaining({ slug: 'core' }));
+    expect(deps.generateOverviewPage).toHaveBeenCalledWith(options.existingMeta.moduleTree);
+    expect(result).toMatchObject({
+      pagesGenerated: 2,
+      mode: 'incremental',
+    });
+  });
 });
