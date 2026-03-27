@@ -49,7 +49,7 @@ describe('wiki generator support contracts', () => {
 
     const result = await readProjectInfo('/tmp/repo');
 
-    expect(result).toContain('Project: repo');
+    expect(result.startsWith('Project: repo')).toBe(true);
     expect(result).toContain('Name: gitnexus');
     expect(result).toContain('Description: Graph-powered code intelligence');
     expect(result).toContain('Scripts: build, test');
@@ -74,7 +74,7 @@ describe('wiki generator support contracts', () => {
 
     const result = await readProjectInfo('/tmp/repo');
 
-    expect(result).toContain('Project: repo');
+    expect(result.startsWith('Project: repo')).toBe(true);
     expect(result).toContain('\nCargo.toml:\n[package]');
     expect(result).not.toContain('x'.repeat(600));
   });
