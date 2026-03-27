@@ -33,6 +33,7 @@ import {
 import {
   GROUPING_SYSTEM_PROMPT,
 } from './prompts.js';
+import { runIncrementalUpdate } from './incremental-update.js';
 import { generateLeafPage } from './pages/leaf-page.js';
 import { generateParentPage } from './pages/parent-page.js';
 import { generateOverviewPage } from './pages/overview-page.js';
@@ -160,7 +161,60 @@ export class WikiGenerator {
     let result: { pagesGenerated: number; mode: 'full' | 'incremental' | 'up-to-date'; failedModules: string[] };
     try {
       if (!forceMode && existingMeta && existingMeta.fromCommit) {
-        result = await this.incrementalUpdate(existingMeta, currentCommit);
+        result = await runIncrementalUpdate({
+          existingMeta,
+          currentCommit,
+          wikiDir: this.wikiDir,
+          repoPath: this.repoPath,
+          llmConfig: this.llmConfig,
+          maxTokensPerModule: this.maxTokensPerModule,
+          failedModules: this.failedModules,
+          onProgress: this.onProgress,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          getChangedFiles: (fromCommit, toCommit) => this.getChangedFiles(fromCommit, toCommit),
+          slugify: (name) => this.slugify(name),
+          findNodeBySlug: (tree, slug) => this.findNodeBySlug(tree, slug),
+          saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
+          deleteSnapshot: async () => {
+            try {
+              await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+            } catch {}
+          },
+          fullGeneration: async (commit) => this.fullGeneration(commit),
+          runParallel: async (items, fn) => this.runParallel(items, fn),
+        }, {
+          generateLeafPage: async (node) => {
+            await generateLeafPage({
+              node,
+              wikiDir: this.wikiDir,
+              repoPath: this.repoPath,
+              llmConfig: this.llmConfig,
+              maxTokensPerModule: this.maxTokensPerModule,
+              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+              readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+              truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+            });
+          },
+          generateParentPage: async (node) => {
+            await generateParentPage({
+              node,
+              wikiDir: this.wikiDir,
+              llmConfig: this.llmConfig,
+              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            });
+          },
+          generateOverviewPage: async (moduleTree) => {
+            await generateOverviewPage({
+              moduleTree,
+              wikiDir: this.wikiDir,
+              repoPath: this.repoPath,
+              llmConfig: this.llmConfig,
+              streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+              readProjectInfo: () => this.readProjectInfo(),
+              extractModuleFiles: (tree) => this.extractModuleFiles(tree),
+            });
+          },
+        });
       } else {
         result = await this.fullGeneration(currentCommit);
       }
@@ -317,142 +371,6 @@ export class WikiGenerator {
 
     this.onProgress('done', 100, 'Wiki generation complete');
     return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
-  }
-
-  // ─── Incremental Updates ────────────────────────────────────────────
-
-  private async incrementalUpdate(
-    existingMeta: WikiMeta,
-    currentCommit: string,
-  ): Promise<{ pagesGenerated: number; mode: 'incremental'; failedModules: string[] }> {
-    this.onProgress('incremental', 5, 'Detecting changes...');
-
-    // Get changed files since last generation
-    const changedFiles = this.getChangedFiles(existingMeta.fromCommit, currentCommit);
-    if (changedFiles.length === 0) {
-      // No file changes but commit differs (e.g. merge commit)
-      await this.saveWikiMeta({
-        ...existingMeta,
-        fromCommit: currentCommit,
-        generatedAt: new Date().toISOString(),
-      });
-      return { pagesGenerated: 0, mode: 'incremental', failedModules: [] };
-    }
-
-    this.onProgress('incremental', 10, `${changedFiles.length} files changed`);
-
-    // Determine affected modules
-    const affectedModules = new Set<string>();
-    const newFiles: string[] = [];
-
-    for (const fp of changedFiles) {
-      let found = false;
-      for (const [mod, files] of Object.entries(existingMeta.moduleFiles)) {
-        if (files.includes(fp)) {
-          affectedModules.add(mod);
-          found = true;
-          break;
-        }
-      }
-      if (!found && !shouldIgnorePath(fp)) {
-        newFiles.push(fp);
-      }
-    }
-
-    // If significant new files exist, re-run full grouping
-    if (newFiles.length > 5) {
-      this.onProgress('incremental', 15, 'Significant new files detected, running full generation...');
-      // Delete old snapshot to force re-grouping
-      try { await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json')); } catch {}
-      const fullResult = await this.fullGeneration(currentCommit);
-      return { ...fullResult, mode: 'incremental' };
-    }
-
-    // Add new files to nearest module or "Other"
-    if (newFiles.length > 0) {
-      if (!existingMeta.moduleFiles['Other']) {
-        existingMeta.moduleFiles['Other'] = [];
-      }
-      existingMeta.moduleFiles['Other'].push(...newFiles);
-      affectedModules.add('Other');
-    }
-
-    // Regenerate affected module pages (parallel)
-    let pagesGenerated = 0;
-    const moduleTree = existingMeta.moduleTree;
-    const affectedArray = Array.from(affectedModules);
-
-    this.onProgress('incremental', 20, `Regenerating ${affectedArray.length} module(s)...`);
-
-    const affectedNodes: ModuleTreeNode[] = [];
-    for (const mod of affectedArray) {
-      const modSlug = this.slugify(mod);
-      const node = this.findNodeBySlug(moduleTree, modSlug);
-      if (node) {
-        try { await fs.unlink(path.join(this.wikiDir, `${node.slug}.md`)); } catch {}
-        affectedNodes.push(node);
-      }
-    }
-
-    let incProcessed = 0;
-    pagesGenerated += await this.runParallel(affectedNodes, async (node) => {
-      try {
-        if (node.children && node.children.length > 0) {
-          await generateParentPage({
-            node,
-            wikiDir: this.wikiDir,
-            llmConfig: this.llmConfig,
-            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-          });
-        } else {
-          await generateLeafPage({
-            node,
-            wikiDir: this.wikiDir,
-            repoPath: this.repoPath,
-            llmConfig: this.llmConfig,
-            maxTokensPerModule: this.maxTokensPerModule,
-            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-            readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
-            truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
-          });
-        }
-        incProcessed++;
-        const percent = 20 + Math.round((incProcessed / affectedNodes.length) * 60);
-        this.onProgress('incremental', percent, `${incProcessed}/${affectedNodes.length} — ${node.name}`);
-        return 1;
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        incProcessed++;
-        return 0;
-      }
-    });
-
-    // Regenerate overview if any pages changed
-    if (pagesGenerated > 0) {
-      this.onProgress('incremental', 85, 'Updating overview...');
-      await generateOverviewPage({
-        moduleTree,
-        wikiDir: this.wikiDir,
-        repoPath: this.repoPath,
-        llmConfig: this.llmConfig,
-        streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-        readProjectInfo: () => this.readProjectInfo(),
-        extractModuleFiles: (tree) => this.extractModuleFiles(tree),
-      });
-      pagesGenerated++;
-    }
-
-    // Save updated metadata
-    this.onProgress('incremental', 95, 'Saving metadata...');
-    await this.saveWikiMeta({
-      ...existingMeta,
-      fromCommit: currentCommit,
-      generatedAt: new Date().toISOString(),
-      model: this.llmConfig.model,
-    });
-
-    this.onProgress('done', 100, 'Incremental update complete');
-    return { pagesGenerated, mode: 'incremental', failedModules: [...this.failedModules] };
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
