@@ -454,4 +454,54 @@ describe('WikiGenerator orchestration', () => {
       vi.doUnmock('../../src/core/wiki/run-pipeline.js');
     }
   });
+
+  it('delegates fullGeneration() through runFullGeneration with resolved generation dependencies', async () => {
+    vi.resetModules();
+    const runFullGeneration = vi.fn(async () => ({
+      pagesGenerated: 1,
+      mode: 'full' as const,
+      failedModules: [],
+    }));
+    vi.doMock('../../src/core/wiki/full-generation.js', () => ({
+      runFullGeneration,
+    }));
+
+    try {
+      const { WikiGenerator } = await loadGenerator();
+      const generator = new WikiGenerator(
+        '/tmp/repo',
+        '/tmp/storage',
+        '/tmp/kuzu',
+        { model: 'mock-model' } as any,
+      );
+
+      await (generator as any).fullGeneration('head-commit');
+
+      expect(runFullGeneration).toHaveBeenCalledTimes(1);
+      expect(runFullGeneration).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentCommit: 'head-commit',
+          wikiDir: '/tmp/storage/wiki',
+          llmConfig: { model: 'mock-model' },
+          maxTokensPerModule: 30000,
+          failedModules: [],
+          onProgress: expect.any(Function),
+          slugify: expect.any(Function),
+          estimateModuleTokens: expect.any(Function),
+          streamOpts: expect.any(Function),
+          fileExists: expect.any(Function),
+          saveModuleTree: expect.any(Function),
+          saveWikiMeta: expect.any(Function),
+          runParallel: expect.any(Function),
+        }),
+        expect.objectContaining({
+          generateLeafPage: expect.any(Function),
+          generateParentPage: expect.any(Function),
+          generateOverviewPage: expect.any(Function),
+        }),
+      );
+    } finally {
+      vi.doUnmock('../../src/core/wiki/full-generation.js');
+    }
+  });
 });
