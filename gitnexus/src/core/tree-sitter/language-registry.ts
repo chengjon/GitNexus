@@ -11,10 +11,11 @@ import PHP from 'tree-sitter-php';
 import { createRequire } from 'node:module';
 import { SupportedLanguages } from '../../config/supported-languages.js';
 
-export interface OptionalLanguageSupport {
+export interface LanguageSupportSummaryEntry {
   language: SupportedLanguages;
-  optional: true;
+  tier: 'builtin' | 'optional';
   status: 'available' | 'unavailable';
+  source: string;
   detail: string;
 }
 
@@ -64,34 +65,57 @@ const loadOptionalLanguage = (
 
 export const getOptionalLanguageSupportSummary = (
   loadOptionalLanguageModule: OptionalLanguageLoader = defaultOptionalLanguageLoader,
-): OptionalLanguageSupport[] => {
+): LanguageSupportSummaryEntry[] => {
+  const builtInLanguages: Array<{ language: SupportedLanguages; source: string }> = [
+    { language: SupportedLanguages.JavaScript, source: 'bundled' },
+    { language: SupportedLanguages.TypeScript, source: 'bundled' },
+    { language: SupportedLanguages.Python, source: 'bundled' },
+    { language: SupportedLanguages.Java, source: 'bundled' },
+    { language: SupportedLanguages.C, source: 'bundled' },
+    { language: SupportedLanguages.CPlusPlus, source: 'bundled' },
+    { language: SupportedLanguages.CSharp, source: 'bundled' },
+    { language: SupportedLanguages.Go, source: 'bundled' },
+    { language: SupportedLanguages.Rust, source: 'bundled' },
+    { language: SupportedLanguages.PHP, source: 'bundled' },
+  ];
   const optionalLanguages: Array<{ language: SupportedLanguages; moduleName: string }> = [
     { language: SupportedLanguages.Kotlin, moduleName: 'tree-sitter-kotlin' },
     { language: SupportedLanguages.Swift, moduleName: 'tree-sitter-swift' },
   ];
 
-  return optionalLanguages.map(({ language, moduleName }) => {
-    try {
-      const loaded = unwrapLanguageModule(loadOptionalLanguageModule(moduleName));
-      return {
-        language,
-        optional: true as const,
-        status: loaded ? 'available' as const : 'unavailable' as const,
-        detail: loaded ? 'loaded' : 'unavailable',
-      };
-    } catch (error) {
-      if (isOptionalLanguageUnavailableError(error)) {
+  return [
+    ...builtInLanguages.map(({ language, source }) => ({
+      language,
+      tier: 'builtin' as const,
+      status: 'available' as const,
+      source,
+      detail: 'bundled',
+    })),
+    ...optionalLanguages.map(({ language, moduleName }) => {
+      try {
+        const loaded = unwrapLanguageModule(loadOptionalLanguageModule(moduleName));
         return {
           language,
-          optional: true as const,
-          status: 'unavailable' as const,
-          detail: error instanceof Error ? error.message : String(error),
+          tier: 'optional' as const,
+          status: loaded ? 'available' as const : 'unavailable' as const,
+          source: moduleName,
+          detail: loaded ? 'loaded' : 'unavailable',
         };
-      }
+      } catch (error) {
+        if (isOptionalLanguageUnavailableError(error)) {
+          return {
+            language,
+            tier: 'optional' as const,
+            status: 'unavailable' as const,
+            source: moduleName,
+            detail: error instanceof Error ? error.message : String(error),
+          };
+        }
 
-      throw error;
-    }
-  });
+        throw error;
+      }
+    }),
+  ];
 };
 
 export const createLanguageMap = (

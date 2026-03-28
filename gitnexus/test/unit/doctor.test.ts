@@ -372,15 +372,24 @@ describe('runDoctor', () => {
         getLanguageSupportSummary: () => [
           {
             language: SupportedLanguages.Kotlin,
-            optional: true,
+            tier: 'optional',
             status: 'unavailable',
+            source: 'tree-sitter-kotlin',
             detail: 'No native build was found for tree-sitter-kotlin',
           },
           {
             language: SupportedLanguages.Swift,
-            optional: true,
+            tier: 'optional',
             status: 'available',
+            source: 'tree-sitter-swift',
             detail: 'loaded',
+          },
+          {
+            language: SupportedLanguages.TypeScript,
+            tier: 'builtin',
+            status: 'available',
+            source: 'bundled',
+            detail: 'bundled',
           },
         ],
       },
@@ -391,7 +400,7 @@ describe('runDoctor', () => {
         expect.objectContaining({
           name: 'language-support',
           status: 'warn',
-          detail: expect.stringContaining('kotlin=unavailable'),
+          detail: expect.stringContaining('kotlin:optional=unavailable'),
         }),
       ]),
     );

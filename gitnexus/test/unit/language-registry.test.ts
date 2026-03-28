@@ -58,19 +58,34 @@ describe('language-registry', () => {
       throw new Error(`Unexpected optional module request: ${moduleName}`);
     });
 
-    expect(support).toEqual([
+    expect(support).toEqual(expect.arrayContaining([
       {
         language: SupportedLanguages.Kotlin,
-        optional: true,
+        tier: 'optional',
         status: 'unavailable',
+        source: 'tree-sitter-kotlin',
         detail: 'No native build was found for tree-sitter-kotlin',
       },
       {
         language: SupportedLanguages.Swift,
-        optional: true,
+        tier: 'optional',
         status: 'available',
+        source: 'tree-sitter-swift',
         detail: 'loaded',
       },
-    ]);
+    ]));
+  });
+
+  it('reports built-in language support as always available', () => {
+    const support = getOptionalLanguageSupportSummary();
+    const builtIn = support.find((entry) => entry.language === SupportedLanguages.TypeScript);
+
+    expect(builtIn).toEqual({
+      language: SupportedLanguages.TypeScript,
+      tier: 'builtin',
+      status: 'available',
+      source: 'bundled',
+      detail: 'bundled',
+    });
   });
 });

@@ -4,7 +4,7 @@ import { getEmbeddingsConfigSnapshot } from './config.js';
 import { DEFAULT_EMBEDDING_CONFIG } from '../core/embeddings/types.js';
 import { getHostPlans } from './setup.js';
 import { execFileSync } from 'node:child_process';
-import { getOptionalLanguageSupportSummary, type OptionalLanguageSupport } from '../core/tree-sitter/language-registry.js';
+import { getOptionalLanguageSupportSummary, type LanguageSupportSummaryEntry } from '../core/tree-sitter/language-registry.js';
 import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
 export interface DoctorOptions {
@@ -33,7 +33,7 @@ interface DoctorDeps {
   fetchJson: (url: string, init?: RequestInit) => Promise<any>;
   probeOllama: (baseUrl: string, model: string) => Promise<{ status: 'pass' | 'warn'; detail: string }>;
   getHostPlans: typeof getHostPlans;
-  getLanguageSupportSummary?: () => OptionalLanguageSupport[];
+  getLanguageSupportSummary?: () => LanguageSupportSummaryEntry[];
   getNativeRuntimeCheck?: () => DoctorCheck;
 }
 
@@ -195,7 +195,7 @@ export async function runDoctor(
       name: 'language-support',
       status: unavailable.length > 0 ? 'warn' : 'pass',
       detail: languageSupport
-        .map((entry) => `${entry.language}=${entry.status}${entry.detail ? ` (${entry.detail})` : ''}`)
+        .map((entry) => `${entry.language}:${entry.tier}=${entry.status}${entry.detail ? ` (${entry.detail})` : ''}`)
         .join(', '),
     });
   }
