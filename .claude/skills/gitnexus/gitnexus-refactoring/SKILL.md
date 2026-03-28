@@ -33,7 +33,7 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 - [ ] Review graph edits (high confidence) and text_search edits (review carefully)
 - [ ] Note: wide matches in the same file are tagged with lower confidence
 - [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
-- [ ] gitnexus_detect_changes({cwd: "/path/to/worktree"}) — verify only expected files changed
+- [ ] gitnexus_detect_changes() — verify only expected files changed
 - [ ] In worktrees, pass `cwd` explicitly if the MCP server may be running elsewhere
 - [ ] Run tests for affected processes
 ```

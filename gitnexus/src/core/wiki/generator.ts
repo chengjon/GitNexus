@@ -20,17 +20,11 @@ import {
   getFilesWithExports,
   getAllFiles,
   getInterFileCallEdges,
-  getIntraModuleCallEdges,
-  getInterModuleCallEdges,
-  getProcessesForFiles,
-  getAllProcesses,
-  getInterModuleEdgesForOverview,
   type FileWithExports,
 } from './graph-queries.js';
 import { generateHTMLViewer } from './html-viewer.js';
 
 import {
-  callLLM,
   estimateTokens,
   type LLMConfig,
   type CallLLMOptions,
@@ -38,16 +32,14 @@ import {
 
 import {
   GROUPING_SYSTEM_PROMPT,
-  MODULE_SYSTEM_PROMPT,
-  MODULE_USER_PROMPT,
-  PARENT_SYSTEM_PROMPT,
-  PARENT_USER_PROMPT,
-  OVERVIEW_SYSTEM_PROMPT,
-  OVERVIEW_USER_PROMPT,
-  fillTemplate,
-  formatCallEdges,
-  formatProcesses,
 } from './prompts.js';
+import { runFullGeneration } from './full-generation.js';
+import { extractModuleFiles, readProjectInfo } from './generator-support.js';
+import { runIncrementalUpdate } from './incremental-update.js';
+import { runWikiGeneration } from './run-pipeline.js';
+import { generateLeafPage } from './pages/leaf-page.js';
+import { generateParentPage } from './pages/parent-page.js';
+import { generateOverviewPage } from './pages/overview-page.js';
 
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import type { ModuleTreeNode } from './module-tree/types.js';
@@ -140,50 +132,86 @@ export class WikiGenerator {
    * Main entry point. Runs the full pipeline or incremental update.
    */
   async run(): Promise<{ pagesGenerated: number; mode: 'full' | 'incremental' | 'up-to-date'; failedModules: string[] }> {
-    await fs.mkdir(this.wikiDir, { recursive: true });
-
-    const existingMeta = await this.loadWikiMeta();
-    const currentCommit = this.getCurrentCommit();
-    const forceMode = this.options.force;
-
-    // Up-to-date check (skip if --force)
-    if (!forceMode && existingMeta && existingMeta.fromCommit === currentCommit) {
-      // Still regenerate the HTML viewer in case it's missing
-      await this.ensureHTMLViewer();
-      return { pagesGenerated: 0, mode: 'up-to-date', failedModules: [] };
-    }
-
-    // Force mode: delete snapshot to force full re-grouping
-    if (forceMode) {
-      try { await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json')); } catch {}
-      // Delete existing module pages so they get regenerated
-      const existingFiles = await fs.readdir(this.wikiDir).catch(() => [] as string[]);
-      for (const f of existingFiles) {
-        if (f.endsWith('.md')) {
-          try { await fs.unlink(path.join(this.wikiDir, f)); } catch {}
+    return runWikiGeneration({
+      forceMode: !!this.options.force,
+      repoPath: this.repoPath,
+      wikiDir: this.wikiDir,
+      kuzuPath: this.kuzuPath,
+      onProgress: this.onProgress,
+      prepareWikiDir: async () => {
+        await fs.mkdir(this.wikiDir, { recursive: true });
+      },
+      cleanupForceMode: async () => {
+        try {
+          await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+        } catch {}
+        const existingFiles = await fs.readdir(this.wikiDir).catch(() => [] as string[]);
+        for (const file of existingFiles) {
+          if (file.endsWith('.md')) {
+            try {
+              await fs.unlink(path.join(this.wikiDir, file));
+            } catch {}
+          }
         }
-      }
-    }
-
-    // Init graph
-    this.onProgress('init', 2, 'Connecting to knowledge graph...');
-    await initWikiDb(this.kuzuPath);
-
-    let result: { pagesGenerated: number; mode: 'full' | 'incremental' | 'up-to-date'; failedModules: string[] };
-    try {
-      if (!forceMode && existingMeta && existingMeta.fromCommit) {
-        result = await this.incrementalUpdate(existingMeta, currentCommit);
-      } else {
-        result = await this.fullGeneration(currentCommit);
-      }
-    } finally {
-      await closeWikiDb();
-    }
-
-    // Always generate the HTML viewer after wiki content changes
-    await this.ensureHTMLViewer();
-
-    return result;
+      },
+      loadWikiMeta: async () => this.loadWikiMeta(),
+      getCurrentCommit: () => this.getCurrentCommit(),
+      initWikiDb: async (kuzuPath) => initWikiDb(kuzuPath),
+      closeWikiDb: async () => closeWikiDb(),
+      ensureHTMLViewer: async () => this.ensureHTMLViewer(),
+      fullGeneration: async (currentCommit) => this.fullGeneration(currentCommit),
+      runIncrementalUpdate: async (existingMeta, currentCommit) => runIncrementalUpdate({
+        existingMeta,
+        currentCommit,
+        wikiDir: this.wikiDir,
+        llmConfig: this.llmConfig,
+        failedModules: this.failedModules,
+        onProgress: this.onProgress,
+        getChangedFiles: (fromCommit, toCommit) => this.getChangedFiles(fromCommit, toCommit),
+        slugify: (name) => this.slugify(name),
+        findNodeBySlug: (tree, slug) => this.findNodeBySlug(tree, slug),
+        saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
+        deleteSnapshot: async () => {
+          try {
+            await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json'));
+          } catch {}
+        },
+        fullGeneration: async (commit) => this.fullGeneration(commit),
+        runParallel: async (items, fn) => this.runParallel(items, fn),
+      }, {
+        generateLeafPage: async (node) => {
+          await generateLeafPage({
+            node,
+            wikiDir: this.wikiDir,
+            repoPath: this.repoPath,
+            llmConfig: this.llmConfig,
+            maxTokensPerModule: this.maxTokensPerModule,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+            truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+          });
+        },
+        generateParentPage: async (node) => {
+          await generateParentPage({
+            node,
+            wikiDir: this.wikiDir,
+            llmConfig: this.llmConfig,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          });
+        },
+        generateOverviewPage: async (moduleTree) => {
+          await generateOverviewPage({
+            moduleTree,
+            wikiDir: this.wikiDir,
+            repoPath: this.repoPath,
+            llmConfig: this.llmConfig,
+            streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+            readProjectInfo: () => readProjectInfo(this.repoPath),
+            extractModuleFiles: (tree) => extractModuleFiles(tree),
+          });
+        },
+      }),
+    });
   }
 
   // ─── HTML Viewer ─────────────────────────────────────────────────────
@@ -202,30 +230,8 @@ export class WikiGenerator {
   // ─── Full Generation ────────────────────────────────────────────────
 
   private async fullGeneration(currentCommit: string): Promise<{ pagesGenerated: number; mode: 'full'; failedModules: string[] }> {
-    let pagesGenerated = 0;
-
-    // Phase 0: Gather structure
-    this.onProgress('gather', 5, 'Querying graph for file structure...');
-    const filesWithExports = await getFilesWithExports();
-    const allFiles = await getAllFiles();
-
-    // Filter to source files only
-    const sourceFiles = allFiles.filter(f => !shouldIgnorePath(f));
-    if (sourceFiles.length === 0) {
-      throw new Error('No source files found in the knowledge graph. Nothing to document.');
-    }
-
-    // Build enriched file list (merge exports into all source files)
-    const exportMap = new Map(filesWithExports.map(f => [f.filePath, f]));
-    const enrichedFiles: FileWithExports[] = sourceFiles.map(fp => {
-      return exportMap.get(fp) || { filePath: fp, symbols: [] };
-    });
-
-    this.onProgress('gather', 10, `Found ${sourceFiles.length} source files`);
-
-    // Phase 1: Build module tree
-    const moduleTree = await buildModuleTree({
-      files: enrichedFiles,
+    const result = await runFullGeneration({
+      currentCommit,
       wikiDir: this.wikiDir,
       llmConfig: this.llmConfig,
       maxTokensPerModule: this.maxTokensPerModule,
@@ -233,327 +239,45 @@ export class WikiGenerator {
       slugify: (name) => this.slugify(name),
       estimateModuleTokens: async (filePaths) => this.estimateModuleTokens(filePaths),
       streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+      fileExists: async (filePath) => this.fileExists(filePath),
+      saveModuleTree: async (tree) => this.saveModuleTree(tree),
+      saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
+      runParallel: async (items, fn) => this.runParallel(items, fn),
+    }, {
+      generateLeafPage: async (node) => {
+        await generateLeafPage({
+          node,
+          wikiDir: this.wikiDir,
+          repoPath: this.repoPath,
+          llmConfig: this.llmConfig,
+          maxTokensPerModule: this.maxTokensPerModule,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
+          truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
+        });
+      },
+      generateParentPage: async (node) => {
+        await generateParentPage({
+          node,
+          wikiDir: this.wikiDir,
+          llmConfig: this.llmConfig,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+        });
+      },
+      generateOverviewPage: async (moduleTree) => {
+        await generateOverviewPage({
+          moduleTree,
+          wikiDir: this.wikiDir,
+          repoPath: this.repoPath,
+          llmConfig: this.llmConfig,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          readProjectInfo: () => readProjectInfo(this.repoPath),
+          extractModuleFiles: (tree) => extractModuleFiles(tree),
+        });
+      },
     });
-    pagesGenerated = 0;
-
-    // Phase 2: Generate module pages (parallel with concurrency limit)
-    const totalModules = countModules(moduleTree);
-    let modulesProcessed = 0;
-
-    const reportProgress = (moduleName?: string) => {
-      modulesProcessed++;
-      const percent = 30 + Math.round((modulesProcessed / totalModules) * 55);
-      const detail = moduleName
-        ? `${modulesProcessed}/${totalModules} — ${moduleName}`
-        : `${modulesProcessed}/${totalModules} modules`;
-      this.onProgress('modules', percent, detail);
-    };
-
-    // Flatten tree into layers: leaves first, then parents
-    // Leaves can run in parallel; parents must wait for their children
-    const { leaves, parents } = flattenModuleTree(moduleTree);
-
-    // Process all leaf modules in parallel
-    pagesGenerated += await this.runParallel(leaves, async (node) => {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      if (await this.fileExists(pagePath)) {
-        reportProgress(node.name);
-        return 0;
-      }
-      try {
-        await this.generateLeafPage(node);
-        reportProgress(node.name);
-        return 1;
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        reportProgress(`Failed: ${node.name}`);
-        return 0;
-      }
-    });
-
-    // Process parent modules sequentially (they depend on child docs)
-    for (const node of parents) {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      if (await this.fileExists(pagePath)) {
-        reportProgress(node.name);
-        continue;
-      }
-      try {
-        await this.generateParentPage(node);
-        pagesGenerated++;
-        reportProgress(node.name);
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        reportProgress(`Failed: ${node.name}`);
-      }
-    }
-
-    // Phase 3: Generate overview
-    this.onProgress('overview', 88, 'Generating overview page...');
-    await this.generateOverview(moduleTree);
-    pagesGenerated++;
-
-    // Save metadata
-    this.onProgress('finalize', 95, 'Saving metadata...');
-    const moduleFiles = this.extractModuleFiles(moduleTree);
-    await this.saveModuleTree(moduleTree);
-    await this.saveWikiMeta({
-      fromCommit: currentCommit,
-      generatedAt: new Date().toISOString(),
-      model: this.llmConfig.model,
-      moduleFiles,
-      moduleTree,
-    });
-
-    this.onProgress('done', 100, 'Wiki generation complete');
-    return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
-  }
-
-  // ─── Phase 2: Generate Module Pages ─────────────────────────────────
-
-  /**
-   * Generate a leaf module page from source code + graph data.
-   */
-  private async generateLeafPage(node: ModuleTreeNode): Promise<void> {
-    const filePaths = node.files;
-
-    // Read source files from disk
-    const sourceCode = await this.readSourceFiles(filePaths);
-
-    // Token budget check — if too large, summarize in batches
-    const totalTokens = estimateTokens(sourceCode);
-    let finalSourceCode = sourceCode;
-    if (totalTokens > this.maxTokensPerModule) {
-      finalSourceCode = this.truncateSource(sourceCode, this.maxTokensPerModule);
-    }
-
-    // Get graph data
-    const [intraCalls, interCalls, processes] = await Promise.all([
-      getIntraModuleCallEdges(filePaths),
-      getInterModuleCallEdges(filePaths),
-      getProcessesForFiles(filePaths, 5),
-    ]);
-
-    const prompt = fillTemplate(MODULE_USER_PROMPT, {
-      MODULE_NAME: node.name,
-      SOURCE_CODE: finalSourceCode,
-      INTRA_CALLS: formatCallEdges(intraCalls),
-      OUTGOING_CALLS: formatCallEdges(interCalls.outgoing),
-      INCOMING_CALLS: formatCallEdges(interCalls.incoming),
-      PROCESSES: formatProcesses(processes),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, MODULE_SYSTEM_PROMPT,
-      this.streamOpts(node.name),
-    );
-
-    // Write page with front matter
-    const pageContent = `# ${node.name}\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, `${node.slug}.md`), pageContent, 'utf-8');
-  }
-
-  /**
-   * Generate a parent module page from children's documentation.
-   */
-  private async generateParentPage(node: ModuleTreeNode): Promise<void> {
-    if (!node.children || node.children.length === 0) return;
-
-    // Read children's overview sections
-    const childDocs: string[] = [];
-    for (const child of node.children) {
-      const childPage = path.join(this.wikiDir, `${child.slug}.md`);
-      try {
-        const content = await fs.readFile(childPage, 'utf-8');
-        // Extract overview section (first ~500 chars or up to "### Architecture")
-        const overviewEnd = content.indexOf('### Architecture');
-        const overview = overviewEnd > 0 ? content.slice(0, overviewEnd).trim() : content.slice(0, 800).trim();
-        childDocs.push(`#### ${child.name}\n${overview}`);
-      } catch {
-        childDocs.push(`#### ${child.name}\n(Documentation not yet generated)`);
-      }
-    }
-
-    // Get cross-child call edges
-    const allChildFiles = node.children.flatMap(c => c.files);
-    const crossCalls = await getIntraModuleCallEdges(allChildFiles);
-    const processes = await getProcessesForFiles(allChildFiles, 3);
-
-    const prompt = fillTemplate(PARENT_USER_PROMPT, {
-      MODULE_NAME: node.name,
-      CHILDREN_DOCS: childDocs.join('\n\n'),
-      CROSS_MODULE_CALLS: formatCallEdges(crossCalls),
-      CROSS_PROCESSES: formatProcesses(processes),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, PARENT_SYSTEM_PROMPT,
-      this.streamOpts(node.name),
-    );
-
-    const pageContent = `# ${node.name}\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, `${node.slug}.md`), pageContent, 'utf-8');
-  }
-
-  // ─── Phase 3: Generate Overview ─────────────────────────────────────
-
-  private async generateOverview(moduleTree: ModuleTreeNode[]): Promise<void> {
-    // Read module overview sections
-    const moduleSummaries: string[] = [];
-    for (const node of moduleTree) {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      try {
-        const content = await fs.readFile(pagePath, 'utf-8');
-        const overviewEnd = content.indexOf('### Architecture');
-        const overview = overviewEnd > 0 ? content.slice(0, overviewEnd).trim() : content.slice(0, 600).trim();
-        moduleSummaries.push(`#### ${node.name}\n${overview}`);
-      } catch {
-        moduleSummaries.push(`#### ${node.name}\n(Documentation pending)`);
-      }
-    }
-
-    // Get inter-module edges for architecture diagram
-    const moduleFiles = this.extractModuleFiles(moduleTree);
-    const moduleEdges = await getInterModuleEdgesForOverview(moduleFiles);
-
-    // Get top processes for key workflows
-    const topProcesses = await getAllProcesses(5);
-
-    // Read project config
-    const projectInfo = await this.readProjectInfo();
-
-    const edgesText = moduleEdges.length > 0
-      ? moduleEdges.map(e => `${e.from} → ${e.to} (${e.count} calls)`).join('\n')
-      : 'No inter-module call edges detected';
-
-    const prompt = fillTemplate(OVERVIEW_USER_PROMPT, {
-      PROJECT_INFO: projectInfo,
-      MODULE_SUMMARIES: moduleSummaries.join('\n\n'),
-      MODULE_EDGES: edgesText,
-      TOP_PROCESSES: formatProcesses(topProcesses),
-    });
-
-    const response = await callLLM(
-      prompt, this.llmConfig, OVERVIEW_SYSTEM_PROMPT,
-      this.streamOpts('Generating overview', 88),
-    );
-
-    const pageContent = `# ${path.basename(this.repoPath)} — Wiki\n\n${response.content}`;
-    await fs.writeFile(path.join(this.wikiDir, 'overview.md'), pageContent, 'utf-8');
-  }
-
-  // ─── Incremental Updates ────────────────────────────────────────────
-
-  private async incrementalUpdate(
-    existingMeta: WikiMeta,
-    currentCommit: string,
-  ): Promise<{ pagesGenerated: number; mode: 'incremental'; failedModules: string[] }> {
-    this.onProgress('incremental', 5, 'Detecting changes...');
-
-    // Get changed files since last generation
-    const changedFiles = this.getChangedFiles(existingMeta.fromCommit, currentCommit);
-    if (changedFiles.length === 0) {
-      // No file changes but commit differs (e.g. merge commit)
-      await this.saveWikiMeta({
-        ...existingMeta,
-        fromCommit: currentCommit,
-        generatedAt: new Date().toISOString(),
-      });
-      return { pagesGenerated: 0, mode: 'incremental', failedModules: [] };
-    }
-
-    this.onProgress('incremental', 10, `${changedFiles.length} files changed`);
-
-    // Determine affected modules
-    const affectedModules = new Set<string>();
-    const newFiles: string[] = [];
-
-    for (const fp of changedFiles) {
-      let found = false;
-      for (const [mod, files] of Object.entries(existingMeta.moduleFiles)) {
-        if (files.includes(fp)) {
-          affectedModules.add(mod);
-          found = true;
-          break;
-        }
-      }
-      if (!found && !shouldIgnorePath(fp)) {
-        newFiles.push(fp);
-      }
-    }
-
-    // If significant new files exist, re-run full grouping
-    if (newFiles.length > 5) {
-      this.onProgress('incremental', 15, 'Significant new files detected, running full generation...');
-      // Delete old snapshot to force re-grouping
-      try { await fs.unlink(path.join(this.wikiDir, 'first_module_tree.json')); } catch {}
-      const fullResult = await this.fullGeneration(currentCommit);
-      return { ...fullResult, mode: 'incremental' };
-    }
-
-    // Add new files to nearest module or "Other"
-    if (newFiles.length > 0) {
-      if (!existingMeta.moduleFiles['Other']) {
-        existingMeta.moduleFiles['Other'] = [];
-      }
-      existingMeta.moduleFiles['Other'].push(...newFiles);
-      affectedModules.add('Other');
-    }
-
-    // Regenerate affected module pages (parallel)
-    let pagesGenerated = 0;
-    const moduleTree = existingMeta.moduleTree;
-    const affectedArray = Array.from(affectedModules);
-
-    this.onProgress('incremental', 20, `Regenerating ${affectedArray.length} module(s)...`);
-
-    const affectedNodes: ModuleTreeNode[] = [];
-    for (const mod of affectedArray) {
-      const modSlug = this.slugify(mod);
-      const node = this.findNodeBySlug(moduleTree, modSlug);
-      if (node) {
-        try { await fs.unlink(path.join(this.wikiDir, `${node.slug}.md`)); } catch {}
-        affectedNodes.push(node);
-      }
-    }
-
-    let incProcessed = 0;
-    pagesGenerated += await this.runParallel(affectedNodes, async (node) => {
-      try {
-        if (node.children && node.children.length > 0) {
-          await this.generateParentPage(node);
-        } else {
-          await this.generateLeafPage(node);
-        }
-        incProcessed++;
-        const percent = 20 + Math.round((incProcessed / affectedNodes.length) * 60);
-        this.onProgress('incremental', percent, `${incProcessed}/${affectedNodes.length} — ${node.name}`);
-        return 1;
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        incProcessed++;
-        return 0;
-      }
-    });
-
-    // Regenerate overview if any pages changed
-    if (pagesGenerated > 0) {
-      this.onProgress('incremental', 85, 'Updating overview...');
-      await this.generateOverview(moduleTree);
-      pagesGenerated++;
-    }
-
-    // Save updated metadata
-    this.onProgress('incremental', 95, 'Saving metadata...');
-    await this.saveWikiMeta({
-      ...existingMeta,
-      fromCommit: currentCommit,
-      generatedAt: new Date().toISOString(),
-      model: this.llmConfig.model,
-    });
-
-    this.onProgress('done', 100, 'Incremental update complete');
-    return { pagesGenerated, mode: 'incremental', failedModules: [...this.failedModules] };
+    this.failedModules.push(...result.failedModules);
+    return result;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
@@ -610,58 +334,6 @@ export class WikiGenerator {
       }
     }
     return total;
-  }
-
-  private async readProjectInfo(): Promise<string> {
-    const candidates = ['package.json', 'Cargo.toml', 'pyproject.toml', 'go.mod', 'pom.xml', 'build.gradle'];
-    const lines: string[] = [`Project: ${path.basename(this.repoPath)}`];
-
-    for (const file of candidates) {
-      const fullPath = path.join(this.repoPath, file);
-      try {
-        const content = await fs.readFile(fullPath, 'utf-8');
-        if (file === 'package.json') {
-          const pkg = JSON.parse(content);
-          if (pkg.name) lines.push(`Name: ${pkg.name}`);
-          if (pkg.description) lines.push(`Description: ${pkg.description}`);
-          if (pkg.scripts) lines.push(`Scripts: ${Object.keys(pkg.scripts).join(', ')}`);
-        } else {
-          // Include first 500 chars of other config files
-          lines.push(`\n${file}:\n${content.slice(0, 500)}`);
-        }
-        break; // Use first config found
-      } catch {
-        continue;
-      }
-    }
-
-    // Read README excerpt
-    for (const readme of ['README.md', 'readme.md', 'README.txt']) {
-      try {
-        const content = await fs.readFile(path.join(this.repoPath, readme), 'utf-8');
-        lines.push(`\nREADME excerpt:\n${content.slice(0, 1000)}`);
-        break;
-      } catch {
-        continue;
-      }
-    }
-
-    return lines.join('\n');
-  }
-
-  private extractModuleFiles(tree: ModuleTreeNode[]): Record<string, string[]> {
-    const result: Record<string, string[]> = {};
-    for (const node of tree) {
-      if (node.children && node.children.length > 0) {
-        result[node.name] = node.children.flatMap(c => c.files);
-        for (const child of node.children) {
-          result[child.name] = child.files;
-        }
-      } else {
-        result[node.name] = node.files;
-      }
-    }
-    return result;
   }
 
   /**

@@ -33,8 +33,8 @@ description: "Use when the user wants to know what will break if they change som
 - [ ] Check high-confidence (>0.8) dependencies
 - [ ] READ processes to check affected execution flows
 - [ ] gitnexus_detect_changes() for pre-commit check
-- [ ] If working in a git worktree, pass `cwd` explicitly
-- [ ] Check output's path_resolution to verify correct path is used
+- [ ] If working in a git worktree or MCP server cwd may differ, pass `cwd`
+- [ ] Check output's `path_resolution` to verify the correct path was used
 - [ ] Assess risk level and report to user
 ```
 
@@ -95,7 +95,16 @@ gitnexus_detect_changes({
 → path_resolution: cwd_worktree | registry_repo
 ```
 
-> **Worktree scenarios:** When working in a git worktree, pass `cwd` explicitly to ensure correct directory analysis. Check `path_resolution` in output to verify the correct path was used.
+Worktree / MCP server note:
+
+```
+gitnexus_detect_changes({
+  scope: "staged",
+  cwd: "/path/to/repo/.worktrees/feature-branch"
+})
+```
+
+Use `cwd` when the MCP server `process.cwd()` may not match the active worktree.
 
 ## Example: "What breaks if I change validateUser?"
 
