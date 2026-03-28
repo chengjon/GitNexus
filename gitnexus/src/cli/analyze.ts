@@ -17,7 +17,7 @@ import { initKuzu, loadGraphToKuzu, getKuzuStats, executeQuery, executeWithReuse
 import { getStoragePaths, saveMeta, loadMeta, addToGitignore, registerRepo, getGlobalRegistryPath } from '../storage/repo-manager.js';
 import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 import { generateAIContextFiles } from './ai-context.js';
-import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
+import { generateSkillFiles } from './skill-gen.js';
 import { getIndexFreshness, getGitNexusVersion } from './index-freshness.js';
 import { getCliEmbeddingConfig, getEmbeddingNodeLimit } from './embedding-overrides.js';
 import {
@@ -25,6 +25,21 @@ import {
   formatEmbeddingSkipReason,
   shouldSuggestIncrementalEmbeddingRefresh,
 } from './embedding-insights.js';
+import {
+  cacheExistingEmbeddingsForAnalyze,
+  runAnalyzeEmbeddingOrchestration,
+} from './analyze-embeddings.js';
+import { finalizeAnalyzeArtifacts } from './analyze-finalization.js';
+import {
+  createDefaultAnalyzeFTSIndexes,
+  reloadKuzuGraphForAnalyze,
+} from './analyze-kuzu.js';
+import { buildAnalyzeSummaryLines } from './analyze-summary.js';
+import {
+  createAnalyzeBarLogger,
+  createAnalyzeInterruptHandler,
+  createAnalyzeProgressTracker,
+} from './analyze-session.js';
 import { getEmbeddingRuntimeConfig } from '../core/embeddings/runtime-config.js';
 import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 import fs from 'fs/promises';
@@ -347,29 +362,32 @@ export const analyzeCommand = async (
   let bar: cliProgress.SingleBar | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
   let forceExitCode: number | null = null;
-  let aborted = false;
-  const barLog = (...args: any[]) => {
-    // Clear the bar line, print the message, then let the next bar.update redraw
-    process.stdout.write('\x1b[2K\r');
-    origLog(args.map(a => (typeof a === 'string' ? a : String(a))).join(' '));
-  };
-  const shutdownHandler = (exitCode: number) => {
-    if (aborted) process.exit(1); // Second Ctrl-C: force exit
-    aborted = true;
-    try { bar?.stop(); } catch {}
-    console.log('\n  Interrupted — cleaning up...');
-    void nativeRuntimeManager.runCleanupAndExit(exitCode, {
-      cleanup: async () => {
-        try { await closeKuzu(); } catch {}
-        await nativeRuntimeManager.removeReindexLock(reindexLockPath);
-      },
-      scheduleExit: async (code) => {
-        nativeRuntimeManager.scheduleExit(code);
-      },
-    });
-  };
-  const onSigInt = () => shutdownHandler(130);
-  const onSigTerm = () => shutdownHandler(143);
+  const barLog = createAnalyzeBarLogger({
+    clearLine: () => {
+      process.stdout.write('\x1b[2K\r');
+    },
+    log: origLog,
+  });
+  const handleInterrupt = createAnalyzeInterruptHandler({
+    stopBar: () => {
+      bar?.stop();
+    },
+    log: (message) => {
+      console.log(message);
+    },
+    closeKuzu,
+    removeReindexLock: (lockPath) => nativeRuntimeManager.removeReindexLock(lockPath),
+    reindexLockPath,
+    runCleanupAndExit: (exitCode, cleanupOptions) => nativeRuntimeManager.runCleanupAndExit(exitCode, cleanupOptions),
+    scheduleExit: (code) => {
+      nativeRuntimeManager.scheduleExit(code);
+    },
+    processExit: (code) => {
+      process.exit(code);
+    },
+  });
+  const onSigInt = () => { void handleInterrupt(130); };
+  const onSigTerm = () => { void handleInterrupt(143); };
   const unregisterShutdownHandlers = nativeRuntimeManager.registerShutdownHandlers(process, onSigInt, onSigTerm);
 
   try {
@@ -404,47 +422,42 @@ export const analyzeCommand = async (
     console.warn = barLog;
     console.error = barLog;
 
-    // Track elapsed time per phase — both updateBar and the interval use the
-    // same format so they don't flicker against each other.
-    let lastPhaseLabel = 'Initializing...';
-    let phaseStart = Date.now();
-
-    /** Update bar with phase label + elapsed seconds (shown after 3s). */
+    const progressTracker = createAnalyzeProgressTracker({
+      update: (value, payload) => {
+        if (typeof value === 'number') {
+          bar!.update(value, payload);
+          return;
+        }
+        bar!.update(value);
+      },
+    });
     const updateBar = (value: number, phaseLabel: string) => {
-      if (phaseLabel !== lastPhaseLabel) { lastPhaseLabel = phaseLabel; phaseStart = Date.now(); }
-      const elapsed = Math.round((Date.now() - phaseStart) / 1000);
-      const display = elapsed >= 3 ? `${phaseLabel} (${elapsed}s)` : phaseLabel;
-      bar!.update(value, { phase: display });
+      progressTracker.updateBar(value, phaseLabel);
     };
 
     // Tick elapsed seconds for phases with infrequent progress callbacks
     // (e.g. CSV streaming, FTS indexing). Uses the same display format as
     // updateBar so there's no flickering.
     elapsedTimer = setInterval(() => {
-      const elapsed = Math.round((Date.now() - phaseStart) / 1000);
-      if (elapsed >= 3) {
-        bar!.update({ phase: `${lastPhaseLabel} (${elapsed}s)` });
-      }
+      progressTracker.tickElapsed();
     }, 1000);
 
     const t0Global = Date.now();
 
     // ── Cache embeddings from existing index before rebuild ────────────
-    let cachedEmbeddingNodeIds = new Set<string>();
-    let cachedEmbeddings: Array<{ nodeId: string; embedding: number[] }> = [];
-
-    if (options?.embeddings && existingMeta && !options?.force) {
-      try {
-        updateBar(0, 'Caching embeddings...');
-        await initKuzu(kuzuPath);
-        const cached = await loadCachedEmbeddings();
-        cachedEmbeddingNodeIds = cached.embeddingNodeIds;
-        cachedEmbeddings = cached.embeddings;
-        await closeKuzu();
-      } catch {
-        try { await closeKuzu(); } catch {}
-      }
-    }
+    const cachedEmbeddingSnapshot = await cacheExistingEmbeddingsForAnalyze({
+      embeddingsEnabled: options?.embeddings,
+      hasExistingMeta: !!existingMeta,
+      force: options?.force,
+      kuzuPath,
+      updateBar,
+    }, {
+      initKuzu,
+      closeKuzu,
+      loadCachedEmbeddings,
+    });
+    const cachedEmbeddingNodeIds = cachedEmbeddingSnapshot.embeddingNodeIds;
+    const cachedEmbeddings = cachedEmbeddingSnapshot.embeddings;
 
     // ── Phase 1: Full Pipeline (0–60%) ─────────────────────────────────
     const pipelineResult = await runPipelineFromRepo(repoPath, (progress) => {
@@ -454,39 +467,26 @@ export const analyzeCommand = async (
     });
 
     // ── Phase 2: KuzuDB (60–85%) ──────────────────────────────────────
-    updateBar(60, 'Loading into KuzuDB...');
-
-    await closeKuzu();
-    const kuzuFiles = [kuzuPath, `${kuzuPath}.wal`, `${kuzuPath}.lock`];
-    for (const f of kuzuFiles) {
-      try { await fs.rm(f, { recursive: true, force: true }); } catch {}
-    }
-
-    const t0Kuzu = Date.now();
-    await initKuzu(kuzuPath);
-    let kuzuMsgCount = 0;
-    const kuzuResult = await loadGraphToKuzu(pipelineResult.graph, pipelineResult.repoPath, storagePath, (msg) => {
-      kuzuMsgCount++;
-      const progress = Math.min(84, 60 + Math.round((kuzuMsgCount / (kuzuMsgCount + 10)) * 24));
-      updateBar(progress, msg);
+    const { kuzuTime, kuzuWarnings } = await reloadKuzuGraphForAnalyze({
+      kuzuPath,
+      storagePath,
+      pipelineResult,
+      updateBar,
+    }, {
+      closeKuzu,
+      removePath: async (targetPath) => {
+        await fs.rm(targetPath, { recursive: true, force: true });
+      },
+      initKuzu,
+      loadGraphToKuzu,
     });
-    const kuzuTime = ((Date.now() - t0Kuzu) / 1000).toFixed(1);
-    const kuzuWarnings = kuzuResult.warnings;
 
     // ── Phase 3: FTS (85–90%) ─────────────────────────────────────────
-    updateBar(85, 'Creating search indexes...');
-
-    const t0Fts = Date.now();
-    try {
-      await createFTSIndex('File', 'file_fts', ['name', 'content']);
-      await createFTSIndex('Function', 'function_fts', ['name', 'content']);
-      await createFTSIndex('Class', 'class_fts', ['name', 'content']);
-      await createFTSIndex('Method', 'method_fts', ['name', 'content']);
-      await createFTSIndex('Interface', 'interface_fts', ['name', 'content']);
-    } catch {
-      // Non-fatal — FTS is best-effort
-    }
-    const ftsTime = ((Date.now() - t0Fts) / 1000).toFixed(1);
+    const { ftsTime } = await createDefaultAnalyzeFTSIndexes({
+      updateBar,
+    }, {
+      createFTSIndex,
+    });
 
     // ── Phase 3.5: Re-insert cached embeddings ────────────────────────
     if (cachedEmbeddings.length > 0) {
@@ -509,54 +509,25 @@ export const analyzeCommand = async (
     const embeddingNodeLimit = getEmbeddingNodeLimit();
     const embeddingConfig = getCliEmbeddingConfig();
     const embeddingRuntimeConfig = getEmbeddingRuntimeConfig();
-    const { countEmbeddableNodes } = await import('../core/embeddings/embedding-pipeline.js');
-    const embeddableNodeCount = options?.embeddings ? await countEmbeddableNodes(executeQuery) : 0;
-    let embeddingTime = '0.0';
-    let embeddingSkipped = true;
-    let embeddingSkipReason = 'off (use --embeddings to enable)';
-    let embeddingDetail = '';
-
-    if (options?.embeddings) {
-      if (embeddableNodeCount > embeddingNodeLimit) {
-        embeddingSkipReason = formatEmbeddingSkipReason(embeddableNodeCount, embeddingNodeLimit);
-        embeddingDetail = `${embeddableNodeCount.toLocaleString()} embeddable | limit ${embeddingNodeLimit.toLocaleString()}`;
-      } else {
-        embeddingSkipped = false;
-      }
-    }
-
-    if (!embeddingSkipped) {
-      updateBar(90, 'Loading embedding model...');
-      const t0Emb = Date.now();
-      const { runEmbeddingPipeline } = await import('../core/embeddings/embedding-pipeline.js');
-      const embeddingStats = await runEmbeddingPipeline(
-        executeQuery,
-        executeWithReusedStatement,
-        (progress) => {
-          const scaled = 90 + Math.round((progress.percent / 100) * 8);
-          const label = progress.phase === 'loading-model'
-            ? 'Loading embedding model...'
-            : progress.phase === 'embedding'
-              ? `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'} (batch ${progress.currentBatch || 0}/${progress.totalBatches || '?'})`
-              : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
-          updateBar(scaled, label);
-        },
-        embeddingConfig,
-        cachedEmbeddingNodeIds.size > 0 ? cachedEmbeddingNodeIds : undefined,
-      );
-      const embeddingSeconds = (Date.now() - t0Emb) / 1000;
-      embeddingTime = embeddingSeconds.toFixed(1);
-      embeddingDetail = formatEmbeddingRunDetails({
-        provider: embeddingRuntimeConfig.provider,
-        model: embeddingRuntimeConfig.provider === 'ollama'
-          ? embeddingRuntimeConfig.ollamaModel
-          : (embeddingConfig.modelId || embeddingRuntimeConfig.localModelPath || 'Snowflake/snowflake-arctic-embed-xs'),
-        embeddableNodeCount: embeddableNodeCount || embeddingStats.embeddableNodeCount,
-        totalBatches: embeddingStats.totalBatches,
-        batchSize: embeddingStats.batchSize,
-        seconds: embeddingSeconds,
-      });
-    }
+    const {
+      embeddingTime,
+      embeddingSkipped,
+      embeddingSkipReason,
+      embeddingDetail,
+    } = await runAnalyzeEmbeddingOrchestration({
+      embeddingsEnabled: options?.embeddings,
+      embeddingNodeLimit,
+      embeddingConfig,
+      embeddingRuntimeConfig,
+      cachedEmbeddingNodeIds,
+      cachedEmbeddings,
+      executeQuery,
+      executeWithReusedStatement,
+      updateBar,
+    }, {
+      formatEmbeddingSkipReason,
+      formatEmbeddingRunDetails,
+    });
 
     // ── Phase 5: Finalize (98–100%) ───────────────────────────────────
     updateBar(98, 'Saving metadata...');
@@ -568,59 +539,36 @@ export const analyzeCommand = async (
       embeddingCount = embResult?.[0]?.cnt ?? 0;
     } catch { /* table may not exist if embeddings never ran */ }
 
-    const meta = {
-      repoPath,
-      lastCommit: currentCommit,
-      indexedAt: new Date().toISOString(),
-      toolVersion: gitNexusVersion,
-      stats: {
-        files: pipelineResult.totalFileCount,
-        nodes: stats.nodes,
-        edges: stats.edges,
-        communities: pipelineResult.communityResult?.stats.totalCommunities,
-        processes: pipelineResult.processResult?.stats.totalProcesses,
-        embeddings: embeddingCount,
-      },
-    };
-    await saveMeta(storagePath, meta);
-
-    if (scope.registerRepo) {
-      await registerRepo(repoPath, meta);
-    }
-
-    if (scope.updateGitignore) {
-      await addToGitignore(repoPath);
-    }
-
     const projectName = path.basename(repoPath);
-    let aggregatedClusterCount = 0;
-    if (pipelineResult.communityResult?.communities) {
-      const groups = new Map<string, number>();
-      for (const c of pipelineResult.communityResult.communities) {
-        const label = c.heuristicLabel || c.label || 'Unknown';
-        groups.set(label, (groups.get(label) || 0) + c.symbolCount);
-      }
-      aggregatedClusterCount = Array.from(groups.values()).filter(count => count >= 5).length;
-    }
-
-    let generatedSkills: GeneratedSkillInfo[] = [];
     if (options?.skills && pipelineResult.communityResult) {
       updateBar(99, 'Generating skill files...');
-      const skillResult = await generateSkillFiles(repoPath, projectName, pipelineResult);
-      generatedSkills = skillResult.skills;
     }
 
-    let aiContext = { files: [] as string[] };
-    if (scope.refreshContext) {
-      aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
-        files: pipelineResult.totalFileCount,
+    const {
+      aiContext,
+      communityCount,
+      processCount,
+    } = await finalizeAnalyzeArtifacts({
+      repoPath,
+      storagePath,
+      projectName,
+      currentCommit,
+      gitNexusVersion,
+      scope,
+      generateSkills: !!options?.skills,
+      pipelineResult,
+      stats: {
         nodes: stats.nodes,
         edges: stats.edges,
-        communities: pipelineResult.communityResult?.stats.totalCommunities,
-        clusters: aggregatedClusterCount,
-        processes: pipelineResult.processResult?.stats.totalProcesses,
-      }, generatedSkills);
-    }
+        embeddings: embeddingCount,
+      },
+    }, {
+      saveMeta,
+      registerRepo,
+      addToGitignore,
+      generateSkillFiles,
+      generateAIContextFiles,
+    });
 
     await nativeRuntimeManager.cleanupCoreRuntime(closeKuzu);
 
@@ -633,40 +581,34 @@ export const analyzeCommand = async (
     bar.update(100, { phase: 'Done' });
     bar.stop();
 
-    // ── Summary ───────────────────────────────────────────────────────
-    const embeddingsCached = cachedEmbeddings.length > 0;
-    console.log(`\n  Repository indexed successfully (${totalTime}s)${embeddingsCached ? ` [${cachedEmbeddings.length} embeddings cached]` : ''}\n`);
-    console.log(`  ${stats.nodes.toLocaleString()} nodes | ${stats.edges.toLocaleString()} edges | ${pipelineResult.communityResult?.stats.totalCommunities || 0} clusters | ${pipelineResult.processResult?.stats.totalProcesses || 0} flows`);
-    console.log(`  KuzuDB ${kuzuTime}s | FTS ${ftsTime}s | Embeddings ${embeddingSkipped ? embeddingSkipReason : embeddingTime + 's'}`);
-    if (options?.embeddings && embeddingDetail) {
-      console.log(`  Embeddings detail: ${embeddingDetail}`);
-    }
-    console.log(`  ${repoPath}`);
-
-    if (aiContext.files.length > 0) {
-      console.log(`  Context: ${aiContext.files.join(', ')}`);
-    }
-
-    // Show a quiet summary if some edge types needed fallback insertion
-    if (kuzuWarnings.length > 0) {
-      const totalFallback = kuzuWarnings.reduce((sum, w) => {
-        const m = w.match(/\((\d+) edges\)/);
-        return sum + (m ? parseInt(m[1]) : 0);
-      }, 0);
-      console.log(`  Note: ${totalFallback} edges across ${kuzuWarnings.length} types inserted via fallback (schema will be updated in next release)`);
-    }
-
-    if (shouldSuggestIncrementalEmbeddingRefresh(options?.force, options?.embeddings, embeddingCount)) {
-      console.log('  Tip: Future refreshes usually omit `--force` so GitNexus can reuse existing embeddings.');
-    }
-
+    let showSetupTip = false;
     try {
       await fs.access(getGlobalRegistryPath());
     } catch {
-      console.log('\n  Tip: Run `gitnexus setup` to configure MCP for your editor.');
+      showSetupTip = true;
     }
-
-    console.log('');
+    for (const line of buildAnalyzeSummaryLines({
+      totalTime,
+      cachedEmbeddingsCount: cachedEmbeddings.length,
+      nodes: stats.nodes,
+      edges: stats.edges,
+      communityCount,
+      processCount,
+      kuzuTime,
+      ftsTime,
+      embeddingSkipped,
+      embeddingSkipReason,
+      embeddingTime,
+      embeddingsEnabled: options?.embeddings,
+      embeddingDetail,
+      repoPath,
+      contextFiles: aiContext.files,
+      kuzuWarnings,
+      showIncrementalEmbeddingRefreshTip: shouldSuggestIncrementalEmbeddingRefresh(options?.force, options?.embeddings, embeddingCount),
+      showSetupTip,
+    })) {
+      console.log(line);
+    }
 
     // KuzuDB's native module holds open handles that prevent Node from exiting.
     // ONNX Runtime also registers native atexit hooks that segfault on some
