@@ -13,9 +13,8 @@ import {
   findEnclosingClassId,
   extractMethodSignature,
   countCallArguments,
-  inferCallForm,
-  extractReceiverName
 } from '../utils.js';
+import { inferCallForm, extractReceiverName } from '../call-form.js';
 import { buildTypeEnv, lookupTypeEnv } from '../type-env.js';
 import { isNodeExported } from '../export-detection.js';
 import { detectFrameworkFromAST } from '../framework-detection.js';

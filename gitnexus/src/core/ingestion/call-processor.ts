@@ -16,9 +16,8 @@ import {
   extractFunctionName,
   isBuiltInOrNoise,
   countCallArguments,
-  inferCallForm,
-  extractReceiverName,
 } from './utils.js';
+import { inferCallForm, extractReceiverName } from './call-form.js';
 import { buildTypeEnv, lookupTypeEnv } from './type-env.js';
 import { getTreeSitterBufferSize } from './constants.js';
 import type { ExtractedCall } from './workers/parse-worker.js';
