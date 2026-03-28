@@ -460,7 +460,7 @@ describe('WikiGenerator orchestration', () => {
     const runFullGeneration = vi.fn(async () => ({
       pagesGenerated: 1,
       mode: 'full' as const,
-      failedModules: [],
+      failedModules: ['Core'],
     }));
     vi.doMock('../../src/core/wiki/full-generation.js', () => ({
       runFullGeneration,
@@ -478,28 +478,28 @@ describe('WikiGenerator orchestration', () => {
       await (generator as any).fullGeneration('head-commit');
 
       expect(runFullGeneration).toHaveBeenCalledTimes(1);
-      expect(runFullGeneration).toHaveBeenCalledWith(
-        expect.objectContaining({
-          currentCommit: 'head-commit',
-          wikiDir: '/tmp/storage/wiki',
-          llmConfig: { model: 'mock-model' },
-          maxTokensPerModule: 30000,
-          failedModules: [],
-          onProgress: expect.any(Function),
-          slugify: expect.any(Function),
-          estimateModuleTokens: expect.any(Function),
-          streamOpts: expect.any(Function),
-          fileExists: expect.any(Function),
-          saveModuleTree: expect.any(Function),
-          saveWikiMeta: expect.any(Function),
-          runParallel: expect.any(Function),
-        }),
-        expect.objectContaining({
-          generateLeafPage: expect.any(Function),
-          generateParentPage: expect.any(Function),
-          generateOverviewPage: expect.any(Function),
-        }),
-      );
+      const [forwardedOptions, forwardedDeps] = runFullGeneration.mock.calls[0] ?? [];
+      expect(forwardedOptions).toEqual(expect.objectContaining({
+        currentCommit: 'head-commit',
+        wikiDir: '/tmp/storage/wiki',
+        llmConfig: { model: 'mock-model' },
+        maxTokensPerModule: 30000,
+        onProgress: expect.any(Function),
+        slugify: expect.any(Function),
+        estimateModuleTokens: expect.any(Function),
+        streamOpts: expect.any(Function),
+        fileExists: expect.any(Function),
+        saveModuleTree: expect.any(Function),
+        saveWikiMeta: expect.any(Function),
+        runParallel: expect.any(Function),
+      }));
+      expect(forwardedOptions).not.toHaveProperty('failedModules');
+      expect(forwardedDeps).toEqual(expect.objectContaining({
+        generateLeafPage: expect.any(Function),
+        generateParentPage: expect.any(Function),
+        generateOverviewPage: expect.any(Function),
+      }));
+      expect((generator as any).failedModules).toEqual(['Core']);
     } finally {
       vi.doUnmock('../../src/core/wiki/full-generation.js');
     }

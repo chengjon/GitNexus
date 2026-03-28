@@ -61,7 +61,6 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     wikiDir: '/tmp/wiki',
     llmConfig: { model: 'mock-model' },
     maxTokensPerModule: 1000,
-    failedModules: [] as string[],
     onProgress: vi.fn(),
     slugify: vi.fn((name: string) => name.toLowerCase()),
     estimateModuleTokens: vi.fn(async () => 100),
@@ -206,6 +205,33 @@ describe('runFullGeneration contracts', () => {
       pagesGenerated: 1,
       mode: 'full',
       failedModules: ['Core', 'Backend'],
+    });
+  });
+
+  it('tracks failed modules internally without requiring a mutable input array', async () => {
+    const { runFullGeneration } = await loadFullGenerationModule();
+    const leafNode = makeLeafNode();
+
+    mocks.getAllFiles.mockResolvedValue(['src/core/util.ts']);
+    mocks.buildModuleTree.mockResolvedValue([leafNode]);
+    mocks.countModules.mockReturnValue(1);
+    mocks.flattenModuleTree.mockReturnValue({
+      leaves: [leafNode],
+      parents: [],
+    });
+
+    const result = await runFullGeneration(makeOptions({
+      fileExists: vi.fn(async () => false),
+    }) as any, makeDeps({
+      generateLeafPage: vi.fn(async () => {
+        throw new Error('leaf failed');
+      }),
+    }) as any);
+
+    expect(result).toMatchObject({
+      pagesGenerated: 1,
+      mode: 'full',
+      failedModules: ['Core'],
     });
   });
 

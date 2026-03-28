@@ -1,3 +1,5 @@
+import path from 'path';
+
 import { shouldIgnorePath } from '../../config/ignore-service.js';
 import {
   getAllFiles,
@@ -19,7 +21,6 @@ export interface RunFullGenerationOptions {
   wikiDir: string;
   llmConfig: LLMConfig;
   maxTokensPerModule: number;
-  failedModules: string[];
   onProgress: ProgressCallback;
   slugify: (name: string) => string;
   estimateModuleTokens: (filePaths: string[]) => Promise<number>;
@@ -45,7 +46,6 @@ export async function runFullGeneration(
     wikiDir,
     llmConfig,
     maxTokensPerModule,
-    failedModules,
     onProgress,
     slugify,
     estimateModuleTokens,
@@ -62,6 +62,7 @@ export async function runFullGeneration(
   } = deps;
 
   let pagesGenerated = 0;
+  const failedModules: string[] = [];
 
   onProgress('gather', 5, 'Querying graph for file structure...');
   const filesWithExports = await getFilesWithExports();
@@ -106,7 +107,7 @@ export async function runFullGeneration(
   const { leaves, parents } = flattenModuleTree(moduleTree);
 
   pagesGenerated += await runParallel(leaves, async (node) => {
-    const pagePath = `${wikiDir}/${node.slug}.md`;
+    const pagePath = path.join(wikiDir, `${node.slug}.md`);
     if (await fileExists(pagePath)) {
       reportProgress(node.name);
       return 0;
@@ -123,7 +124,7 @@ export async function runFullGeneration(
   });
 
   for (const node of parents) {
-    const pagePath = `${wikiDir}/${node.slug}.md`;
+    const pagePath = path.join(wikiDir, `${node.slug}.md`);
     if (await fileExists(pagePath)) {
       reportProgress(node.name);
       continue;

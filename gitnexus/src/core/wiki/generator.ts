@@ -230,12 +230,11 @@ export class WikiGenerator {
   // ─── Full Generation ────────────────────────────────────────────────
 
   private async fullGeneration(currentCommit: string): Promise<{ pagesGenerated: number; mode: 'full'; failedModules: string[] }> {
-    return runFullGeneration({
+    const result = await runFullGeneration({
       currentCommit,
       wikiDir: this.wikiDir,
       llmConfig: this.llmConfig,
       maxTokensPerModule: this.maxTokensPerModule,
-      failedModules: this.failedModules,
       onProgress: this.onProgress,
       slugify: (name) => this.slugify(name),
       estimateModuleTokens: async (filePaths) => this.estimateModuleTokens(filePaths),
@@ -277,6 +276,8 @@ export class WikiGenerator {
         });
       },
     });
+    this.failedModules.push(...result.failedModules);
+    return result;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
