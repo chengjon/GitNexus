@@ -4,10 +4,12 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import {
-  listGitNexusMcpPidsHoldingPath,
-  quiesceGitNexusMcpHolders,
   resolveAnalyzeScopeOptions,
 } from '../../src/cli/analyze.js';
+import {
+  listGitNexusMcpPidsHoldingPath,
+  quiesceGitNexusMcpHolders,
+} from '../../src/cli/platform-process-scan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
