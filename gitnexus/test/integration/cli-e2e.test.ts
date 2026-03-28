@@ -88,6 +88,49 @@ function runCliRaw(extraArgs: string[], cwd: string, timeoutMs = 15000) {
   });
 }
 
+function createTempFixtureRepo(prefix: string) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmpDir, 'src', 'index.ts'),
+    [
+      "import { greet } from './util';",
+      "export function main() {",
+      "  return greet('world');",
+      '}',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  fs.writeFileSync(
+    path.join(tmpDir, 'src', 'util.ts'),
+    [
+      'export function greet(name: string) {',
+      "  return `hello ${name}`;",
+      '}',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\n', 'utf-8');
+
+  spawnSync('git', ['init'], { cwd: tmpDir, stdio: 'pipe' });
+  spawnSync('git', ['add', '-A'], { cwd: tmpDir, stdio: 'pipe' });
+  spawnSync('git', ['commit', '-m', 'initial commit'], {
+    cwd: tmpDir,
+    stdio: 'pipe',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'test',
+      GIT_AUTHOR_EMAIL: 'test@test',
+      GIT_COMMITTER_NAME: 'test',
+      GIT_COMMITTER_EMAIL: 'test@test',
+    },
+  });
+
+  return tmpDir;
+}
+
 describe('CLI end-to-end', () => {
   it('status command exits cleanly', () => {
     const result = runCli('status', MINI_REPO);
@@ -117,6 +160,48 @@ describe('CLI end-to-end', () => {
     const gitnexusDir = path.join(MINI_REPO, '.gitnexus');
     expect(fs.existsSync(gitnexusDir)).toBe(true);
     expect(fs.statSync(gitnexusDir).isDirectory()).toBe(true);
+  });
+
+  it('analyze defaults to index-only behavior without repo context refresh', () => {
+    const tmpDir = createTempFixtureRepo('cli-analyze-default-');
+    try {
+      const result = runCliRaw(['analyze', tmpDir], repoRoot, 30000);
+      if (result.status === null) return;
+
+      expect(result.status, [
+        `analyze exited with code ${result.status}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join('\n')).toBe(0);
+
+      expect(fs.existsSync(path.join(tmpDir, '.gitnexus'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', 'gitnexus'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('analyze --with-context refreshes repo context files explicitly', () => {
+    const tmpDir = createTempFixtureRepo('cli-analyze-with-context-');
+    try {
+      const result = runCliRaw(['analyze', tmpDir, '--with-context'], repoRoot, 30000);
+      if (result.status === null) return;
+
+      expect(result.status, [
+        `analyze --with-context exited with code ${result.status}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join('\n')).toBe(0);
+
+      expect(fs.existsSync(path.join(tmpDir, '.gitnexus'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', 'gitnexus'))).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   describe('unhappy path', () => {
