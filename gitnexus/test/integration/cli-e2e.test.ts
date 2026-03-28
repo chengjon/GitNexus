@@ -131,6 +131,31 @@ function createTempFixtureRepo(prefix: string) {
   return tmpDir;
 }
 
+function writeGitNexusMeta(repoPath: string, lastCommit: string) {
+  const storageDir = path.join(repoPath, '.gitnexus');
+  fs.mkdirSync(storageDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(storageDir, 'meta.json'),
+    JSON.stringify({
+      indexedBranch: null,
+      schemaVersion: 'v1',
+      toolVersion: '1.4.0',
+      repoPath,
+      lastCommit,
+      indexedAt: '2026-03-29T00:00:00.000Z',
+      stats: {
+        files: 1,
+        nodes: 1,
+        edges: 0,
+        communities: 0,
+        processes: 0,
+        embeddings: 0,
+      },
+    }, null, 2),
+    'utf-8',
+  );
+}
+
 describe('CLI end-to-end', () => {
   it('status command exits cleanly', () => {
     const result = runCli('status', MINI_REPO);
@@ -301,6 +326,49 @@ describe('CLI end-to-end', () => {
 
         expect(result.status).toBe(0);
         expect(result.stdout).toMatch(/Repository not indexed/);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('status prefers the git toplevel index over a nested stale index', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-status-toplevel-'));
+      const nestedDir = path.join(tmpDir, 'packages', 'child');
+
+      try {
+        fs.mkdirSync(nestedDir, { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'root.ts'), 'export const root = true;\n', 'utf-8');
+
+        spawnSync('git', ['init'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['config', 'user.email', 'test@test'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['add', '-A'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: tmpDir, stdio: 'pipe' });
+
+        fs.writeFileSync(path.join(tmpDir, 'root.ts'), 'export const root = false;\n', 'utf-8');
+        spawnSync('git', ['commit', '-am', 'second'], { cwd: tmpDir, stdio: 'pipe' });
+
+        const currentCommit = spawnSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tmpDir,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).stdout.trim();
+        const previousCommit = spawnSync('git', ['rev-parse', 'HEAD~1'], {
+          cwd: tmpDir,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).stdout.trim();
+
+        writeGitNexusMeta(tmpDir, currentCommit);
+        writeGitNexusMeta(nestedDir, previousCommit);
+
+        const result = runCliOutsideProject(['status'], nestedDir);
+        if (result.status === null) return;
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(`Repository: ${tmpDir}`);
+        expect(result.stdout).toContain('Status: ✅ up-to-date');
+        expect(result.stdout).not.toContain(`Repository: ${nestedDir}`);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

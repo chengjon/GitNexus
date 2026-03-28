@@ -4,20 +4,26 @@
  * Shows the indexing status of the current repository.
  */
 
-import { findRepo } from '../storage/repo-manager.js';
-import { getCurrentCommit, isGitRepo } from '../storage/git.js';
+import { loadRepo } from '../storage/repo-manager.js';
+import { getCurrentCommit, getGitRoot, isGitRepo } from '../storage/git.js';
 import { getIndexFreshness, getGitNexusVersion } from './index-freshness.js';
 import { getIndexHealth } from '../mcp/staleness.js';
 
 export const statusCommand = async () => {
   const cwd = process.cwd();
-  
+
   if (!isGitRepo(cwd)) {
     console.log('Not a git repository.');
     return;
   }
 
-  const repo = await findRepo(cwd);
+  const gitRoot = getGitRoot(cwd);
+  if (!gitRoot) {
+    console.log('Not a git repository.');
+    return;
+  }
+
+  const repo = await loadRepo(gitRoot);
   if (!repo) {
     console.log('Repository not indexed.');
     console.log('Run: gitnexus analyze');
