@@ -12,6 +12,13 @@ import {
   NodeTableName,
 } from './schema.js';
 import { streamAllCSVsToDisk } from './csv-generator.js';
+import {
+  createFTSIndex as createFTSIndexImpl,
+  dropFTSIndex as dropFTSIndexImpl,
+  loadFTSExtension as loadFTSExtensionImpl,
+  queryFTS as queryFTSImpl,
+  type KuzuFtsRuntime,
+} from './fts.js';
 
 let db: kuzu.Database | null = null;
 let conn: kuzu.Connection | null = null;
@@ -21,6 +28,14 @@ let ftsLoaded = false;
 // Global session lock for operations that touch module-level kuzu globals.
 // This guarantees no DB switch can happen while an operation is running.
 let sessionLock: Promise<void> = Promise.resolve();
+
+const coreFtsRuntime: KuzuFtsRuntime = {
+  getConnection: () => conn,
+  isFTSLoaded: () => ftsLoaded,
+  setFTSLoaded: (value: boolean) => {
+    ftsLoaded = value;
+  },
+};
 
 const runWithSessionLock = async <T>(operation: () => Promise<T>): Promise<T> => {
   const previous = sessionLock;
@@ -676,28 +691,7 @@ export const getEmbeddingTableName = (): string => EMBEDDING_TABLE_NAME;
 // Full-Text Search (FTS) Functions
 // ============================================================================
 
-/**
- * Load the FTS extension (required before using FTS functions).
- * Safe to call multiple times — tracks loaded state via module-level ftsLoaded.
- */
-export const loadFTSExtension = async (): Promise<void> => {
-  if (ftsLoaded) return;
-  if (!conn) {
-    throw new Error('KuzuDB not initialized. Call initKuzu first.');
-  }
-  try {
-    await conn.query('INSTALL fts');
-    await conn.query('LOAD EXTENSION fts');
-    ftsLoaded = true;
-  } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('already loaded') || msg.includes('already installed') || msg.includes('already exists')) {
-      ftsLoaded = true;
-    } else {
-      console.error('GitNexus: FTS extension load failed:', msg);
-    }
-  }
-};
+export const loadFTSExtension = async (): Promise<void> => loadFTSExtensionImpl(coreFtsRuntime);
 
 /**
  * Create a full-text search index on a table
@@ -711,24 +705,7 @@ export const createFTSIndex = async (
   indexName: string,
   properties: string[],
   stemmer: string = 'porter'
-): Promise<void> => {
-  if (!conn) {
-    throw new Error('KuzuDB not initialized. Call initKuzu first.');
-  }
-
-  await loadFTSExtension();
-
-  const propList = properties.map(p => `'${p}'`).join(', ');
-  const query = `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', [${propList}], stemmer := '${stemmer}')`;
-
-  try {
-    await conn.query(query);
-  } catch (e: any) {
-    if (!e.message?.includes('already exists')) {
-      throw e;
-    }
-  }
-};
+): Promise<void> => createFTSIndexImpl(coreFtsRuntime, tableName, indexName, properties, stemmer);
 
 /**
  * Query a full-text search index
@@ -745,57 +722,11 @@ export const queryFTS = async (
   query: string,
   limit: number = 20,
   conjunctive: boolean = false
-): Promise<Array<{ nodeId: string; name: string; filePath: string; score: number; [key: string]: any }>> => {
-  if (!conn) {
-    throw new Error('KuzuDB not initialized. Call initKuzu first.');
-  }
-  
-  // Escape backslashes and single quotes to prevent Cypher injection
-  const escapedQuery = query.replace(/\\/g, '\\\\').replace(/'/g, "''");
-  
-  const cypher = `
-    CALL QUERY_FTS_INDEX('${tableName}', '${indexName}', '${escapedQuery}', conjunctive := ${conjunctive})
-    RETURN node, score
-    ORDER BY score DESC
-    LIMIT ${limit}
-  `;
-  
-  try {
-    const queryResult = await conn.query(cypher);
-    const result = Array.isArray(queryResult) ? queryResult[0] : queryResult;
-    const rows = await result.getAll();
-    
-    return rows.map((row: any) => {
-      const node = row.node || row[0] || {};
-      const score = row.score ?? row[1] ?? 0;
-      return {
-        nodeId: node.nodeId || node.id || '',
-        name: node.name || '',
-        filePath: node.filePath || '',
-        score: typeof score === 'number' ? score : parseFloat(score) || 0,
-        ...node,
-      };
-    });
-  } catch (e: any) {
-    // Return empty if index doesn't exist yet
-    if (e.message?.includes('does not exist')) {
-      return [];
-    }
-    throw e;
-  }
-};
+): Promise<Array<{ nodeId: string; name: string; filePath: string; score: number; [key: string]: any }>> =>
+  queryFTSImpl(coreFtsRuntime, tableName, indexName, query, limit, conjunctive);
 
 /**
  * Drop an FTS index
  */
-export const dropFTSIndex = async (tableName: string, indexName: string): Promise<void> => {
-  if (!conn) {
-    throw new Error('KuzuDB not initialized. Call initKuzu first.');
-  }
-  
-  try {
-    await conn.query(`CALL DROP_FTS_INDEX('${tableName}', '${indexName}')`);
-  } catch {
-    // Index may not exist
-  }
-};
+export const dropFTSIndex = async (tableName: string, indexName: string): Promise<void> =>
+  dropFTSIndexImpl(coreFtsRuntime, tableName, indexName);
