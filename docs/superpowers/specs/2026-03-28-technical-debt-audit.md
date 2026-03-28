@@ -110,8 +110,13 @@ The worktree contains 47 commits across the full extraction series:
 
 Current local follow-up status:
 - the design review has been completed
-- the `failedModules` dual-channel follow-up has been implemented locally in the worktree
-- the remaining work is operational: final commit(s) and merge sequencing
+- the `failedModules` dual-channel follow-up has been committed in the worktree
+- the review artifacts have also been committed in the worktree
+- the remaining work is now merge sequencing rather than code authoring
+
+Latest worktree commits:
+- `77732ce` — `docs(review): add wiki generator review notes`
+- `7595f7d` — `fix(wiki): internalize full generation failures`
 
 **Recommendation**: Treat the remaining generator work as integration/merge work, not as an unresolved design defect.
 
@@ -171,8 +176,8 @@ The current workspace now contains focused orchestration helpers for analyze:
 |----------|--------|--------|-------|
 | **High** | Decide merge strategy for 47 commits | ✅ Done | Team |
 | **High** | Update audit language so P0/P1 statuses match roadmap and current codebase reality | ✅ Done | Auditor |
-| **High** | Account for the 2 wiki review docs before merging the worktree | 🔄 In progress — both review docs are staged, final commit still pending | Worktree owner |
-| **Medium** | Complete design review for generator.ts extraction before merge | ✅ Review completed; follow-up fix implemented locally, final commit still pending | Reviewer + implementer |
+| **High** | Account for the 2 wiki review docs before merging the worktree | ✅ Done — review docs are now committed in the worktree (`77732ce`) | Worktree owner |
+| **Medium** | Complete design review for generator.ts extraction before merge | ✅ Done — review completed and follow-up fix committed in the worktree (`7595f7d`) | Reviewer + implementer |
 | **Medium** | Commit the local `kuzu-adapter.ts` FTS slice after review | ✅ Done locally (`ecd70ee`) | Maintainer |
 | **Medium** | Commit the local `analyze.ts` helper extraction after review | ✅ Done locally (`df9ae67`) | Maintainer |
 | **Low** | Record exact verification commands / sample time in future audit snapshots | ✅ Done | Auditor |
@@ -184,6 +189,7 @@ Sample window: 2026-03-28 19:30-19:31 (UTC+08:00)
 Commands used for this audit update:
 - `git -C .worktrees/wiki-page-generation-subagents rev-list --count HEAD ^main` → `47`
 - `git -C .worktrees/wiki-page-generation-subagents status --short`
+- `git -C .worktrees/wiki-page-generation-subagents log --oneline --max-count=4`
 - `find .omc/state -maxdepth 1 -type f | sort`
 - `npx vitest run test/unit/wiki-incremental-update.test.ts test/unit/wiki-generator-support.test.ts test/unit/wiki-full-generation.test.ts test/unit/wiki-generator-orchestration.test.ts`
 - `npx vitest run test/unit/kuzu-fts.test.ts test/unit/analyze-finalization.test.ts test/unit/analyze-embeddings.test.ts test/unit/analyze-summary.test.ts test/unit/analyze-kuzu.test.ts test/unit/analyze-session.test.ts`
@@ -191,7 +197,7 @@ Commands used for this audit update:
 - `npx vitest run --config vitest.integration.config.ts test/integration/cli-e2e.test.ts`
 
 Observed verification results:
-- Worktree status at sample time: 2 staged review docs + 1 staged `gitnexus/src/core/wiki/full-generation.ts`
+- Worktree status at sample time: clean after two follow-up commits (`77732ce`, `7595f7d`)
 - `.omc/state` contained 2 files: `hud-state.json`, `hud-stdin-cache.json`
 - Targeted wiki extraction tests passed: 4 files, 22 tests
 - Local `kuzu-adapter` / `analyze.ts` refactor helpers passed: 6 files, 18 tests
@@ -220,7 +226,7 @@ Test coverage by commit labeling: 27/47 commits (57%) are `test:` commits.
 ## 6. Summary (2026-03-28 Updated)
 
 **Status**: Action items largely resolved
-- Wiki worktree: merge strategy decided, review docs staged
+- Wiki worktree: merge strategy decided, review/fix follow-ups committed, branch is clean
 - P0/P1 status: language aligned with current codebase
 - Verification evidence is now recorded with explicit commands and sample window
 - Design review is complete and its generator follow-up fix exists in local code
@@ -228,8 +234,7 @@ Test coverage by commit labeling: 27/47 commits (57%) are `test:` commits.
 - `kuzu-adapter.ts` and `analyze.ts` now have verified local extraction slices committed on local `main`
 
 **Remaining**:
-- Final commit of the staged wiki review docs and `full-generation.ts`
 - Review/push the newly committed `kuzu-adapter.ts` and `analyze.ts` slices as needed
-- Execute the generator worktree merge command sequence after the above is settled
+- Execute the generator worktree merge command sequence after review
 
 **Risk assessment**: Medium — the remaining work is mostly integration and branch hygiene rather than unverified refactor intent. Confidence is improved by passing helper tests, native core search integration, CLI analyze e2e, and by landing the local `kuzu-adapter.ts` / `analyze.ts` slices as commits.
