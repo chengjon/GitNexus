@@ -19,6 +19,7 @@ import {
   saveCLIConfig,
   loadCLIConfig,
   loadCLIConfigSync,
+  addToGitInfoExclude,
 } from '../../src/storage/repo-manager.js';
 import { createTempDir } from '../helpers/test-db.js';
 
@@ -224,6 +225,40 @@ describe('RepoMeta persistence', () => {
 
     const reloaded = await loadMeta(storagePath);
     expect(reloaded).toEqual(raw);
+  });
+});
+
+describe('addToGitInfoExclude', () => {
+  let tmpHandle: Awaited<ReturnType<typeof createTempDir>>;
+
+  beforeEach(async () => {
+    tmpHandle = await createTempDir('gitnexus-git-info-exclude-');
+    await fs.mkdir(path.join(tmpHandle.dbPath, '.git', 'info'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await tmpHandle.cleanup();
+  });
+
+  it('writes .gitnexus to .git/info/exclude without requiring tracked file changes', async () => {
+    await addToGitInfoExclude(tmpHandle.dbPath);
+
+    const content = await fs.readFile(
+      path.join(tmpHandle.dbPath, '.git', 'info', 'exclude'),
+      'utf-8',
+    );
+
+    expect(content).toContain('.gitnexus');
+  });
+
+  it('is idempotent when .gitnexus is already present', async () => {
+    const excludePath = path.join(tmpHandle.dbPath, '.git', 'info', 'exclude');
+    await fs.writeFile(excludePath, '.gitnexus\n', 'utf-8');
+
+    await addToGitInfoExclude(tmpHandle.dbPath);
+
+    const content = await fs.readFile(excludePath, 'utf-8');
+    expect(content.match(/\.gitnexus/g)?.length).toBe(1);
   });
 });
 

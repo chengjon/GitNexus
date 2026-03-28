@@ -36,6 +36,7 @@ program
   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
   .option('--with-context', 'Also refresh AGENTS.md / CLAUDE.md context files after indexing')
   .option('--no-context', 'Legacy compatibility flag; context refresh is already disabled by default')
+  .option('--with-gitignore', 'Also ensure .gitnexus is listed in .gitignore')
   .option('--no-gitignore', 'Skip ensuring .gitnexus is listed in .gitignore')
   .option('--no-register', 'Skip updating the global indexed repository registry')
   .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));

@@ -30,6 +30,7 @@ export interface AnalyzeFinalizationDeps {
   saveMeta: (storagePath: string, meta: RepoMeta) => Promise<void>;
   registerRepo: (repoPath: string, meta: RepoMeta) => Promise<void>;
   addToGitignore: (repoPath: string) => Promise<void>;
+  addToGitInfoExclude: (repoPath: string) => Promise<void>;
   generateSkillFiles: (
     repoPath: string,
     projectName: string,
@@ -106,6 +107,8 @@ export async function finalizeAnalyzeArtifacts(
 
   if (input.scope.updateGitignore) {
     await deps.addToGitignore(input.repoPath);
+  } else {
+    await deps.addToGitInfoExclude(input.repoPath);
   }
 
   let generatedSkills: GeneratedSkillInfo[] = [];

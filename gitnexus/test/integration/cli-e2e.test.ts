@@ -174,10 +174,31 @@ describe('CLI end-to-end', () => {
         `stderr: ${result.stderr}`,
       ].join('\n')).toBe(0);
 
+      expect((result.stdout + result.stderr)).not.toContain('.gitignore');
       expect(fs.existsSync(path.join(tmpDir, '.gitnexus'))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', 'gitnexus'))).toBe(false);
+      expect(gitStatusShort(tmpDir)).toBe('');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('analyze --with-gitignore updates .gitignore explicitly', () => {
+    const tmpDir = createTempFixtureRepo('cli-analyze-with-gitignore-');
+    try {
+      const result = runCliRaw(['analyze', tmpDir, '--with-gitignore'], repoRoot, 30000);
+      if (result.status === null) return;
+
+      expect(result.status, [
+        `analyze --with-gitignore exited with code ${result.status}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join('\n')).toBe(0);
+
+      expect(fs.existsSync(path.join(tmpDir, '.gitnexus'))).toBe(true);
+      expect(gitStatusShort(tmpDir)).toContain('.gitignore');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -317,3 +338,11 @@ describe('CLI end-to-end', () => {
 
   });
 });
+
+function gitStatusShort(cwd: string): string {
+  return spawnSync('git', ['status', '--short'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).stdout.trim();
+}

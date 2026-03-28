@@ -215,6 +215,27 @@ export const addToGitignore = async (repoPath: string): Promise<void> => {
   }
 };
 
+/**
+ * Add .gitnexus to .git/info/exclude if not already present.
+ * This keeps tool-owned index files out of normal git status output
+ * without modifying repo-tracked files.
+ */
+export const addToGitInfoExclude = async (repoPath: string): Promise<void> => {
+  const excludePath = path.join(repoPath, '.git', 'info', 'exclude');
+  const entry = `${GITNEXUS_DIR}\n`;
+
+  try {
+    const content = await fs.readFile(excludePath, 'utf-8');
+    if (content.includes(GITNEXUS_DIR)) return;
+
+    const newContent = content.endsWith('\n') ? `${content}${entry}` : `${content}\n${entry}`;
+    await fs.writeFile(excludePath, newContent, 'utf-8');
+  } catch {
+    await fs.mkdir(path.dirname(excludePath), { recursive: true });
+    await fs.writeFile(excludePath, entry, 'utf-8');
+  }
+};
+
 // ─── Global Registry (~/.gitnexus/registry.json) ───────────────────────
 
 /**

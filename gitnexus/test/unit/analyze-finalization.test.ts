@@ -19,6 +19,7 @@ describe('analyze finalization helpers', () => {
     const saveMeta = vi.fn(async () => undefined);
     const registerRepo = vi.fn(async () => undefined);
     const addToGitignore = vi.fn(async () => undefined);
+    const addToGitInfoExclude = vi.fn(async () => undefined);
     const generateSkillFiles = vi.fn(async () => ({
       skills: [{ name: 'api', label: 'API', symbolCount: 5, fileCount: 2 }],
       outputPath: '/tmp/repo/.claude/skills/generated',
@@ -35,7 +36,7 @@ describe('analyze finalization helpers', () => {
       gitNexusVersion: '1.4.0',
       scope: {
         registerRepo: true,
-        updateGitignore: true,
+        updateGitignore: false,
         refreshContext: false,
       },
       generateSkills: true,
@@ -66,13 +67,15 @@ describe('analyze finalization helpers', () => {
       saveMeta,
       registerRepo,
       addToGitignore,
+      addToGitInfoExclude,
       generateSkillFiles,
       generateAIContextFiles,
     });
 
     expect(saveMeta).toHaveBeenCalledTimes(1);
     expect(registerRepo).toHaveBeenCalledTimes(1);
-    expect(addToGitignore).toHaveBeenCalledTimes(1);
+    expect(addToGitignore).not.toHaveBeenCalled();
+    expect(addToGitInfoExclude).toHaveBeenCalledTimes(1);
     expect(generateSkillFiles).toHaveBeenCalledTimes(1);
     expect(generateAIContextFiles).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -85,6 +88,7 @@ describe('analyze finalization helpers', () => {
     const saveMeta = vi.fn(async () => undefined);
     const registerRepo = vi.fn(async () => undefined);
     const addToGitignore = vi.fn(async () => undefined);
+    const addToGitInfoExclude = vi.fn(async () => undefined);
     const generateSkillFiles = vi.fn(async () => ({
       skills: [{ name: 'api', label: 'API', symbolCount: 5, fileCount: 2 }],
       outputPath: '/tmp/repo/.claude/skills/generated',
@@ -132,6 +136,7 @@ describe('analyze finalization helpers', () => {
       saveMeta,
       registerRepo,
       addToGitignore,
+      addToGitInfoExclude,
       generateSkillFiles,
       generateAIContextFiles,
     });
@@ -151,6 +156,7 @@ describe('analyze finalization helpers', () => {
     }));
     expect(registerRepo).toHaveBeenCalledTimes(1);
     expect(addToGitignore).toHaveBeenCalledTimes(1);
+    expect(addToGitInfoExclude).not.toHaveBeenCalled();
     expect(generateSkillFiles).toHaveBeenCalledWith('/tmp/repo', 'repo', expect.any(Object));
     expect(generateAIContextFiles).toHaveBeenCalledWith(
       '/tmp/repo',
@@ -179,6 +185,7 @@ describe('analyze finalization helpers', () => {
     const saveMeta = vi.fn(async () => undefined);
     const registerRepo = vi.fn(async () => undefined);
     const addToGitignore = vi.fn(async () => undefined);
+    const addToGitInfoExclude = vi.fn(async () => undefined);
     const generateSkillFiles = vi.fn(async () => ({
       skills: [],
       outputPath: '/tmp/repo/.claude/skills/generated',
@@ -211,6 +218,7 @@ describe('analyze finalization helpers', () => {
       saveMeta,
       registerRepo,
       addToGitignore,
+      addToGitInfoExclude,
       generateSkillFiles,
       generateAIContextFiles,
     });
@@ -218,6 +226,7 @@ describe('analyze finalization helpers', () => {
     expect(saveMeta).toHaveBeenCalledTimes(1);
     expect(registerRepo).not.toHaveBeenCalled();
     expect(addToGitignore).not.toHaveBeenCalled();
+    expect(addToGitInfoExclude).toHaveBeenCalledTimes(1);
     expect(generateSkillFiles).not.toHaveBeenCalled();
     expect(generateAIContextFiles).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({

@@ -39,7 +39,7 @@ describe('resolveAnalyzeScopeOptions', () => {
   it('keeps repo-context refresh disabled by default', () => {
     expect(resolveAnalyzeScopeOptions({})).toEqual({
       registerRepo: true,
-      updateGitignore: true,
+      updateGitignore: false,
       refreshContext: false,
     });
   });
@@ -49,8 +49,18 @@ describe('resolveAnalyzeScopeOptions', () => {
       withContext: true,
     } as any)).toEqual({
       registerRepo: true,
-      updateGitignore: true,
+      updateGitignore: false,
       refreshContext: true,
+    });
+  });
+
+  it('enables gitignore updates only when explicitly opted in', () => {
+    expect(resolveAnalyzeScopeOptions({
+      withGitignore: true,
+    } as any)).toEqual({
+      registerRepo: true,
+      updateGitignore: true,
+      refreshContext: false,
     });
   });
 
@@ -84,7 +94,7 @@ describe('resolveAnalyzeScopeOptions', () => {
       context: true,
     } as any)).toEqual({
       registerRepo: true,
-      updateGitignore: true,
+      updateGitignore: false,
       refreshContext: true,
     });
   });

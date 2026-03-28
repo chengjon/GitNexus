@@ -133,13 +133,15 @@ The CLI indexes your repository and runs an MCP server that gives AI agents deep
 npx gitnexus analyze
 ```
 
-That remains the main indexing command. By default it updates the index, `.gitnexus/` metadata, `.gitignore`, and the global repo registry, but it does **not** refresh repo-tracked context files.
+That remains the main indexing command. By default it updates the index, `.gitnexus/` metadata, repo-local `.git/info/exclude`, and the global repo registry, but it does **not** refresh repo-tracked context files or modify tracked `.gitignore`.
 
 Use `npx gitnexus analyze --with-context` if you also want to refresh:
 
 - `AGENTS.md`
 - `CLAUDE.md`
 - `.claude/skills/gitnexus/`
+
+Use `npx gitnexus analyze --with-gitignore` if you explicitly want `.gitignore` updated with `.gitnexus`.
 
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
@@ -260,6 +262,7 @@ gitnexus analyze [path]           # Index a repository (default: no repo-context
 gitnexus analyze --force          # Force full re-index
 gitnexus analyze --skills         # Generate repo-specific skill files from detected communities
 gitnexus analyze --with-context   # Index and also refresh AGENTS.md / CLAUDE.md / repo skills
+gitnexus analyze --with-gitignore # Index and also update tracked .gitignore
 gitnexus analyze --no-context     # Legacy compatibility flag; context refresh is already off by default
 gitnexus analyze --no-gitignore   # Index only, skip .gitignore update
 gitnexus analyze --no-register    # Index only, skip global registry update

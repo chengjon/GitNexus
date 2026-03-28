@@ -14,7 +14,7 @@ import { initKuzu, loadGraphToKuzu, getKuzuStats, executeQuery, executeWithReuse
 // loaded when embeddings are not requested. This avoids crashes on Node
 // versions whose ABI is not yet supported by the native binary (#89).
 // disposeEmbedder intentionally not called — ONNX Runtime segfaults on cleanup (see #38)
-import { getStoragePaths, saveMeta, loadMeta, addToGitignore, registerRepo, getGlobalRegistryPath } from '../storage/repo-manager.js';
+import { getStoragePaths, saveMeta, loadMeta, addToGitignore, addToGitInfoExclude, registerRepo, getGlobalRegistryPath } from '../storage/repo-manager.js';
 import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 import { generateAIContextFiles } from './ai-context.js';
 import { generateSkillFiles } from './skill-gen.js';
@@ -77,6 +77,7 @@ export interface AnalyzeOptions {
   skills?: boolean;
   verbose?: boolean;
   withContext?: boolean;
+  withGitignore?: boolean;
   context?: boolean;
   gitignore?: boolean;
   register?: boolean;
@@ -109,10 +110,16 @@ export function resolveAnalyzeScopeOptions(options: AnalyzeOptions = {}): Analyz
       : options.context === false || options.noContext === true
         ? false
         : false;
+  const updateGitignore =
+    options.withGitignore === true
+      ? true
+      : options.gitignore === false || options.noGitignore === true
+        ? false
+        : false;
 
   return {
     registerRepo: isEnabledOption(options.register, options.noRegister),
-    updateGitignore: isEnabledOption(options.gitignore, options.noGitignore),
+    updateGitignore,
     refreshContext,
   };
 }
@@ -401,6 +408,7 @@ export const analyzeCommand = async (
       saveMeta,
       registerRepo,
       addToGitignore,
+      addToGitInfoExclude,
       generateSkillFiles,
       generateAIContextFiles,
     });
