@@ -6,8 +6,17 @@ All notable changes to GitNexus will be documented in this file.
 
 ### Added
 
-- `detect_changes` now accepts an explicit `cwd` parameter for git operations, making worktree-aware usage possible from MCP/CLI hosts whose `process.cwd()` does not reflect the user’s active worktree.
-- `detect_changes` responses now include richer metadata such as the git repo path, actual git diff path, process cwd, path-resolution mode, and structured fallback reasons.
+- Tool aliases: `search` → `query`, `explore` → `context` for all MCP tools.
+- Graph Schema updates: added `Constructor` and `Property` node types, `HAS_METHOD` and `OVERRIDES` edge types.
+- MCP prompts usage documentation for Claude Code: `@gitnexus detect_impact` and `@gitnexus generate_map`.
+- GitNexus CLI skill files updated with new commands and parameters:
+  - `init-project` — initialize project-local files only
+  - `refresh-context` — regenerate context files only
+  - `doctor` — check GitNexus and MCP readiness
+  - `mcp` — start MCP server
+  - `serve` — start HTTP server for web UI
+- `detect_changes` now supports explicit `cwd` parameter for worktree scenarios and reports path metadata (git_repo_path, git_diff_path, path_resolution).
+
 - New git identity helpers in `src/storage/git.ts` for resolving git top-level and git common-dir identity.
 - Embeddings configuration can now be stored in `~/.gitnexus/config.json` under an `embeddings` block instead of requiring shell env vars for every run.
 - New `gitnexus config embeddings` CLI commands:
@@ -33,6 +42,7 @@ All notable changes to GitNexus will be documented in this file.
 
 ### Changed
 
+- Updated all 7 GitNexus skill files to reflect latest CLI and MCP tool functionality.
 - `src/mcp/local/local-backend.ts` was refactored from a large monolithic implementation into a thin facade over runtime, registry, handlers, and shared helper modules.
 - `detect_changes` now resolves git diff execution paths more explicitly and surfaces worktree ambiguity as metadata/warnings rather than silent behavior.
 - `detect_changes` symbol matching was tightened from broad substring-style path matching toward exact-path-first matching with a safer fallback path.

@@ -313,17 +313,17 @@ Environment variables still take precedence over `~/.gitnexus/config.json`.
 
 **7 tools** exposed via MCP:
 
-| Tool               | What It Does                                                      | `repo` Param |
-| ------------------ | ----------------------------------------------------------------- | -------------- |
-| `list_repos`     | Discover all indexed repositories                                 | —             |
-| `query`          | Process-grouped hybrid search (BM25 + semantic + RRF)             | Optional       |
-| `context`        | 360-degree symbol view — categorized refs, process participation | Optional       |
-| `impact`         | Blast radius analysis with depth grouping and confidence          | Optional       |
-| `detect_changes` | Git-diff impact — maps changed lines to affected processes       | Optional       |
-| `rename`         | Multi-file coordinated rename with graph + text search            | Optional       |
-| `cypher`         | Raw Cypher graph queries                                          | Optional       |
+| Tool               | What It Does                                                      | `repo` Param | Alias     |
+| ------------------ | ----------------------------------------------------------------- | -------------- | --------- |
+| `list_repos`     | Discover all indexed repositories                                 | —             | —         |
+| `query`          | Process-grouped hybrid search (BM25 + semantic + RRF)             | Optional       | `search`  |
+| `context`        | 360-degree symbol view — categorized refs, process participation | Optional       | `explore` |
+| `impact`         | Blast radius analysis with depth grouping and confidence          | Optional       | —         |
+| `detect_changes` | Git-diff impact — maps changed lines to affected processes       | Optional       | —         |
+| `rename`         | Multi-file coordinated rename with graph + text search            | Optional       | —         |
+| `cypher`         | Raw Cypher graph queries                                          | Optional       | —         |
 
-> When only one repo is indexed, the `repo` parameter is optional. With multiple repos, specify which one: `query({query: "auth", repo: "my-app"})`.
+> **Note:** `search` is an alias for `query`, `explore` is an alias for `context`. When only one repo is indexed, the `repo` parameter is optional. With multiple repos, specify which one: `query({query: "auth", repo: "my-app"})`.
 
 **Resources** for instant context:
 
@@ -343,6 +343,13 @@ Environment variables still take precedence over `~/.gitnexus/config.json`.
 | ----------------- | ------------------------------------------------------------------------- |
 | `detect_impact` | Pre-commit change analysis — scope, affected processes, risk level       |
 | `generate_map`  | Architecture documentation from the knowledge graph with mermaid diagrams |
+
+In Claude Code with GitNexus MCP configured, invoke prompts directly:
+
+```
+@gitnexus detect_impact
+@gitnexus generate_map
+```
 
 **4 agent skills** installed to `.claude/skills/` automatically:
 

@@ -30,15 +30,17 @@ For any task involving code understanding, debugging, impact analysis, or refact
 
 ## Tools Reference
 
-| Tool             | What it gives you                                                        |
-| ---------------- | ------------------------------------------------------------------------ |
-| `query`          | Process-grouped code intelligence — execution flows related to a concept |
-| `context`        | 360-degree symbol view — categorized refs, processes it participates in  |
-| `impact`         | Symbol blast radius — what breaks at depth 1/2/3 with confidence         |
-| `detect_changes` | Git-diff impact — what do your current changes affect                    |
-| `rename`         | Multi-file coordinated rename with confidence-tagged edits               |
-| `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
-| `list_repos`     | Discover indexed repos                                                   |
+| Tool             | What it gives you                                                        | Alias    |
+| ---------------- | ------------------------------------------------------------------------ | -------- |
+| `query`          | Process-grouped code intelligence — execution flows related to a concept | `search` |
+| `context`        | 360-degree symbol view — categorized refs, processes it participates in  | `explore` |
+| `impact`         | Symbol blast radius — what breaks at depth 1/2/3 with confidence         | —        |
+| `detect_changes` | Git-diff impact — what do your current changes affect                    | —        |
+| `rename`         | Multi-file coordinated rename with confidence-tagged edits               | —        |
+| `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           | —        |
+| `list_repos`     | Discover indexed repos                                                   | —        |
+
+> **Note:** `search` is an alias for `query`, `explore` is an alias for `context`.
 
 ## Resources Reference
 
@@ -53,10 +55,24 @@ Lightweight reads (~100-500 tokens) for navigation:
 | `gitnexus://repo/{name}/process/{processName}` | Step-by-step trace                        |
 | `gitnexus://repo/{name}/schema`                | Graph schema for Cypher                   |
 
+## MCP Prompts
+
+| Prompt           | What it Does                                                          |
+| ---------------- | --------------------------------------------------------------------- |
+| `detect_impact` | Pre-commit change analysis — scope, affected processes, risk level    |
+| `generate_map`  | Architecture documentation from knowledge graph with mermaid diagrams |
+
+In Claude Code with GitNexus MCP configured, invoke prompts directly:
+
+```
+@gitnexus detect_impact
+@gitnexus generate_map
+```
+
 ## Graph Schema
 
-**Nodes:** File, Function, Class, Interface, Method, Community, Process
-**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
+**Nodes:** File, Folder, Function, Class, Interface, Method, Constructor, Property, CodeElement, Community, Process
+**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS, HAS_METHOD, OVERRIDES
 
 ```cypher
 MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})

@@ -44,7 +44,7 @@ description: "Use when the user is debugging a bug, tracing an error, or asking 
 | Wrong return value   | `context` on the function → trace callees for data flow    |
 | Intermittent failure | `context` → look for external calls, async deps            |
 | Performance issue    | `context` → find symbols with many callers (hot paths)     |
-| Recent regression    | `detect_changes` to see what your changes affect           |
+| Recent regression    | `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` to see what changed |
 
 ## Tools
 

@@ -21,6 +21,13 @@ Run from the project root. This parses all source files, builds the knowledge gr
 | -------------- | ---------------------------------------------------------------- |
 | `--force`      | Force full re-index even if up to date                           |
 | `--embeddings` | Enable embedding generation for semantic search (off by default) |
+| `--skills`     | Generate repo-specific skill files from detected communities     |
+| `--no-context` | Index only, skip AGENTS.md / CLAUDE.md refresh                   |
+| `--no-gitignore` | Index only, skip .gitignore update                            |
+| `--no-register` | Index only, skip global registry update                         |
+| `--verbose`    | Log skipped files when parsers are unavailable                  |
+
+**Automatic behavior:** `gitnexus analyze` automatically detects and stops local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI/editor sessions open.
 
 **When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated.
 
@@ -31,8 +38,6 @@ Graph tools, BM25/FTS search, impact analysis, and context lookups still work wi
 Use `npx gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.
 
 This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
-
-During `npx gitnexus analyze`, GitNexus automatically detects and stops local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This prevents the usual KuzuDB lock conflict when you have multiple Codex / Claude Code / editor sessions running.
 
 **Embeddings configuration:**
 
@@ -92,6 +97,47 @@ gitnexus config embeddings set --provider ollama --ollama-base-url http://localh
 gitnexus config embeddings clear
 ```
 
+### init-project — Initialize project-local files only
+
+```bash
+npx gitnexus init-project [path]
+```
+
+Creates `.gitignore`, `AGENTS.md`, `CLAUDE.md`, and repo-specific skills in `.claude/skills/generated/`. Does not perform full re-indexing. Useful when the index already exists and you only need to refresh project-local files.
+
+### refresh-context — Regenerate context files only
+
+```bash
+npx gitnexus refresh-context [path]
+```
+
+Regenerates `AGENTS.md`, `CLAUDE.md`, and repo-specific skills without re-indexing. Use when the index is current but context files need updating.
+
+### doctor — Check GitNexus and MCP readiness
+
+```bash
+npx gitnexus doctor
+npx gitnexus doctor --host <name>
+```
+
+Shows local repo index status and MCP server readiness. With `--host <name>`, checks whether a specific editor (codex, claude, cursor, etc.) has proper MCP configuration.
+
+### mcp — Start MCP server
+
+```bash
+npx gitnexus mcp
+```
+
+Starts the MCP server in stdio mode. Serves all indexed repositories. Use when an editor needs a direct stdio command rather than a configured MCP.
+
+### serve — Start HTTP server for web UI
+
+```bash
+npx gitnexus serve
+```
+
+Starts a local HTTP server (port 4747) for Web UI connection. Enables multi-repo browsing through the browser-based interface. The Web UI auto-detects the local server and can browse all indexed repos without re-uploading or re-indexing.
+
 ### status — Check index freshness
 
 ```bash
@@ -147,5 +193,4 @@ Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_
 
 - **"Not inside a git repository"**: Run from a directory inside a git repo
 - **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
-- **`analyze` times out waiting for Kuzu lock release**: Check which process still holds `.gitnexus/kuzu` with `lsof +D .gitnexus` or `lsof .gitnexus/kuzu`, then stop the remaining holder and retry
 - **Embeddings timeout on Hugging Face**: Set `HF_ENDPOINT` / `GITNEXUS_HF_REMOTE_HOST`, configure `GITNEXUS_HF_CACHE_DIR`, or switch to the local Ollama provider via `GITNEXUS_EMBEDDING_PROVIDER=ollama`

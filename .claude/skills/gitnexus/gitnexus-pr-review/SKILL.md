@@ -18,12 +18,13 @@ description: "Use when the user wants to review a pull request, understand what 
 
 ```
 1. gh pr diff <number>                                    → Get the raw diff
-2. gitnexus_detect_changes({scope: "compare", base_ref: "main"})  → Map diff to affected flows
-3. For each changed symbol:
+2. gitnexus_detect_changes({scope: "compare", base_ref: "main", cwd: "/path/to/worktree"})  → Map diff to affected flows
+3. Check output's path_resolution to verify correct path is used
+4. For each changed symbol:
    gitnexus_impact({target: "<symbol>", direction: "upstream"})    → Blast radius per change
-4. gitnexus_context({name: "<key symbol>"})               → Understand callers/callees
-5. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
-6. Summarize findings with risk assessment
+5. gitnexus_context({name: "<key symbol>"})               → Understand callers/callees
+6. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
+7. Summarize findings with risk assessment
 ```
 
 > If "Index is stale" → run `npx gitnexus analyze` in terminal before reviewing.
@@ -33,6 +34,7 @@ description: "Use when the user wants to review a pull request, understand what 
 ```
 - [ ] Fetch PR diff (gh pr diff or git diff base...head)
 - [ ] gitnexus_detect_changes to map changes to affected execution flows
+- [ ] If in worktree, pass `cwd` and check path_resolution
 - [ ] gitnexus_impact on each non-trivial changed symbol
 - [ ] Review d=1 items (WILL BREAK) — are callers updated?
 - [ ] gitnexus_context on key changed symbols to understand full picture
@@ -50,6 +52,7 @@ description: "Use when the user wants to review a pull request, understand what 
 | **Completeness** | `detect_changes` shows all affected flows — are they all handled? |
 | **Test coverage** | `impact({includeTests: true})` shows which tests touch changed code |
 | **Breaking changes** | d=1 upstream items that aren't updated in the PR = potential breakage |
+| **Path verification** | `detect_changes` output's `git_diff_path` and `path_resolution` confirm correct analysis path |
 
 ## Risk Assessment
 

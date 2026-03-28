@@ -33,6 +33,8 @@ description: "Use when the user wants to know what will break if they change som
 - [ ] Check high-confidence (>0.8) dependencies
 - [ ] READ processes to check affected execution flows
 - [ ] gitnexus_detect_changes() for pre-commit check
+- [ ] If working in a git worktree, pass `cwd` explicitly
+- [ ] Check output's path_resolution to verify correct path is used
 - [ ] Assess risk level and report to user
 ```
 
@@ -75,13 +77,25 @@ gitnexus_impact({
 
 **gitnexus_detect_changes** — git-diff based impact analysis:
 
-```
-gitnexus_detect_changes({scope: "staged"})
+```typescript
+gitnexus_detect_changes({
+  scope: "staged",       // unstaged | staged | all | compare
+  base_ref: "main",     // optional: compare branch (required when scope="compare")
+  cwd: "/path/to/worktree"  // optional: specify git working directory (worktree scenarios)
+})
 
 → Changed: 5 symbols in 3 files
 → Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
 → Risk: MEDIUM
+
+// Output metadata:
+→ git_repo_path: /path/to/registry/repo
+→ git_diff_path: /path/to/actual/worktree
+→ process_cwd: /current/working/dir
+→ path_resolution: cwd_worktree | registry_repo
 ```
+
+> **Worktree scenarios:** When working in a git worktree, pass `cwd` explicitly to ensure correct directory analysis. Check `path_resolution` in output to verify the correct path was used.
 
 ## Example: "What breaks if I change validateUser?"
 
