@@ -32,6 +32,24 @@ jobs:
     permissions:
       contents: read
 
+  language-support:
+    name: language support
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./.github/actions/setup-gitnexus
+        with:
+          build: 'true'
+      - name: Run doctor JSON
+        working-directory: gitnexus
+        run: node dist/cli/index.js doctor --json > doctor-output.json
+      - name: Summarize language support
+        working-directory: gitnexus
+        run: node scripts/ci/language-support-report.mjs doctor-output.json
+
   integration:
     uses: ./.github/workflows/ci-integration.yml
     with:
@@ -47,7 +65,7 @@ jobs:
   save-pr-meta:
     name: Save PR Metadata
     if: always() && github.event_name == 'pull_request'
-    needs: [quality, unit-tests, integration]
+    needs: [quality, unit-tests, language-support, integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -57,12 +75,14 @@ jobs:
           PR_NUMBER: ${{ github.event.number }}
           QUALITY: ${{ needs.quality.result }}
           UNIT: ${{ needs.unit-tests.result }}
+          LANG: ${{ needs.language-support.result }}
           INTEG: ${{ needs.integration.result }}
         run: |
           mkdir -p pr-meta
           echo "$PR_NUMBER"  > pr-meta/pr_number
           echo "$QUALITY"    > pr-meta/quality_result
           echo "$UNIT"       > pr-meta/unit_result
+          echo "$LANG"       > pr-meta/language_support_result
           echo "$INTEG"      > pr-meta/integration_result
 
       - name: Upload PR metadata
@@ -76,7 +96,7 @@ jobs:
   # Single required check for branch protection.
   ci-status:
     name: CI Gate
-    needs: [quality, unit-tests, integration]
+    needs: [quality, unit-tests, language-support, integration]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -86,13 +106,16 @@ jobs:
         env:
           QUALITY: ${{ needs.quality.result }}
           UNIT: ${{ needs.unit-tests.result }}
+          LANG: ${{ needs.language-support.result }}
           INTEG: ${{ needs.integration.result }}
         run: |
           echo "Quality:     $QUALITY"
           echo "Unit Tests:  $UNIT"
+          echo "Lang Support:$LANG"
           echo "Integration: $INTEG"
           if [[ "$QUALITY" != "success" ]] ||
              [[ "$UNIT" != "success" ]] ||
+             [[ "$LANG" != "success" ]] ||
              [[ "$INTEG" != "success" ]]; then
             echo "::error::One or more CI jobs failed"
             exit 1
