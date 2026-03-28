@@ -13,6 +13,7 @@ import { PipelineResult } from '../types/pipeline.js';
 import { CommunityNode, CommunityMembership } from '../core/ingestion/community-processor.js';
 import { ProcessNode } from '../core/ingestion/process-processor.js';
 import { GraphNode, KnowledgeGraph } from '../core/graph/types.js';
+import { selectSignificantCommunities, type AggregatedCommunity } from './skill-community-selection.js';
 
 // ============================================================================
 // TYPES
@@ -23,13 +24,6 @@ export interface GeneratedSkillInfo {
   label: string;
   symbolCount: number;
   fileCount: number;
-}
-
-interface AggregatedCommunity {
-  label: string;
-  rawIds: string[];
-  symbolCount: number;
-  cohesion: number;
 }
 
 interface MemberSymbol {
@@ -85,14 +79,7 @@ export const generateSkillFiles = async (
     ? communityResult.communities
     : buildCommunitiesFromMemberships(communityResult.memberships, graph, repoPath);
 
-  const aggregated = aggregateCommunities(communities);
-
-  // Step 2: Filter to significant communities
-  // Keep communities with >= 3 symbols after aggregation.
-  const significant = aggregated
-    .filter(c => c.symbolCount >= 3)
-    .sort((a, b) => b.symbolCount - a.symbolCount)
-    .slice(0, 20);
+  const significant = selectSignificantCommunities(communities);
 
   if (significant.length === 0) {
     console.log('\n  Skills: no significant communities found (all below 3-symbol threshold)');
@@ -258,49 +245,6 @@ const buildCommunitiesFromMemberships = (
   }
 
   return communities.sort((a, b) => b.symbolCount - a.symbolCount);
-};
-
-// ============================================================================
-// AGGREGATION
-// ============================================================================
-
-/**
- * @brief Aggregate raw Leiden communities by heuristicLabel
- * @param {CommunityNode[]} communities - Raw community nodes from Leiden detection
- * @returns {AggregatedCommunity[]} Aggregated communities grouped by label
- */
-const aggregateCommunities = (communities: CommunityNode[]): AggregatedCommunity[] => {
-  const groups = new Map<string, {
-    rawIds: string[];
-    totalSymbols: number;
-    weightedCohesion: number;
-  }>();
-
-  for (const c of communities) {
-    const label = c.heuristicLabel || c.label || 'Unknown';
-    const symbols = c.symbolCount || 0;
-    const cohesion = c.cohesion || 0;
-    const existing = groups.get(label);
-
-    if (!existing) {
-      groups.set(label, {
-        rawIds: [c.id],
-        totalSymbols: symbols,
-        weightedCohesion: cohesion * symbols,
-      });
-    } else {
-      existing.rawIds.push(c.id);
-      existing.totalSymbols += symbols;
-      existing.weightedCohesion += cohesion * symbols;
-    }
-  }
-
-  return Array.from(groups.entries()).map(([label, g]) => ({
-    label,
-    rawIds: g.rawIds,
-    symbolCount: g.totalSymbols,
-    cohesion: g.totalSymbols > 0 ? g.weightedCohesion / g.totalSymbols : 0,
-  }));
 };
 
 // ============================================================================
