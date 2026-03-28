@@ -13,7 +13,7 @@ function parseLanguageSupportDetail(detail) {
     .split(', ')
     .filter(Boolean)
     .map((entry) => {
-      const match = entry.match(/^([^:]+):([^=]+)=([^(]+)(?: \((.*)\))?$/);
+      const match = entry.match(/^([^:]+):([^=]+)=([^(]+)(?: \(([\s\S]*)\))?$/);
       if (!match) return null;
       const [, language, tier, status, extra] = match;
       return {
@@ -25,6 +25,9 @@ function parseLanguageSupportDetail(detail) {
     })
     .filter(Boolean);
 }
+
+const REQUIRED_BUILTIN_LANGUAGES = ['typescript', 'python', 'java', 'c', 'cpp', 'csharp', 'go', 'rust', 'php', 'javascript'];
+const EXPECTED_OPTIONAL_LANGUAGES = ['kotlin', 'swift'];
 
 export function formatLanguageSupportSummary(languageSupportCheck) {
   const rows = parseLanguageSupportDetail(languageSupportCheck.detail);
@@ -43,6 +46,27 @@ export function formatLanguageSupportSummary(languageSupportCheck) {
   return lines.join('\n');
 }
 
+export function validateLanguageSupportPolicy(languageSupportCheck) {
+  const rows = parseLanguageSupportDetail(languageSupportCheck.detail);
+
+  for (const language of REQUIRED_BUILTIN_LANGUAGES) {
+    const row = rows.find((entry) => entry.language === language && entry.tier === 'builtin');
+    if (!row) {
+      throw new Error(`builtin language declaration missing: ${language}`);
+    }
+    if (row.status !== 'available') {
+      throw new Error(`builtin language support must be available: ${language}`);
+    }
+  }
+
+  for (const language of EXPECTED_OPTIONAL_LANGUAGES) {
+    const row = rows.find((entry) => entry.language === language && entry.tier === 'optional');
+    if (!row) {
+      throw new Error(`optional language declaration missing: ${language}`);
+    }
+  }
+}
+
 function main() {
   const filePath = process.argv[2];
   if (!filePath) {
@@ -52,6 +76,7 @@ function main() {
   const raw = fs.readFileSync(filePath, 'utf8');
   const doctorResult = JSON.parse(raw);
   const languageSupportCheck = extractLanguageSupportCheck(doctorResult);
+  validateLanguageSupportPolicy(languageSupportCheck);
   const summary = formatLanguageSupportSummary(languageSupportCheck);
 
   console.log(summary);
