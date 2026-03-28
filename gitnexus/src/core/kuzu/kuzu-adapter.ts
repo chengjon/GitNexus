@@ -1,6 +1,4 @@
 import fs from 'fs/promises';
-import { createReadStream } from 'fs';
-import { createInterface } from 'readline';
 import path from 'path';
 import kuzu from 'kuzu';
 import { KnowledgeGraph } from '../graph/types.js';
@@ -11,7 +9,6 @@ import {
   EMBEDDING_TABLE_NAME,
   NodeTableName,
 } from './schema.js';
-import { streamAllCSVsToDisk } from './csv-generator.js';
 import {
   createFTSIndex as createFTSIndexImpl,
   dropFTSIndex as dropFTSIndexImpl,
@@ -19,6 +16,7 @@ import {
   queryFTS as queryFTSImpl,
   type KuzuFtsRuntime,
 } from './fts.js';
+import { loadGraphToKuzu as loadGraphToKuzuImpl, type KuzuProgressCallback } from './load-graph.js';
 
 let db: kuzu.Database | null = null;
 let conn: kuzu.Connection | null = null;
@@ -53,6 +51,21 @@ const runWithSessionLock = async <T>(operation: () => Promise<T>): Promise<T> =>
 };
 
 const normalizeCopyPath = (filePath: string): string => filePath.replace(/\\/g, '/');
+
+// Multi-language table names that were created with backticks in CODE_ELEMENT_BASE
+// and must always be referenced with backticks in queries.
+const BACKTICK_TABLES = new Set([
+  'Struct', 'Enum', 'Macro', 'Typedef', 'Union', 'Namespace', 'Trait', 'Impl',
+  'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation',
+  'Constructor', 'Template', 'Module',
+]);
+
+const escapeTableName = (table: string): string => {
+  return BACKTICK_TABLES.has(table) ? `\`${table}\`` : table;
+};
+
+/** Tables with isExported column (TypeScript/JS-native types) */
+const TABLES_WITH_EXPORTED = new Set<string>(['Function', 'Class', 'Interface', 'Method', 'CodeElement']);
 
 export const initKuzu = async (dbPath: string) => {
   return runWithSessionLock(() => ensureKuzuInitialized(dbPath));
@@ -131,227 +144,13 @@ const doInitKuzu = async (dbPath: string) => {
   return { db, conn };
 };
 
-export type KuzuProgressCallback = (message: string) => void;
-
 export const loadGraphToKuzu = async (
   graph: KnowledgeGraph,
   repoPath: string,
   storagePath: string,
   onProgress?: KuzuProgressCallback
 ) => {
-  if (!conn) {
-    throw new Error('KuzuDB not initialized. Call initKuzu first.');
-  }
-
-  const log = onProgress || (() => {});
-
-  const csvDir = path.join(storagePath, 'csv');
-
-  log('Streaming CSVs to disk...');
-  const csvResult = await streamAllCSVsToDisk(graph, repoPath, csvDir);
-
-  const validTables = new Set<string>(NODE_TABLES as readonly string[]);
-  const getNodeLabel = (nodeId: string): string => {
-    if (nodeId.startsWith('comm_')) return 'Community';
-    if (nodeId.startsWith('proc_')) return 'Process';
-    return nodeId.split(':')[0];
-  };
-
-  // Bulk COPY all node CSVs (sequential — KuzuDB allows only one write txn at a time)
-  const nodeFiles = [...csvResult.nodeFiles.entries()];
-  const totalSteps = nodeFiles.length + 1; // +1 for relationships
-  let stepsDone = 0;
-
-  for (const [table, { csvPath, rows }] of nodeFiles) {
-    stepsDone++;
-    log(`Loading nodes ${stepsDone}/${totalSteps}: ${table} (${rows.toLocaleString()} rows)`);
-
-    const normalizedPath = normalizeCopyPath(csvPath);
-    const copyQuery = getCopyQuery(table, normalizedPath);
-
-    try {
-      await conn.query(copyQuery);
-    } catch (err) {
-      try {
-        const retryQuery = copyQuery.replace('auto_detect=false)', 'auto_detect=false, IGNORE_ERRORS=true)');
-        await conn.query(retryQuery);
-      } catch (retryErr) {
-        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-        throw new Error(`COPY failed for ${table}: ${retryMsg.slice(0, 200)}`);
-      }
-    }
-  }
-
-  // Bulk COPY relationships — split by FROM→TO label pair (KuzuDB requires it)
-  // Stream-read the relation CSV line by line to avoid exceeding V8 max string length
-  let relHeader = '';
-  const relsByPair = new Map<string, string[]>();
-  let skippedRels = 0;
-  let totalValidRels = 0;
-
-  await new Promise<void>((resolve, reject) => {
-    const rl = createInterface({ input: createReadStream(csvResult.relCsvPath, 'utf-8'), crlfDelay: Infinity });
-    let isFirst = true;
-    rl.on('line', (line) => {
-      if (isFirst) { relHeader = line; isFirst = false; return; }
-      if (!line.trim()) return;
-      const match = line.match(/"([^"]*)","([^"]*)"/);
-      if (!match) { skippedRels++; return; }
-      const fromLabel = getNodeLabel(match[1]);
-      const toLabel = getNodeLabel(match[2]);
-      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) {
-        skippedRels++;
-        return;
-      }
-      const pairKey = `${fromLabel}|${toLabel}`;
-      let list = relsByPair.get(pairKey);
-      if (!list) { list = []; relsByPair.set(pairKey, list); }
-      list.push(line);
-      totalValidRels++;
-    });
-    rl.on('close', resolve);
-    rl.on('error', reject);
-  });
-
-  const insertedRels = totalValidRels;
-  const warnings: string[] = [];
-  if (insertedRels > 0) {
-
-    log(`Loading edges: ${insertedRels.toLocaleString()} across ${relsByPair.size} types`);
-
-    let pairIdx = 0;
-    let failedPairEdges = 0;
-    const failedPairLines: string[] = [];
-
-    for (const [pairKey, lines] of relsByPair) {
-      pairIdx++;
-      const [fromLabel, toLabel] = pairKey.split('|');
-      const pairCsvPath = path.join(csvDir, `rel_${fromLabel}_${toLabel}.csv`);
-      await fs.writeFile(pairCsvPath, relHeader + '\n' + lines.join('\n'), 'utf-8');
-      const normalizedPath = normalizeCopyPath(pairCsvPath);
-      const copyQuery = `COPY ${REL_TABLE_NAME} FROM "${normalizedPath}" (from="${fromLabel}", to="${toLabel}", HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
-
-      if (pairIdx % 5 === 0 || lines.length > 1000) {
-        log(`Loading edges: ${pairIdx}/${relsByPair.size} types (${fromLabel} -> ${toLabel})`);
-      }
-
-      try {
-        await conn.query(copyQuery);
-      } catch (err) {
-        try {
-          const retryQuery = copyQuery.replace('auto_detect=false)', 'auto_detect=false, IGNORE_ERRORS=true)');
-          await conn.query(retryQuery);
-        } catch (retryErr) {
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          warnings.push(`${fromLabel}->${toLabel} (${lines.length} edges): ${retryMsg.slice(0, 80)}`);
-          failedPairEdges += lines.length;
-          failedPairLines.push(...lines);
-        }
-      }
-      try { await fs.unlink(pairCsvPath); } catch {}
-    }
-
-    if (failedPairLines.length > 0) {
-      log(`Inserting ${failedPairEdges} edges individually (missing schema pairs)`);
-      await fallbackRelationshipInserts([relHeader, ...failedPairLines], validTables, getNodeLabel);
-    }
-  }
-
-  // Cleanup all CSVs
-  try { await fs.unlink(csvResult.relCsvPath); } catch {}
-  for (const [, { csvPath }] of csvResult.nodeFiles) {
-    try { await fs.unlink(csvPath); } catch {}
-  }
-  try {
-    const remaining = await fs.readdir(csvDir);
-    for (const f of remaining) {
-      try { await fs.unlink(path.join(csvDir, f)); } catch {}
-    }
-  } catch {}
-  try { await fs.rmdir(csvDir); } catch {}
-
-  return { success: true, insertedRels, skippedRels, warnings };
-};
-
-// KuzuDB default ESCAPE is '\' (backslash), but our CSV uses RFC 4180 escaping ("" for literal quotes).
-// Source code content is full of backslashes which confuse the auto-detection.
-// We MUST explicitly set ESCAPE='"' to use RFC 4180 escaping, and disable auto_detect to prevent
-// KuzuDB from overriding our settings based on sample rows.
-const COPY_CSV_OPTS = `(HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
-
-// Multi-language table names that were created with backticks in CODE_ELEMENT_BASE
-// and must always be referenced with backticks in queries
-const BACKTICK_TABLES = new Set([
-  'Struct', 'Enum', 'Macro', 'Typedef', 'Union', 'Namespace', 'Trait', 'Impl',
-  'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation',
-  'Constructor', 'Template', 'Module',
-]);
-
-const escapeTableName = (table: string): string => {
-  return BACKTICK_TABLES.has(table) ? `\`${table}\`` : table;
-};
-
-/** Fallback: insert relationships one-by-one if COPY fails */
-const fallbackRelationshipInserts = async (
-  validRelLines: string[],
-  validTables: Set<string>,
-  getNodeLabel: (id: string) => string
-) => {
-  if (!conn) return;
-  const escapeLabel = (label: string): string => {
-    return BACKTICK_TABLES.has(label) ? `\`${label}\`` : label;
-  };
-
-  for (let i = 1; i < validRelLines.length; i++) {
-    const line = validRelLines[i];
-    try {
-      const match = line.match(/"([^"]*)","([^"]*)","([^"]*)",([0-9.]+),"([^"]*)",([0-9-]+)/);
-      if (!match) continue;
-      const [, fromId, toId, relType, confidenceStr, reason, stepStr] = match;
-      const fromLabel = getNodeLabel(fromId);
-      const toLabel = getNodeLabel(toId);
-      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) continue;
-
-      const confidence = parseFloat(confidenceStr) || 1.0;
-      const step = parseInt(stepStr) || 0;
-
-      await conn.query(`
-        MATCH (a:${escapeLabel(fromLabel)} {id: '${fromId.replace(/'/g, "''")}' }),
-              (b:${escapeLabel(toLabel)} {id: '${toId.replace(/'/g, "''")}' })
-        CREATE (a)-[:${REL_TABLE_NAME} {type: '${relType}', confidence: ${confidence}, reason: '${reason.replace(/'/g, "''")}', step: ${step}}]->(b)
-      `);
-    } catch {
-      // skip
-    }
-  }
-};
-
-/** Tables with isExported column (TypeScript/JS-native types) */
-const TABLES_WITH_EXPORTED = new Set<string>(['Function', 'Class', 'Interface', 'Method', 'CodeElement']);
-
-const getCopyQuery = (table: NodeTableName, filePath: string): string => {
-  const t = escapeTableName(table);
-  if (table === 'File') {
-    return `COPY ${t}(id, name, filePath, content) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  if (table === 'Folder') {
-    return `COPY ${t}(id, name, filePath) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  if (table === 'Community') {
-    return `COPY ${t}(id, label, heuristicLabel, keywords, description, enrichedBy, cohesion, symbolCount) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  if (table === 'Process') {
-    return `COPY ${t}(id, label, heuristicLabel, processType, stepCount, communities, entryPointId, terminalId) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  if (table === 'Method') {
-    return `COPY ${t}(id, name, filePath, startLine, endLine, isExported, content, description, parameterCount, returnType) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  // TypeScript/JS code element tables have isExported; multi-language tables do not
-  if (TABLES_WITH_EXPORTED.has(table)) {
-    return `COPY ${t}(id, name, filePath, startLine, endLine, isExported, content, description) FROM "${filePath}" ${COPY_CSV_OPTS}`;
-  }
-  // Multi-language tables (Struct, Impl, Trait, Macro, etc.)
-  return `COPY ${t}(id, name, filePath, startLine, endLine, content, description) FROM "${filePath}" ${COPY_CSV_OPTS}`;
+  return loadGraphToKuzuImpl(graph, repoPath, storagePath, onProgress, conn ?? undefined);
 };
 
 /**
