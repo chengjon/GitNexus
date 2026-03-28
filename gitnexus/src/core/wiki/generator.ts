@@ -33,6 +33,7 @@ import {
 import {
   GROUPING_SYSTEM_PROMPT,
 } from './prompts.js';
+import { runFullGeneration } from './full-generation.js';
 import { extractModuleFiles, readProjectInfo } from './generator-support.js';
 import { runIncrementalUpdate } from './incremental-update.js';
 import { runWikiGeneration } from './run-pipeline.js';
@@ -229,65 +230,22 @@ export class WikiGenerator {
   // ─── Full Generation ────────────────────────────────────────────────
 
   private async fullGeneration(currentCommit: string): Promise<{ pagesGenerated: number; mode: 'full'; failedModules: string[] }> {
-    let pagesGenerated = 0;
-
-    // Phase 0: Gather structure
-    this.onProgress('gather', 5, 'Querying graph for file structure...');
-    const filesWithExports = await getFilesWithExports();
-    const allFiles = await getAllFiles();
-
-    // Filter to source files only
-    const sourceFiles = allFiles.filter(f => !shouldIgnorePath(f));
-    if (sourceFiles.length === 0) {
-      throw new Error('No source files found in the knowledge graph. Nothing to document.');
-    }
-
-    // Build enriched file list (merge exports into all source files)
-    const exportMap = new Map(filesWithExports.map(f => [f.filePath, f]));
-    const enrichedFiles: FileWithExports[] = sourceFiles.map(fp => {
-      return exportMap.get(fp) || { filePath: fp, symbols: [] };
-    });
-
-    this.onProgress('gather', 10, `Found ${sourceFiles.length} source files`);
-
-    // Phase 1: Build module tree
-    const moduleTree = await buildModuleTree({
-      files: enrichedFiles,
+    return runFullGeneration({
+      currentCommit,
       wikiDir: this.wikiDir,
       llmConfig: this.llmConfig,
       maxTokensPerModule: this.maxTokensPerModule,
+      failedModules: this.failedModules,
       onProgress: this.onProgress,
       slugify: (name) => this.slugify(name),
       estimateModuleTokens: async (filePaths) => this.estimateModuleTokens(filePaths),
       streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-    });
-    pagesGenerated = 0;
-
-    // Phase 2: Generate module pages (parallel with concurrency limit)
-    const totalModules = countModules(moduleTree);
-    let modulesProcessed = 0;
-
-    const reportProgress = (moduleName?: string) => {
-      modulesProcessed++;
-      const percent = 30 + Math.round((modulesProcessed / totalModules) * 55);
-      const detail = moduleName
-        ? `${modulesProcessed}/${totalModules} — ${moduleName}`
-        : `${modulesProcessed}/${totalModules} modules`;
-      this.onProgress('modules', percent, detail);
-    };
-
-    // Flatten tree into layers: leaves first, then parents
-    // Leaves can run in parallel; parents must wait for their children
-    const { leaves, parents } = flattenModuleTree(moduleTree);
-
-    // Process all leaf modules in parallel
-    pagesGenerated += await this.runParallel(leaves, async (node) => {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      if (await this.fileExists(pagePath)) {
-        reportProgress(node.name);
-        return 0;
-      }
-      try {
+      fileExists: async (filePath) => this.fileExists(filePath),
+      saveModuleTree: async (tree) => this.saveModuleTree(tree),
+      saveWikiMeta: async (meta) => this.saveWikiMeta(meta),
+      runParallel: async (items, fn) => this.runParallel(items, fn),
+    }, {
+      generateLeafPage: async (node) => {
         await generateLeafPage({
           node,
           wikiDir: this.wikiDir,
@@ -298,64 +256,27 @@ export class WikiGenerator {
           readSourceFiles: (filePaths) => this.readSourceFiles(filePaths),
           truncateSource: (source, maxTokens) => this.truncateSource(source, maxTokens),
         });
-        reportProgress(node.name);
-        return 1;
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        reportProgress(`Failed: ${node.name}`);
-        return 0;
-      }
-    });
-
-    // Process parent modules sequentially (they depend on child docs)
-    for (const node of parents) {
-      const pagePath = path.join(this.wikiDir, `${node.slug}.md`);
-      if (await this.fileExists(pagePath)) {
-        reportProgress(node.name);
-        continue;
-      }
-      try {
+      },
+      generateParentPage: async (node) => {
         await generateParentPage({
           node,
           wikiDir: this.wikiDir,
           llmConfig: this.llmConfig,
           streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
         });
-        pagesGenerated++;
-        reportProgress(node.name);
-      } catch (err: any) {
-        this.failedModules.push(node.name);
-        reportProgress(`Failed: ${node.name}`);
-      }
-    }
-
-    // Phase 3: Generate overview
-    this.onProgress('overview', 88, 'Generating overview page...');
-    await generateOverviewPage({
-      moduleTree,
-      wikiDir: this.wikiDir,
-      repoPath: this.repoPath,
-      llmConfig: this.llmConfig,
-      streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
-      readProjectInfo: () => readProjectInfo(this.repoPath),
-      extractModuleFiles: (tree) => extractModuleFiles(tree),
+      },
+      generateOverviewPage: async (moduleTree) => {
+        await generateOverviewPage({
+          moduleTree,
+          wikiDir: this.wikiDir,
+          repoPath: this.repoPath,
+          llmConfig: this.llmConfig,
+          streamOpts: (label, fixedPercent) => this.streamOpts(label, fixedPercent),
+          readProjectInfo: () => readProjectInfo(this.repoPath),
+          extractModuleFiles: (tree) => extractModuleFiles(tree),
+        });
+      },
     });
-    pagesGenerated++;
-
-    // Save metadata
-    this.onProgress('finalize', 95, 'Saving metadata...');
-    const moduleFiles = extractModuleFiles(moduleTree);
-    await this.saveModuleTree(moduleTree);
-    await this.saveWikiMeta({
-      fromCommit: currentCommit,
-      generatedAt: new Date().toISOString(),
-      model: this.llmConfig.model,
-      moduleFiles,
-      moduleTree,
-    });
-
-    this.onProgress('done', 100, 'Wiki generation complete');
-    return { pagesGenerated, mode: 'full', failedModules: [...this.failedModules] };
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
