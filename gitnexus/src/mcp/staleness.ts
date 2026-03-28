@@ -23,6 +23,29 @@ export interface StalenessInfo {
   hint?: string;
 }
 
+function normalizePorcelainPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const arrowIndex = trimmed.indexOf(' -> ');
+  return arrowIndex >= 0 ? trimmed.slice(arrowIndex + 4).trim() : trimmed;
+}
+
+function isGitNexusInternalPath(value: string): boolean {
+  const normalized = normalizePorcelainPath(value);
+  return normalized === '.gitnexus' || normalized.startsWith('.gitnexus/');
+}
+
+function hasMeaningfulDirtyEntries(porcelain: string): boolean {
+  return porcelain
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .some((line) => {
+      const pathPart = line.length > 3 ? line.slice(3) : '';
+      return !isGitNexusInternalPath(pathPart);
+    });
+}
+
 export function getIndexHealth(repoPath: string, lastCommit: string): IndexHealth {
   try {
     const commitsBehindRaw = execFileSync(
@@ -35,7 +58,7 @@ export function getIndexHealth(repoPath: string, lastCommit: string): IndexHealt
     ).trim();
 
     const commitsBehind = parseInt(commitsBehindRaw, 10) || 0;
-    const dirty = dirtyRaw.length > 0;
+    const dirty = hasMeaningfulDirtyEntries(dirtyRaw);
     const reasons: IndexHealthReason[] = [];
 
     if (commitsBehind > 0) reasons.push('commit-behind');

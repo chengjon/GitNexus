@@ -76,6 +76,35 @@ describe('getIndexHealth', () => {
     expect(health.dirty).toBe(true);
   });
 
+  it('ignores dirty files under .gitnexus when evaluating worktree health', async () => {
+    const repoDir = await createTempGitRepo('gitnexus-health-ignore-internal-');
+    const headCommit = git(repoDir, ['rev-parse', 'HEAD']);
+    await fs.mkdir(path.join(repoDir, '.gitnexus'), { recursive: true });
+    await fs.writeFile(path.join(repoDir, '.gitnexus', 'meta.json'), '{"ok":true}\n', 'utf-8');
+
+    const health = getIndexHealth(repoDir, headCommit);
+
+    expect(health.level).toBe('fresh');
+    expect(health.reasons).toEqual([]);
+    expect(health.commitsBehind).toBe(0);
+    expect(health.dirty).toBe(false);
+  });
+
+  it('still reports dirty when .gitnexus changes coexist with real repo changes', async () => {
+    const repoDir = await createTempGitRepo('gitnexus-health-mixed-dirty-');
+    const headCommit = git(repoDir, ['rev-parse', 'HEAD']);
+    await fs.mkdir(path.join(repoDir, '.gitnexus'), { recursive: true });
+    await fs.writeFile(path.join(repoDir, '.gitnexus', 'meta.json'), '{"ok":true}\n', 'utf-8');
+    await fs.writeFile(path.join(repoDir, 'file.txt'), 'dirty\n', 'utf-8');
+
+    const health = getIndexHealth(repoDir, headCommit);
+
+    expect(health.level).toBe('degraded');
+    expect(health.reasons).toContain('dirty-worktree');
+    expect(health.commitsBehind).toBe(0);
+    expect(health.dirty).toBe(true);
+  });
+
   it('returns degraded with both reasons when commit is behind and worktree is dirty', async () => {
     const repoDir = await createTempGitRepo('gitnexus-health-combined-');
     await fs.writeFile(path.join(repoDir, 'file.txt'), 'v2\n', 'utf-8');

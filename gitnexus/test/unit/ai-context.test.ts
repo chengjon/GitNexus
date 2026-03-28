@@ -43,6 +43,18 @@ describe('generateAIContextFiles', () => {
     expect(content).toContain('TestProject');
   });
 
+  it('does not embed dynamic repo counts directly in generated context files', async () => {
+    const stats = { nodes: 50, edges: 100, processes: 5 };
+    await generateAIContextFiles(tmpDir, storagePath, 'TestProject', stats);
+
+    const claudeMdPath = path.join(tmpDir, 'CLAUDE.md');
+    const content = await fs.readFile(claudeMdPath, 'utf-8');
+
+    expect(content).toContain('This project is indexed by GitNexus.');
+    expect(content).toContain('Run `gitnexus status` for current index stats and freshness.');
+    expect(content).not.toContain('50 symbols, 100 relationships, 5 execution flows');
+  });
+
   it('handles empty stats', async () => {
     const stats = {};
     const result = await generateAIContextFiles(tmpDir, storagePath, 'EmptyProject', stats);

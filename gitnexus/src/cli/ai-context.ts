@@ -58,7 +58,11 @@ function generateGitNexusContent(projectName: string, stats: RepoStats, generate
   return `${GITNEXUS_START_MARKER}
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **${projectName}** (${stats.nodes || 0} symbols, ${stats.edges || 0} relationships, ${stats.processes || 0} execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus.
+
+Run \`gitnexus status\` for current index stats and freshness.
+
+Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run \`gitnexus analyze\` in terminal first.
 

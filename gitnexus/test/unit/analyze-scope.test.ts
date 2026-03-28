@@ -28,6 +28,7 @@ describe('analyze CLI scope', () => {
     const indexPath = path.join(repoRoot, 'src', 'cli', 'index.ts');
     const source = await fs.readFile(indexPath, 'utf-8');
 
+    expect(source).toContain('--with-context');
     expect(source).toContain('--no-context');
     expect(source).toContain('--no-gitignore');
     expect(source).toContain('--no-register');
@@ -35,15 +36,25 @@ describe('analyze CLI scope', () => {
 });
 
 describe('resolveAnalyzeScopeOptions', () => {
-  it('keeps legacy side effects enabled by default', () => {
+  it('keeps repo-context refresh disabled by default', () => {
     expect(resolveAnalyzeScopeOptions({})).toEqual({
+      registerRepo: true,
+      updateGitignore: true,
+      refreshContext: false,
+    });
+  });
+
+  it('enables context refresh only when explicitly opted in', () => {
+    expect(resolveAnalyzeScopeOptions({
+      withContext: true,
+    } as any)).toEqual({
       registerRepo: true,
       updateGitignore: true,
       refreshContext: true,
     });
   });
 
-  it('disables individual side effects when explicitly opted out', () => {
+  it('still supports legacy no-context opt-out shape', () => {
     expect(resolveAnalyzeScopeOptions({
       noContext: true,
       noGitignore: true,
@@ -55,7 +66,7 @@ describe('resolveAnalyzeScopeOptions', () => {
     });
   });
 
-  it('supports commander no-* option output', () => {
+  it('supports commander no-* option output for compatibility', () => {
     expect(resolveAnalyzeScopeOptions({
       context: false,
       gitignore: false,
@@ -64,6 +75,17 @@ describe('resolveAnalyzeScopeOptions', () => {
       registerRepo: false,
       updateGitignore: false,
       refreshContext: false,
+    });
+  });
+
+  it('prefers explicit with-context over compatibility defaults', () => {
+    expect(resolveAnalyzeScopeOptions({
+      withContext: true,
+      context: true,
+    } as any)).toEqual({
+      registerRepo: true,
+      updateGitignore: true,
+      refreshContext: true,
     });
   });
 });

@@ -76,6 +76,7 @@ export interface AnalyzeOptions {
   embeddings?: boolean;
   skills?: boolean;
   verbose?: boolean;
+  withContext?: boolean;
   context?: boolean;
   gitignore?: boolean;
   register?: boolean;
@@ -102,10 +103,17 @@ function isEnabledOption(
 }
 
 export function resolveAnalyzeScopeOptions(options: AnalyzeOptions = {}): AnalyzeScopeOptions {
+  const refreshContext =
+    options.withContext === true
+      ? true
+      : options.context === false || options.noContext === true
+        ? false
+        : false;
+
   return {
     registerRepo: isEnabledOption(options.register, options.noRegister),
     updateGitignore: isEnabledOption(options.gitignore, options.noGitignore),
-    refreshContext: isEnabledOption(options.context, options.noContext),
+    refreshContext,
   };
 }
 

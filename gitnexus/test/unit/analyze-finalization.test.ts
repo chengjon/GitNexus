@@ -15,7 +15,73 @@ describe('analyze finalization helpers', () => {
     ] as any)).toBe(2);
   });
 
-  it('persists metadata and runs optional side effects with aggregated stats', async () => {
+  it('persists metadata without refreshing repo context unless explicitly requested', async () => {
+    const saveMeta = vi.fn(async () => undefined);
+    const registerRepo = vi.fn(async () => undefined);
+    const addToGitignore = vi.fn(async () => undefined);
+    const generateSkillFiles = vi.fn(async () => ({
+      skills: [{ name: 'api', label: 'API', symbolCount: 5, fileCount: 2 }],
+      outputPath: '/tmp/repo/.claude/skills/generated',
+    }));
+    const generateAIContextFiles = vi.fn(async () => ({
+      files: ['AGENTS.md', 'CLAUDE.md'],
+    }));
+
+    const result = await finalizeAnalyzeArtifacts({
+      repoPath: '/tmp/repo',
+      storagePath: '/tmp/repo/.gitnexus',
+      projectName: 'repo',
+      currentCommit: 'abc123',
+      gitNexusVersion: '1.4.0',
+      scope: {
+        registerRepo: true,
+        updateGitignore: true,
+        refreshContext: false,
+      },
+      generateSkills: true,
+      pipelineResult: {
+        totalFileCount: 42,
+        communityResult: {
+          communities: [
+            { heuristicLabel: 'API', label: 'API', symbolCount: 3 },
+            { heuristicLabel: 'API', label: 'API 2', symbolCount: 2 },
+            { heuristicLabel: 'UI', label: 'UI', symbolCount: 1 },
+          ],
+          stats: {
+            totalCommunities: 3,
+          },
+        },
+        processResult: {
+          stats: {
+            totalProcesses: 7,
+          },
+        },
+      } as any,
+      stats: {
+        nodes: 120,
+        edges: 240,
+        embeddings: 9,
+      },
+    }, {
+      saveMeta,
+      registerRepo,
+      addToGitignore,
+      generateSkillFiles,
+      generateAIContextFiles,
+    });
+
+    expect(saveMeta).toHaveBeenCalledTimes(1);
+    expect(registerRepo).toHaveBeenCalledTimes(1);
+    expect(addToGitignore).toHaveBeenCalledTimes(1);
+    expect(generateSkillFiles).toHaveBeenCalledTimes(1);
+    expect(generateAIContextFiles).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      generatedSkills: [{ name: 'api', label: 'API', symbolCount: 5, fileCount: 2 }],
+      aiContext: { files: [] },
+    }));
+  });
+
+  it('refreshes repo context when explicitly requested', async () => {
     const saveMeta = vi.fn(async () => undefined);
     const registerRepo = vi.fn(async () => undefined);
     const addToGitignore = vi.fn(async () => undefined);

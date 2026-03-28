@@ -133,7 +133,13 @@ The CLI indexes your repository and runs an MCP server that gives AI agents deep
 npx gitnexus analyze
 ```
 
-That remains the main indexing command. By default it also refreshes `AGENTS.md` / `CLAUDE.md`, installs repo-local skills, updates `.gitignore`, and registers the repo for multi-repo MCP discovery.
+That remains the main indexing command. By default it updates the index, `.gitnexus/` metadata, `.gitignore`, and the global repo registry, but it does **not** refresh repo-tracked context files.
+
+Use `npx gitnexus analyze --with-context` if you also want to refresh:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.claude/skills/gitnexus/`
 
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
@@ -159,8 +165,13 @@ npm run build
 cd /path/to/repo
 gitnexus analyze
 
-# Expected outputs:
+# Expected output by default:
 # - .gitnexus/
+
+# If you also want repo context files:
+gitnexus analyze --with-context
+
+# Expected additional outputs:
 # - AGENTS.md
 # - CLAUDE.md
 # - .claude/skills/gitnexus/
@@ -245,10 +256,11 @@ claude mcp add gitnexus -- npx -y gitnexus@latest mcp
 ```bash
 gitnexus setup                    # Configure MCP for your editors (one-time)
 gitnexus doctor --host codex      # Verify host MCP readiness and repo/index state
-gitnexus analyze [path]           # Index a repository (default: also register + gitignore + context refresh)
+gitnexus analyze [path]           # Index a repository (default: no repo-context refresh)
 gitnexus analyze --force          # Force full re-index
 gitnexus analyze --skills         # Generate repo-specific skill files from detected communities
-gitnexus analyze --no-context     # Index only, skip AGENTS.md / CLAUDE.md refresh
+gitnexus analyze --with-context   # Index and also refresh AGENTS.md / CLAUDE.md / repo skills
+gitnexus analyze --no-context     # Legacy compatibility flag; context refresh is already off by default
 gitnexus analyze --no-gitignore   # Index only, skip .gitignore update
 gitnexus analyze --no-register    # Index only, skip global registry update
 gitnexus analyze --embeddings     # Enable embedding generation for semantic search
