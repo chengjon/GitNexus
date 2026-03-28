@@ -18,7 +18,6 @@ import {
   type SwiftPackageConfig,
 } from './language-config.js';
 import {
-  buildSuffixIndex,
   resolveImportPath,
   appendKotlinWildcard,
   KOTLIN_EXTENSIONS,
@@ -39,6 +38,13 @@ import type {
   ComposerConfig
 } from './resolvers/index.js';
 import { normalizeContentForParsing } from './vue-sfc.js';
+import {
+  resolveLanguageImport,
+  type ImportResult,
+  type LanguageConfigs,
+  type ResolveCtx,
+} from './import-resolution-dispatch.js';
+import { buildSuffixIndex } from './resolvers/index.js';
 
 // Re-export resolver types for consumers
 export type {
@@ -110,146 +116,6 @@ export function buildImportResolutionContext(allPaths: string[]): ImportResoluti
 // ============================================================================
 // SHARED LANGUAGE DISPATCH
 // ============================================================================
-
-/** Bundled language-specific configs loaded once per ingestion run. */
-interface LanguageConfigs {
-  tsconfigPaths: TsconfigPaths | null;
-  goModule: GoModuleConfig | null;
-  composerConfig: ComposerConfig | null;
-  swiftPackageConfig: SwiftPackageConfig | null;
-  csharpConfigs: CSharpProjectConfig[];
-}
-
-/** Context for import path resolution (file lists, indexes, cache). */
-interface ResolveCtx {
-  allFilePaths: Set<string>;
-  allFileList: string[];
-  normalizedFileList: string[];
-  index: SuffixIndex;
-  resolveCache: Map<string, string | null>;
-}
-
-/**
- * Result of resolving an import via language-specific dispatch.
- * - 'files': resolved to one or more files → add to ImportMap
- * - 'package': resolved to a directory → add graph edges + store dirSuffix in PackageMap
- * - null: no resolution (external dependency, etc.)
- */
-type ImportResult =
-  | { kind: 'files'; files: string[] }
-  | { kind: 'package'; files: string[]; dirSuffix: string }
-  | null;
-
-/**
- * Shared language dispatch for import resolution.
- * Used by both processImports and processImportsFromExtracted.
- */
-function resolveLanguageImport(
-  filePath: string,
-  rawImportPath: string,
-  language: SupportedLanguages,
-  configs: LanguageConfigs,
-  ctx: ResolveCtx,
-): ImportResult {
-  const { allFilePaths, allFileList, normalizedFileList, index, resolveCache } = ctx;
-  const { tsconfigPaths, goModule, composerConfig, swiftPackageConfig, csharpConfigs } = configs;
-
-  // JVM languages (Java + Kotlin): handle wildcards and member imports
-  if (language === SupportedLanguages.Java || language === SupportedLanguages.Kotlin) {
-    const exts = language === SupportedLanguages.Java ? ['.java'] : KOTLIN_EXTENSIONS;
-
-    if (rawImportPath.endsWith('.*')) {
-      const matchedFiles = resolveJvmWildcard(rawImportPath, normalizedFileList, allFileList, exts, index);
-      if (matchedFiles.length === 0 && language === SupportedLanguages.Kotlin) {
-        const javaMatches = resolveJvmWildcard(rawImportPath, normalizedFileList, allFileList, ['.java'], index);
-        if (javaMatches.length > 0) return { kind: 'files', files: javaMatches };
-      }
-      if (matchedFiles.length > 0) return { kind: 'files', files: matchedFiles };
-      // Fall through to standard resolution
-    } else {
-      let memberResolved = resolveJvmMemberImport(rawImportPath, normalizedFileList, allFileList, exts, index);
-      if (!memberResolved && language === SupportedLanguages.Kotlin) {
-        memberResolved = resolveJvmMemberImport(rawImportPath, normalizedFileList, allFileList, ['.java'], index);
-      }
-      if (memberResolved) return { kind: 'files', files: [memberResolved] };
-      // Fall through to standard resolution
-    }
-  }
-
-  // Go: handle package-level imports
-  if (language === SupportedLanguages.Go && goModule && rawImportPath.startsWith(goModule.modulePath)) {
-    const pkgSuffix = resolveGoPackageDir(rawImportPath, goModule);
-    if (pkgSuffix) {
-      const pkgFiles = resolveGoPackage(rawImportPath, goModule, normalizedFileList, allFileList);
-      if (pkgFiles.length > 0) {
-        return { kind: 'package', files: pkgFiles, dirSuffix: pkgSuffix };
-      }
-    }
-    // Fall through if no files found (package might be external)
-  }
-
-  // C#: handle namespace-based imports (using directives)
-  if (language === SupportedLanguages.CSharp && csharpConfigs.length > 0) {
-    const resolvedFiles = resolveCSharpImport(rawImportPath, csharpConfigs, normalizedFileList, allFileList, index);
-    if (resolvedFiles.length > 1) {
-      const dirSuffix = resolveCSharpNamespaceDir(rawImportPath, csharpConfigs);
-      if (dirSuffix) {
-        return { kind: 'package', files: resolvedFiles, dirSuffix };
-      }
-    }
-    if (resolvedFiles.length > 0) return { kind: 'files', files: resolvedFiles };
-    return null;
-  }
-
-  // PHP: handle namespace-based imports (use statements)
-  if (language === SupportedLanguages.PHP) {
-    const resolved = resolvePhpImport(rawImportPath, composerConfig, allFilePaths, normalizedFileList, allFileList, index);
-    return resolved ? { kind: 'files', files: [resolved] } : null;
-  }
-
-  // Swift: handle module imports
-  if (language === SupportedLanguages.Swift && swiftPackageConfig) {
-    const targetDir = swiftPackageConfig.targets.get(rawImportPath);
-    if (targetDir) {
-      const dirPrefix = targetDir + '/';
-      const files: string[] = [];
-      for (let i = 0; i < normalizedFileList.length; i++) {
-        if (normalizedFileList[i].startsWith(dirPrefix) && normalizedFileList[i].endsWith('.swift')) {
-          files.push(allFileList[i]);
-        }
-      }
-      if (files.length > 0) return { kind: 'files', files };
-    }
-    return null; // External framework (Foundation, UIKit, etc.)
-  }
-
-  // Rust: expand top-level grouped imports: use {crate::a, crate::b}
-  if (language === SupportedLanguages.Rust && rawImportPath.startsWith('{') && rawImportPath.endsWith('}')) {
-    const inner = rawImportPath.slice(1, -1);
-    const parts = inner.split(',').map(p => p.trim()).filter(Boolean);
-    const resolved: string[] = [];
-    for (const part of parts) {
-      const r = resolveRustImport(filePath, part, allFilePaths);
-      if (r) resolved.push(r);
-    }
-    return resolved.length > 0 ? { kind: 'files', files: resolved } : null;
-  }
-
-  // Standard single-file resolution
-  const resolvedPath = resolveImportPath(
-    filePath,
-    rawImportPath,
-    allFilePaths,
-    allFileList,
-    normalizedFileList,
-    resolveCache,
-    language,
-    tsconfigPaths,
-    index,
-  );
-
-  return resolvedPath ? { kind: 'files', files: [resolvedPath] } : null;
-}
 
 /**
  * Apply an ImportResult: emit graph edges and update ImportMap/PackageMap.
