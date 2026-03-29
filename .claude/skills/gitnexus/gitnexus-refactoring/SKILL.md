@@ -30,11 +30,11 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 
 ```
 - [ ] gitnexus_rename({symbol_name: "oldName", new_name: "newName", dry_run: true}) — preview all edits
-- [ ] Review graph edits (high confidence) and text_search edits (review carefully)
-- [ ] Note: wide matches in the same file are tagged with lower confidence
+- [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
 - [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
 - [ ] gitnexus_detect_changes() — verify only expected files changed
-- [ ] In worktrees, pass `cwd` explicitly if the MCP server may be running elsewhere
+- [ ] If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`
+- [ ] In worktrees, also pass `cwd` explicitly if the MCP server may be running elsewhere
 - [ ] Run tests for affected processes
 ```
 
@@ -83,17 +83,20 @@ gitnexus_impact({target: "validateUser", direction: "upstream"})
 **gitnexus_detect_changes** — verify your changes after refactoring:
 
 ```
-gitnexus_detect_changes({scope: "all"})
+gitnexus_detect_changes({scope: "all", repo: "RepoName"})
 → Changed: 8 files, 12 symbols
 → Affected processes: LoginFlow, TokenRefresh
 → Risk: MEDIUM
 ```
 
-Worktree example:
+Multi-repo / worktree example:
 
 ```
+If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`.
+
 gitnexus_detect_changes({
   scope: "all",
+  repo: "RepoName",
   cwd: "/path/to/repo/.worktrees/refactor-branch"
 })
 ```
@@ -113,7 +116,6 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
 | Cross-area refs     | Use detect_changes after to verify scope  |
 | String/dynamic refs | gitnexus_query to find them               |
 | External/public API | Version and deprecate properly            |
-| Worktree usage      | Pass `cwd` explicitly to detect_changes   |
 
 ## Example: Rename `validateUser` to `authenticateUser`
 
@@ -127,7 +129,7 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
 3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
    → Applied 12 edits across 8 files
 
-4. gitnexus_detect_changes({scope: "all", cwd: "/path/to/repo/.worktrees/refactor-branch"})
+4. gitnexus_detect_changes({scope: "all", repo: "RepoName", cwd: "/path/to/repo/.worktrees/refactor-branch"})
    → Affected: LoginFlow, TokenRefresh
    → Risk: MEDIUM — run tests for these flows
 ```

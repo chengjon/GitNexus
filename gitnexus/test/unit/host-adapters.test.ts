@@ -189,4 +189,46 @@ describe('setupCommand orchestration', () => {
     expect(output).toContain('OpenCode (not installed)');
     expect(output).toContain('codex mcp add gitnexus -- npx -y gitnexus@latest mcp');
   });
+
+  it('installs distributed skills from the shared source templates', async () => {
+    const homeDir = await createTempHome('gitnexus-setup-skills-');
+    await fs.mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await fs.mkdir(path.join(homeDir, '.cursor'), { recursive: true });
+    await fs.mkdir(path.join(homeDir, '.config', 'opencode'), { recursive: true });
+
+    vi.spyOn(os, 'homedir').mockReturnValue(homeDir);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await setupCommand();
+
+    const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
+    const impactSource = await fs.readFile(
+      path.join(repoRoot, 'gitnexus', 'skills', 'gitnexus-impact-analysis.md'),
+      'utf-8',
+    );
+    const refactoringSource = await fs.readFile(
+      path.join(repoRoot, 'gitnexus', 'skills', 'gitnexus-refactoring.md'),
+      'utf-8',
+    );
+
+    const installedTargets = [
+      path.join(homeDir, '.claude', 'skills', 'gitnexus-impact-analysis', 'SKILL.md'),
+      path.join(homeDir, '.cursor', 'skills', 'gitnexus-impact-analysis', 'SKILL.md'),
+      path.join(homeDir, '.config', 'opencode', 'skill', 'gitnexus-impact-analysis', 'SKILL.md'),
+    ];
+
+    for (const target of installedTargets) {
+      await expect(fs.readFile(target, 'utf-8')).resolves.toBe(impactSource);
+    }
+
+    const refactoringTargets = [
+      path.join(homeDir, '.claude', 'skills', 'gitnexus-refactoring', 'SKILL.md'),
+      path.join(homeDir, '.cursor', 'skills', 'gitnexus-refactoring', 'SKILL.md'),
+      path.join(homeDir, '.config', 'opencode', 'skill', 'gitnexus-refactoring', 'SKILL.md'),
+    ];
+
+    for (const target of refactoringTargets) {
+      await expect(fs.readFile(target, 'utf-8')).resolves.toBe(refactoringSource);
+    }
+  });
 });

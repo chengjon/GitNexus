@@ -109,4 +109,35 @@ describe('generateAIContextFiles', () => {
       // Skills dir may not be created if skills source doesn't exist in test context
     }
   });
+
+  it('documents explicit repo usage for detect_changes in multi-repo MCP sessions', async () => {
+    const stats = { nodes: 10 };
+    await generateAIContextFiles(tmpDir, storagePath, 'TestProject', stats);
+
+    const claudeMdPath = path.join(tmpDir, 'CLAUDE.md');
+    const contextContent = await fs.readFile(claudeMdPath, 'utf-8');
+    expect(contextContent).toContain('If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`');
+
+    const impactSkillPath = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'gitnexus',
+      'gitnexus-impact-analysis',
+      'SKILL.md',
+    );
+    const impactSkillContent = await fs.readFile(impactSkillPath, 'utf-8');
+    expect(impactSkillContent).toContain('If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`');
+
+    const refactoringSkillPath = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'gitnexus',
+      'gitnexus-refactoring',
+      'SKILL.md',
+    );
+    const refactoringSkillContent = await fs.readFile(refactoringSkillPath, 'utf-8');
+    expect(refactoringSkillContent).toContain('If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`');
+  });
 });
