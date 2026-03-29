@@ -350,7 +350,12 @@ export const listRegisteredRepos = async (opts?: { validate?: boolean }): Promis
 
   // If we pruned any entries, save the cleaned registry
   if (valid.length !== entries.length) {
-    await writeRegistry(valid);
+    try {
+      await writeRegistry(valid);
+    } catch {
+      // In read-only or sandboxed environments, validation should still return
+      // the filtered in-memory result even if the global registry cannot be rewritten.
+    }
   }
 
   return valid;

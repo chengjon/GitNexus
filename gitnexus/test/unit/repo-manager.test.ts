@@ -336,4 +336,67 @@ describe('index artifact health', () => {
       suggestedFix: expect.stringContaining('gitnexus analyze'),
     }));
   });
+
+  it('listRegisteredRepos tolerates registry write failures during validate pruning', async () => {
+    const repoRoot = path.join(tmpHandle.dbPath, 'repo-c');
+    const storagePath = path.join(repoRoot, '.gitnexus');
+    await fs.mkdir(storagePath, { recursive: true });
+    await fs.writeFile(
+      path.join(storagePath, 'meta.json'),
+      JSON.stringify({
+        repoPath: repoRoot,
+        lastCommit: 'ghi9012',
+        indexedAt: '2026-03-22T02:00:00.000Z',
+      }, null, 2),
+      'utf-8',
+    );
+
+    const registryDir = path.join(tmpHandle.dbPath, '.gitnexus');
+    await fs.mkdir(registryDir, { recursive: true });
+    const registryPath = path.join(registryDir, 'registry.json');
+    await fs.writeFile(
+      registryPath,
+      JSON.stringify([
+        {
+          name: 'repo-c',
+          path: repoRoot,
+          storagePath,
+          indexedAt: '2026-03-22T02:00:00.000Z',
+          lastCommit: 'ghi9012',
+          stats: { files: 1, nodes: 2, edges: 3, communities: 1, processes: 1 },
+        },
+        {
+          name: 'stale-repo',
+          path: path.join(tmpHandle.dbPath, 'missing-repo'),
+          storagePath: path.join(tmpHandle.dbPath, 'missing-repo', '.gitnexus'),
+          indexedAt: '2026-03-22T02:00:00.000Z',
+          lastCommit: 'stale',
+          stats: { files: 1, nodes: 1, edges: 1, communities: 1, processes: 1 },
+        },
+      ], null, 2),
+      'utf-8',
+    );
+
+    const writeSpy = vi.spyOn(fs, 'writeFile').mockImplementation(async (targetPath: any, data: any, options: any) => {
+      if (String(targetPath) === registryPath) {
+        const err = new Error(`EROFS: read-only file system, open '${registryPath}'`) as Error & { code?: string };
+        err.code = 'EROFS';
+        throw err;
+      }
+      return (await vi.importActual<typeof import('fs/promises')>('fs/promises')).writeFile(targetPath, data, options as any);
+    });
+
+    try {
+      const entries = await listRegisteredRepos({ validate: true });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toEqual(expect.objectContaining({
+        name: 'repo-c',
+        storagePath,
+        kuzuPath: path.join(storagePath, 'kuzu'),
+        indexState: 'missing_kuzu',
+      }));
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
 });
