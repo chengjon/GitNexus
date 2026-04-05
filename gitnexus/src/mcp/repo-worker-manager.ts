@@ -2,6 +2,8 @@ import { fork, type ChildProcess, type ForkOptions } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { RepoHandle } from './local/runtime/types.js';
 import {
+  isWorkerBootstrapErrorMessage,
+  isWorkerReadyMessage,
   isWorkerResponseMessage,
   type WorkerBootstrapMessage,
   type WorkerRequestMessage,
@@ -26,6 +28,8 @@ export interface RepoWorkerManagerOptions {
   cliEntry?: string;
   forkWorker?: ForkWorker;
   requestTimeoutMs?: number;
+  routerPid?: number;
+  sessionId?: string;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -34,7 +38,9 @@ export class RepoWorkerManager {
   private cliEntry: string;
   private forkWorker: ForkWorker;
   private requestTimeoutMs: number;
+  private routerPid: number;
   private requestSeq = 0;
+  private sessionId: string;
   private workerPromises = new Map<string, Promise<WorkerState>>();
   private workers = new Map<string, WorkerState>();
 
@@ -42,6 +48,8 @@ export class RepoWorkerManager {
     this.cliEntry = options.cliEntry || process.argv[1] || fileURLToPath(new URL('../cli/index.js', import.meta.url));
     this.forkWorker = options.forkWorker || fork;
     this.requestTimeoutMs = options.requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS;
+    this.routerPid = options.routerPid ?? process.pid;
+    this.sessionId = options.sessionId ?? `session-${this.routerPid}`;
   }
 
   async ensureWorker(repo: RepoHandle): Promise<WorkerState> {
@@ -112,7 +120,7 @@ export class RepoWorkerManager {
     return this.workers.get(repoId)?.child.pid ?? null;
   }
 
-  private spawnWorker(repo: RepoHandle): WorkerState {
+  private spawnWorker(repo: RepoHandle): Promise<WorkerState> {
     const child = this.forkWorker(this.cliEntry, ['mcp', '--repo-worker'], {
       execArgv: [],
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -124,29 +132,68 @@ export class RepoWorkerManager {
       repo,
     };
 
-    child.on('message', (message) => {
-      this.handleMessage(state, message);
+    return new Promise((resolve, reject) => {
+      let ready = false;
+      let settled = false;
+
+      const settle = (fn: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        fn();
+      };
+
+      child.on('message', (message) => {
+        if (isWorkerReadyMessage(message)) {
+          ready = true;
+          settle(() => resolve(state));
+          return;
+        }
+
+        if (isWorkerBootstrapErrorMessage(message)) {
+          settle(() => reject(new Error(`Repo worker for ${repo.name} failed to initialize: ${message.error}`)));
+          return;
+        }
+
+        this.handleMessage(state, message);
+      });
+
+      child.on('exit', (code, signal) => {
+        this.workers.delete(repo.id);
+        this.workerPromises.delete(repo.id);
+        const error = new Error(`Repo worker for ${repo.name} exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+        if (!ready) {
+          settle(() => reject(error));
+          return;
+        }
+        this.rejectPending(state, error);
+      });
+
+      child.on('error', (error) => {
+        this.workers.delete(repo.id);
+        this.workerPromises.delete(repo.id);
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+        if (!ready) {
+          settle(() => reject(normalizedError));
+          return;
+        }
+        this.rejectPending(state, normalizedError);
+      });
+
+      const initMessage: WorkerBootstrapMessage = {
+        kind: 'init',
+        repo,
+        routerPid: this.routerPid,
+        sessionId: this.sessionId,
+      };
+
+      try {
+        child.send(initMessage);
+      } catch (error) {
+        settle(() => reject(error instanceof Error ? error : new Error(String(error))));
+      }
     });
-
-    child.on('exit', (code, signal) => {
-      this.workers.delete(repo.id);
-      this.workerPromises.delete(repo.id);
-      this.rejectPending(state, new Error(`Repo worker for ${repo.name} exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`));
-    });
-
-    child.on('error', (error) => {
-      this.workers.delete(repo.id);
-      this.workerPromises.delete(repo.id);
-      this.rejectPending(state, error instanceof Error ? error : new Error(String(error)));
-    });
-
-    const initMessage: WorkerBootstrapMessage = {
-      kind: 'init',
-      repo,
-    };
-    child.send(initMessage);
-
-    return state;
   }
 
   private handleMessage(state: WorkerState, message: unknown): void {

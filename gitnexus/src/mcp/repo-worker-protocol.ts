@@ -10,6 +10,17 @@ export type WorkerRequestMethod =
 export type WorkerBootstrapMessage = {
   kind: 'init';
   repo: RepoHandle;
+  routerPid: number;
+  sessionId: string;
+};
+
+export type WorkerReadyMessage = {
+  kind: 'ready';
+};
+
+export type WorkerBootstrapErrorMessage = {
+  kind: 'bootstrap-error';
+  error: string;
 };
 
 export type WorkerRequestMessage = {
@@ -34,6 +45,7 @@ export type WorkerErrorResponseMessage = {
 };
 
 export type WorkerResponseMessage = WorkerSuccessResponseMessage | WorkerErrorResponseMessage;
+export type WorkerLifecycleMessage = WorkerReadyMessage | WorkerBootstrapErrorMessage;
 
 export function isWorkerResponseMessage(message: unknown): message is WorkerResponseMessage {
   if (!message || typeof message !== 'object') {
@@ -44,4 +56,22 @@ export function isWorkerResponseMessage(message: unknown): message is WorkerResp
   return candidate.kind === 'response'
     && typeof candidate.requestId === 'string'
     && typeof candidate.ok === 'boolean';
+}
+
+export function isWorkerReadyMessage(message: unknown): message is WorkerReadyMessage {
+  if (!message || typeof message !== 'object') {
+    return false;
+  }
+
+  return (message as Partial<WorkerReadyMessage>).kind === 'ready';
+}
+
+export function isWorkerBootstrapErrorMessage(message: unknown): message is WorkerBootstrapErrorMessage {
+  if (!message || typeof message !== 'object') {
+    return false;
+  }
+
+  const candidate = message as Partial<WorkerBootstrapErrorMessage>;
+  return candidate.kind === 'bootstrap-error'
+    && typeof candidate.error === 'string';
 }
