@@ -7,10 +7,13 @@
  */
 
 import { startMCPServer } from '../mcp/server.js';
-import { LocalBackend } from '../mcp/local/local-backend.js';
+import { BackendRuntime } from '../mcp/local/runtime/backend-runtime.js';
+import { RepoWorkerManager } from '../mcp/repo-worker-manager.js';
+import { RouterBackend } from '../mcp/router-backend.js';
+import { startRepoWorkerProcess } from '../mcp/repo-worker.js';
 import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
 
-export const mcpCommand = async () => {
+export const mcpCommand = async (options?: { repoWorker?: boolean }) => {
   // Prevent unhandled errors from crashing the MCP server process.
   // KuzuDB lock conflicts and transient errors should degrade gracefully.
   process.on('uncaughtException', (err) => {
@@ -23,10 +26,17 @@ export const mcpCommand = async () => {
     console.error(`GitNexus MCP: unhandled rejection — ${msg}`);
   });
 
-  // Initialize multi-repo backend from registry.
-  // The server starts even with 0 repos — tools call refreshRepos() lazily,
-  // so repos indexed after the server starts are discovered automatically.
-  const backend = new LocalBackend();
+  if (options?.repoWorker) {
+    await startRepoWorkerProcess();
+    return;
+  }
+
+  // Initialize the stdio router backend from the global registry.
+  // Repo-scoped work is delegated to per-repo worker processes.
+  const backend = new RouterBackend({
+    runtime: new BackendRuntime(),
+    workerManager: new RepoWorkerManager(),
+  });
   await backend.init();
 
   const repos = await backend.listRepos();
