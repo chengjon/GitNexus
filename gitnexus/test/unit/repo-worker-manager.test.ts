@@ -37,14 +37,25 @@ describe('RepoWorkerManager', () => {
       cliEntry: '/tmp/fake-cli.js',
       forkWorker,
       requestTimeoutMs: 1000,
+      sessionId: 'session-router',
+      routerPid: 999,
     });
 
-    await manager.ensureWorker(REPO);
-    await manager.ensureWorker(REPO);
+    const firstWorkerPromise = manager.ensureWorker(REPO);
+    const secondWorkerPromise = manager.ensureWorker(REPO);
+    child.emit('message', { kind: 'ready' });
+
+    await firstWorkerPromise;
+    await secondWorkerPromise;
 
     expect(forkWorker).toHaveBeenCalledTimes(1);
     expect(forkWorker.mock.calls[0][1]).toEqual(['mcp', '--repo-worker']);
-    expect(child.send).toHaveBeenCalledWith({ kind: 'init', repo: REPO });
+    expect(child.send).toHaveBeenCalledWith({
+      kind: 'init',
+      repo: REPO,
+      sessionId: 'session-router',
+      routerPid: 999,
+    });
   });
 
   it('correlates out-of-order responses by requestId', async () => {
@@ -57,6 +68,7 @@ describe('RepoWorkerManager', () => {
 
     const firstPromise = manager.call(REPO, 'queryClusters', 'repo-a', 100);
     const secondPromise = manager.call(REPO, 'queryProcesses', 'repo-a', 50);
+    child.emit('message', { kind: 'ready' });
     await vi.waitFor(() => {
       const sentRequests = child.send.mock.calls
         .map(([message]) => message)
@@ -86,6 +98,52 @@ describe('RepoWorkerManager', () => {
     await expect(secondPromise).resolves.toEqual({ processes: [{ heuristicLabel: 'LoginFlow' }] });
   });
 
+  it('waits for a ready message before sending worker requests', async () => {
+    const child = createFakeChild();
+    const manager = new RepoWorkerManager({
+      cliEntry: '/tmp/fake-cli.js',
+      forkWorker: vi.fn().mockReturnValue(child),
+      requestTimeoutMs: 1000,
+    });
+
+    const promise = manager.call(REPO, 'queryClusters', 'repo-a', 100);
+
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalledWith({
+        kind: 'init',
+        repo: REPO,
+        sessionId: expect.any(String),
+        routerPid: expect.any(Number),
+      });
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    let sentRequests = child.send.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is WorkerRequestMessage => message?.kind === 'request');
+    expect(sentRequests).toHaveLength(0);
+
+    child.emit('message', { kind: 'ready' });
+
+    await vi.waitFor(() => {
+      sentRequests = child.send.mock.calls
+        .map(([message]) => message)
+        .filter((message): message is WorkerRequestMessage => message?.kind === 'request');
+
+      expect(sentRequests).toHaveLength(1);
+    });
+
+    child.emit('message', {
+      kind: 'response',
+      requestId: sentRequests[0].requestId,
+      ok: true,
+      result: { clusters: [{ heuristicLabel: 'Auth' }] },
+    });
+
+    await expect(promise).resolves.toEqual({ clusters: [{ heuristicLabel: 'Auth' }] });
+  });
+
   it('rejects requests that exceed the timeout', async () => {
     vi.useFakeTimers();
 
@@ -97,6 +155,7 @@ describe('RepoWorkerManager', () => {
     });
 
     const promise = manager.call(REPO, 'queryClusters', 'repo-a', 100);
+    child.emit('message', { kind: 'ready' });
     const assertion = expect(promise).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(250);
 
@@ -112,6 +171,7 @@ describe('RepoWorkerManager', () => {
     });
 
     const promise = manager.call(REPO, 'queryClusters', 'repo-a', 100);
+    child.emit('message', { kind: 'ready' });
     await vi.waitFor(() => {
       const sentRequests = child.send.mock.calls
         .map(([message]) => message)

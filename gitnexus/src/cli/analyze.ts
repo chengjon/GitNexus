@@ -41,6 +41,8 @@ import {
   createAnalyzeProgressTracker,
 } from './analyze-session.js';
 import {
+  describeGitNexusMcpHolderPids,
+  formatGitNexusMcpHolderDetails,
   listGitNexusMcpPidsHoldingPath,
   quiesceGitNexusMcpHolders,
 } from './platform-process-scan.js';
@@ -234,13 +236,28 @@ export const analyzeCommand = async (
 
   try {
     const quiesceResult = await quiesceGitNexusMcpHolders(kuzuPath);
+    if ((quiesceResult.drainedPids?.length ?? 0) > 0) {
+      console.log(`  Drained ${quiesceResult.drainedPids!.length} GitNexus MCP process(es) holding ${kuzuPath}`);
+    }
     if (quiesceResult.terminatedPids.length > 0) {
       console.log(`  Stopped ${quiesceResult.terminatedPids.length} GitNexus MCP process(es) holding ${kuzuPath}`);
+      const terminatedDetails = await describeGitNexusMcpHolderPids(
+        quiesceResult.terminatedPids.map((pid) => String(pid)),
+      );
+      const terminatedSummary = formatGitNexusMcpHolderDetails(terminatedDetails);
+      if (terminatedSummary) {
+        console.log(`  Holder details: ${terminatedSummary}`);
+      }
     }
     if (quiesceResult.waitTimedOut) {
       const remaining = await listGitNexusMcpPidsHoldingPath(kuzuPath);
       console.log(`  Timed out waiting for GitNexus MCP to release ${kuzuPath}`);
       if (remaining.length > 0) {
+        const remainingDetails = await describeGitNexusMcpHolderPids(remaining);
+        const remainingSummary = formatGitNexusMcpHolderDetails(remainingDetails);
+        if (remainingSummary) {
+          console.log(`  Remaining holder details: ${remainingSummary}`);
+        }
         console.log(`  Remaining holder PIDs: ${remaining.join(', ')}`);
       }
       process.exitCode = 1;
