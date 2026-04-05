@@ -7,6 +7,9 @@ import {
   resolveAnalyzeScopeOptions,
 } from '../../src/cli/analyze.js';
 import {
+  describeGitNexusMcpHolderPids,
+  drainGitNexusMcpRepoWorkers,
+  formatGitNexusMcpHolderDetails,
   listGitNexusMcpPidsHoldingPath,
   quiesceGitNexusMcpHolders,
 } from '../../src/cli/platform-process-scan.js';
@@ -181,6 +184,140 @@ describe('analyze MCP lock-holder helpers', () => {
     });
 
     expect(result).toEqual({
+      terminatedPids: [],
+      waitTimedOut: false,
+    });
+  });
+
+  it('describes holder pids with registry metadata when records exist', async () => {
+    const details = await describeGitNexusMcpHolderPids(['101', '202'], {
+      isPidAlive: (pid) => pid === 101,
+      listRecords: async () => [
+        {
+          pid: 101,
+          ppid: 1,
+          role: 'repo-worker',
+          sessionId: 'session-101',
+          startedAt: '2026-04-05T00:00:00.000Z',
+          lastHeartbeatAt: '2026-04-05T00:00:10.000Z',
+          cwd: '/tmp/repo-a',
+          command: 'gitnexus mcp --repo-worker',
+          state: 'ready',
+          repoId: 'repo-a',
+          repoName: 'repo-a',
+          repoPath: '/tmp/repo-a',
+          storagePath: '/tmp/.gitnexus/repo-a',
+          routerPid: 999,
+        },
+      ],
+      now: new Date('2026-04-05T00:00:20.000Z'),
+    });
+
+    expect(details).toEqual([
+      expect.objectContaining({
+        pid: 101,
+        role: 'repo-worker',
+        repoName: 'repo-a',
+        health: 'orphaned',
+      }),
+      expect.objectContaining({
+        pid: 202,
+        health: 'unregistered',
+      }),
+    ]);
+  });
+
+  it('formats holder details for analyze output', () => {
+    expect(formatGitNexusMcpHolderDetails([
+      {
+        pid: 101,
+        role: 'repo-worker',
+        repoName: 'repo-a',
+        sessionId: 'session-101',
+        state: 'ready',
+        health: 'healthy',
+      },
+      {
+        pid: 202,
+        health: 'unregistered',
+      },
+    ])).toBe('101:repo-worker:repo-a:healthy:ready:session-101, 202:unregistered');
+  });
+
+  it('drains matching repo workers by repo name', async () => {
+    let listCount = 0;
+    const requested: number[] = [];
+    const readyRecord = {
+      pid: 101,
+      ppid: 1,
+      role: 'repo-worker' as const,
+      sessionId: 'session-101',
+      startedAt: '2026-04-05T00:00:00.000Z',
+      lastHeartbeatAt: '2026-04-05T00:00:10.000Z',
+      cwd: '/tmp/repo-a',
+      command: 'gitnexus mcp --repo-worker',
+      state: 'ready' as const,
+      repoId: 'repo-a',
+      repoName: 'repo-a',
+      repoPath: '/tmp/repo-a',
+      storagePath: '/tmp/.gitnexus/repo-a',
+      routerPid: 999,
+    };
+    const drainingRecord = {
+      ...readyRecord,
+      state: 'draining' as const,
+    };
+
+    const result = await drainGitNexusMcpRepoWorkers({
+      repo: 'repo-a',
+      listRecords: async () => {
+        listCount += 1;
+        if (listCount === 1) return [readyRecord];
+        if (listCount === 2) return [drainingRecord];
+        return [];
+      },
+      isPidAlive: () => listCount < 3,
+      requestDrainPid: async (pid) => { requested.push(pid); },
+      sleep: async () => {},
+      ackTimeoutMs: 20,
+      completionTimeoutMs: 20,
+    });
+
+    expect(requested).toEqual([101]);
+    expect(result).toEqual({
+      requestedPids: [101],
+      acknowledgedPids: [101],
+      completedPids: [101],
+      waitTimedOut: false,
+    });
+  });
+
+  it('tries cooperative drain before SIGTERM fallback when quiescing holders', async () => {
+    const scans = [['101'], []] as string[][];
+    const drained: number[] = [];
+    const terminated: number[] = [];
+
+    const result = await quiesceGitNexusMcpHolders('/tmp/example/.gitnexus/kuzu', {
+      findHolders: async () => scans.shift() ?? [],
+      drainGitNexusMcpPids: async (holderPids) => {
+        drained.push(...holderPids.map(Number));
+        return {
+          requestedPids: holderPids.map(Number),
+          acknowledgedPids: holderPids.map(Number),
+          completedPids: holderPids.map(Number),
+          waitTimedOut: false,
+        };
+      },
+      terminatePid: async (pid) => { terminated.push(pid); },
+      sleep: async () => {},
+      timeoutMs: 50,
+      pollIntervalMs: 1,
+    });
+
+    expect(drained).toEqual([101]);
+    expect(terminated).toEqual([]);
+    expect(result).toEqual({
+      drainedPids: [101],
       terminatedPids: [],
       waitTimedOut: false,
     });
