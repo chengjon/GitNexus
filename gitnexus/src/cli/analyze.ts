@@ -185,12 +185,12 @@ export const analyzeCommand = async (
   }
 
   const { storagePath, kuzuPath } = getStoragePaths(repoPath);
-  const currentCommit = getCurrentCommit(repoPath);
+  const startingCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
   const gitNexusVersion = getGitNexusVersion();
   const scope = resolveAnalyzeScopeOptions(options);
 
-  if (shouldSkipAnalyze(existingMeta, currentCommit, gitNexusVersion, options)) {
+  if (shouldSkipAnalyze(existingMeta, startingCommit, gitNexusVersion, options)) {
     console.log('  Already up to date\n');
     return;
   }
@@ -394,7 +394,7 @@ export const analyzeCommand = async (
       repoPath,
       storagePath,
       projectName,
-      currentCommit,
+      currentCommit: getCurrentCommit(repoPath),
       gitNexusVersion,
       scope,
       generateSkills: !!options?.skills,

@@ -46,7 +46,7 @@ export const statusCommand = async () => {
     console.log(`Reasons: ${health.reasons.join(', ')}`);
   }
   console.log(`Status: ${freshness.isUpToDate ? '✅ up-to-date' : '⚠️ stale (re-run gitnexus analyze)'}`);
-  if (health.level !== 'fresh' || !freshness.isUpToDate) {
+  if (!freshness.isUpToDate || health.level === 'invalid') {
     console.log('Run: gitnexus analyze');
   }
 };
