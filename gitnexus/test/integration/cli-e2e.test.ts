@@ -374,6 +374,38 @@ describe('CLI end-to-end', () => {
       }
     });
 
+    it('status on a dirty but current repo does not suggest re-running analyze', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-status-dirty-current-'));
+
+      try {
+        fs.writeFileSync(path.join(tmpDir, 'root.ts'), 'export const root = true;\n', 'utf-8');
+        spawnSync('git', ['init'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['config', 'user.email', 'test@test'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['config', 'user.name', 'test'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['add', '-A'], { cwd: tmpDir, stdio: 'pipe' });
+        spawnSync('git', ['commit', '-m', 'init'], { cwd: tmpDir, stdio: 'pipe' });
+
+        const currentCommit = spawnSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tmpDir,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).stdout.trim();
+
+        writeGitNexusMeta(tmpDir, currentCommit);
+        fs.writeFileSync(path.join(tmpDir, 'dirty.txt'), 'dirty\n', 'utf-8');
+
+        const result = runCliOutsideProject(['status'], tmpDir);
+        if (result.status === null) return;
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('Status: ✅ up-to-date');
+        expect(result.stdout).toContain('Reasons: dirty-worktree');
+        expect(result.stdout).not.toContain('Run: gitnexus analyze');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
     it('status on non-git directory reports not a git repo', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-nogit-'));
       try {
