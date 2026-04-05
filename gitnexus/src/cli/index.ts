@@ -3,7 +3,7 @@
 // Heap re-spawn removed — only analyze.ts needs the 8GB heap (via its own ensureHeap()).
 // Removing it from here improves MCP server startup time significantly.
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createLazyAction } from './lazy-action.js';
 import { getGitNexusVersion } from './index-freshness.js';
 
@@ -94,6 +94,7 @@ program
 program
   .command('mcp')
   .description('Start MCP server (stdio) — serves all indexed repos')
+  .addOption(new Option('--repo-worker').hideHelp())
   .action(createLazyAction(() => import('./mcp.js'), 'mcpCommand'));
 
 program
