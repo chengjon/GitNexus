@@ -20,10 +20,12 @@ program
   .action(createLazyAction(() => import('./setup.js'), 'setupCommand'));
 
 program
-  .command('doctor')
+  .command('doctor [path]')
   .description('Diagnose index, registry, and host MCP readiness')
   .option('--host <name>', 'Check a specific host configuration')
   .option('--repo <path>', 'Check a specific repository path')
+  .option('--gpu', 'Also run GPU readiness checks for Ollama / NVIDIA setups')
+  .option('--fix', 'Attempt safe GPU-related fixes and print remaining manual steps')
   .option('--json', 'Print structured JSON output')
   .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
 

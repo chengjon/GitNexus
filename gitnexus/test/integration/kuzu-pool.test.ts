@@ -5,7 +5,7 @@
  * Covers hardening fixes: parameterized queries, query timeout,
  * waiter queue timeout, idle eviction guards, stdout silencing race
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import {
@@ -136,6 +136,20 @@ withTestKuzuDB('kuzu-pool', (handle) => {
       await expect(initKuzu('stale-lock-repo', handle.dbPath)).resolves.toBeUndefined();
       await expect(fs.access(reindexLockPath)).rejects.toThrow();
       await closeKuzu('stale-lock-repo');
+    });
+
+    it('surfaces stale undeletable reindex locks distinctly from active rebuild locks', async () => {
+      const reindexLockPath = path.join(path.dirname(handle.dbPath), 'reindexing.lock');
+      await fs.writeFile(reindexLockPath, JSON.stringify({ pid: 999999999, reason: 'stale-test' }), 'utf8');
+      vi.spyOn(fs, 'rm').mockRejectedValueOnce(Object.assign(new Error('permission denied'), { code: 'EPERM' }));
+
+      try {
+        await expect(initKuzu('stale-lock-blocked-repo', handle.dbPath))
+          .rejects.toThrow(/stale reindex lock for dead pid 999999999/i);
+      } finally {
+        vi.restoreAllMocks();
+        await fs.rm(reindexLockPath, { force: true });
+      }
     });
 
     it('read-only mode: write query throws', async () => {

@@ -37,6 +37,7 @@ describe('analyze embedding helpers', () => {
 
   it('restores cached embeddings in batches and skips fresh embedding when the node limit is exceeded', async () => {
     const updateBar = vi.fn();
+    const restoreCachedEmbeddings = vi.fn(async () => undefined);
     const executeWithReusedStatement = vi.fn(async () => undefined);
     const loadEmbeddingPipelineFns = vi.fn(async () => ({
       countEmbeddableNodes: vi.fn(async () => 501),
@@ -52,6 +53,7 @@ describe('analyze embedding helpers', () => {
       embeddingRuntimeConfig: { provider: 'huggingface', localModelPath: null },
       cachedEmbeddingNodeIds: new Set(['node-1']),
       cachedEmbeddings: [{ nodeId: 'node-1', embedding: [1, 2, 3] }],
+      restoreCachedEmbeddings,
       executeQuery: vi.fn(),
       executeWithReusedStatement,
       updateBar,
@@ -62,7 +64,9 @@ describe('analyze embedding helpers', () => {
     });
 
     expect(updateBar).toHaveBeenCalledWith(88, 'Restoring 1 cached embeddings...');
-    expect(executeWithReusedStatement).toHaveBeenCalledTimes(1);
+    expect(restoreCachedEmbeddings).toHaveBeenCalledTimes(1);
+    expect(restoreCachedEmbeddings).toHaveBeenCalledWith([{ nodeId: 'node-1', embedding: [1, 2, 3] }]);
+    expect(executeWithReusedStatement).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       embeddableNodeCount: 501,
       embeddingSkipped: true,

@@ -9,7 +9,7 @@ import { execFile, execFileSync } from 'child_process';
 import v8 from 'v8';
 import cliProgress from 'cli-progress';
 import { runPipelineFromRepo } from '../core/ingestion/pipeline.js';
-import { initKuzu, loadGraphToKuzu, getKuzuStats, executeQuery, executeWithReusedStatement, closeKuzu, createFTSIndex, loadCachedEmbeddings } from '../core/kuzu/kuzu-adapter.js';
+import { initKuzu, loadGraphToKuzu, getKuzuStats, executeQuery, executeWithReusedStatement, restoreCachedEmbeddings, closeKuzu, createFTSIndex, loadCachedEmbeddings } from '../core/kuzu/kuzu-adapter.js';
 // Embedding imports are lazy (dynamic import) so onnxruntime-node is never
 // loaded when embeddings are not requested. This avoids crashes on Node
 // versions whose ABI is not yet supported by the native binary (#89).
@@ -189,8 +189,13 @@ export const analyzeCommand = async (
   const existingMeta = await loadMeta(storagePath);
   const gitNexusVersion = getGitNexusVersion();
   const scope = resolveAnalyzeScopeOptions(options);
+  const shouldSkipUpToDateAnalyze = shouldSkipAnalyze(existingMeta, startingCommit, gitNexusVersion, options);
+  const requestedEmbeddings = options?.embeddings === true;
+  const recordedEmbeddingCount = Number(existingMeta?.stats?.embeddings ?? 0);
+  const needsEmbeddingRefresh = shouldSkipUpToDateAnalyze && requestedEmbeddings && recordedEmbeddingCount === 0;
+  const needsEmbeddingHealthCheck = shouldSkipUpToDateAnalyze && requestedEmbeddings && recordedEmbeddingCount > 0;
 
-  if (shouldSkipAnalyze(existingMeta, startingCommit, gitNexusVersion, options)) {
+  if (shouldSkipUpToDateAnalyze && !needsEmbeddingRefresh && !needsEmbeddingHealthCheck) {
     console.log('  Already up to date\n');
     return;
   }
@@ -200,7 +205,15 @@ export const analyzeCommand = async (
   const origLog = console.log.bind(console);
   const origWarn = console.warn.bind(console);
   const origError = console.error.bind(console);
-  const reindexLockPath = await nativeRuntimeManager.writeReindexLock(storagePath);
+  const reindexLockOwnerPid = process.pid;
+  let reindexLockPath: string;
+  try {
+    reindexLockPath = await nativeRuntimeManager.writeReindexLock(storagePath, reindexLockOwnerPid);
+  } catch (error) {
+    console.log(`  ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+    return;
+  }
   let bar: cliProgress.SingleBar | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
   let forceExitCode: number | null = null;
@@ -218,7 +231,9 @@ export const analyzeCommand = async (
       console.log(message);
     },
     closeKuzu,
-    removeReindexLock: (lockPath) => nativeRuntimeManager.removeReindexLock(lockPath),
+    removeReindexLock: async (lockPath) => {
+      await nativeRuntimeManager.removeReindexLock(lockPath, { expectedPid: reindexLockOwnerPid });
+    },
     reindexLockPath,
     runCleanupAndExit: (exitCode, cleanupOptions) => nativeRuntimeManager.runCleanupAndExit(exitCode, cleanupOptions),
     scheduleExit: (code) => {
@@ -245,6 +260,34 @@ export const analyzeCommand = async (
       }
       process.exitCode = 1;
       return;
+    }
+
+    if (needsEmbeddingHealthCheck) {
+      let persistedEmbeddingCount = 0;
+      try {
+        await initKuzu(kuzuPath);
+        const persistedResult = await executeQuery(`MATCH (e:CodeEmbedding) RETURN count(e) AS cnt`);
+        persistedEmbeddingCount = Number(persistedResult?.[0]?.cnt ?? 0);
+      } catch {
+        persistedEmbeddingCount = 0;
+      } finally {
+        try {
+          await closeKuzu();
+        } catch {
+          // best-effort cleanup only
+        }
+      }
+
+      if (persistedEmbeddingCount === recordedEmbeddingCount) {
+        console.log('  Already up to date\n');
+        return;
+      }
+
+      console.log(
+        `  Embedding index mismatch detected (${persistedEmbeddingCount.toLocaleString()} persisted vs ${recordedEmbeddingCount.toLocaleString()} recorded); rebuilding...`,
+      );
+    } else if (needsEmbeddingRefresh) {
+      console.log('  Embeddings requested but current index has none; rebuilding...');
     }
 
     // Single progress bar for entire pipeline
@@ -330,23 +373,9 @@ export const analyzeCommand = async (
       createFTSIndex,
     });
 
-    // ── Phase 3.5: Re-insert cached embeddings ────────────────────────
-    if (cachedEmbeddings.length > 0) {
-      updateBar(88, `Restoring ${cachedEmbeddings.length} cached embeddings...`);
-      const EMBED_BATCH = 200;
-      for (let i = 0; i < cachedEmbeddings.length; i += EMBED_BATCH) {
-        const batch = cachedEmbeddings.slice(i, i + EMBED_BATCH);
-        const paramsList = batch.map(e => ({ nodeId: e.nodeId, embedding: e.embedding }));
-        try {
-          await executeWithReusedStatement(
-            `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`,
-            paramsList,
-          );
-        } catch { /* some may fail if node was removed, that's fine */ }
-      }
-    }
-
     // ── Phase 4: Embeddings (90–98%) ──────────────────────────────────
+    // Orchestration restores cached embeddings first, then embeds only
+    // the remaining nodes that were not preserved from the previous index.
     const stats = await getKuzuStats();
     const embeddingNodeLimit = getEmbeddingNodeLimit();
     const embeddingConfig = getCliEmbeddingConfig();
@@ -363,6 +392,7 @@ export const analyzeCommand = async (
       embeddingRuntimeConfig,
       cachedEmbeddingNodeIds,
       cachedEmbeddings,
+      restoreCachedEmbeddings,
       executeQuery,
       executeWithReusedStatement,
       updateBar,
@@ -380,6 +410,23 @@ export const analyzeCommand = async (
       const embResult = await executeQuery(`MATCH (e:CodeEmbedding) RETURN count(e) AS cnt`);
       embeddingCount = embResult?.[0]?.cnt ?? 0;
     } catch { /* table may not exist if embeddings never ran */ }
+    let persistedEmbeddingCount = embeddingCount;
+    let embeddingPersistenceWarning = '';
+    if (options?.embeddings) {
+      try {
+        await closeKuzu();
+        await initKuzu(kuzuPath);
+        const persistedResult = await executeQuery(`MATCH (e:CodeEmbedding) RETURN count(e) AS cnt`);
+        persistedEmbeddingCount = persistedResult?.[0]?.cnt ?? 0;
+        if (persistedEmbeddingCount !== embeddingCount) {
+          embeddingPersistenceWarning =
+            `Embedding persistence mismatch: session counted ${Number(embeddingCount).toLocaleString()} rows but reopening Kuzu found ${Number(persistedEmbeddingCount).toLocaleString()}.`;
+        }
+      } catch (error) {
+        embeddingPersistenceWarning =
+          `Could not verify persisted embedding count after reopening Kuzu: ${error instanceof Error ? error.message : String(error)}.`;
+      }
+    }
 
     const projectName = path.basename(repoPath);
     if (options?.skills && pipelineResult.communityResult) {
@@ -402,7 +449,7 @@ export const analyzeCommand = async (
       stats: {
         nodes: stats.nodes,
         edges: stats.edges,
-        embeddings: embeddingCount,
+        embeddings: persistedEmbeddingCount,
       },
     }, {
       saveMeta,
@@ -444,10 +491,11 @@ export const analyzeCommand = async (
       embeddingTime,
       embeddingsEnabled: options?.embeddings,
       embeddingDetail,
+      embeddingPersistenceWarning,
       repoPath,
       contextFiles: aiContext.files,
       kuzuWarnings,
-      showIncrementalEmbeddingRefreshTip: shouldSuggestIncrementalEmbeddingRefresh(options?.force, options?.embeddings, embeddingCount),
+      showIncrementalEmbeddingRefreshTip: shouldSuggestIncrementalEmbeddingRefresh(options?.force, options?.embeddings, persistedEmbeddingCount),
       showSetupTip,
     })) {
       console.log(line);
@@ -466,7 +514,7 @@ export const analyzeCommand = async (
     console.log = origLog;
     console.warn = origWarn;
     console.error = origError;
-    await nativeRuntimeManager.removeReindexLock(reindexLockPath);
+    await nativeRuntimeManager.removeReindexLock(reindexLockPath, { expectedPid: reindexLockOwnerPid });
   }
 
   if (forceExitCode !== null) {
