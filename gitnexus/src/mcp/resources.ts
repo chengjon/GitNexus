@@ -5,7 +5,7 @@
  * All resources use repo-scoped URIs: gitnexus://repo/{name}/context
  */
 
-import type { LocalBackend } from './local/local-backend.js';
+import type { McpBackendLike } from './backend-contract.js';
 import { getIndexHealth } from './staleness.js';
 
 export interface ResourceDefinition {
@@ -115,7 +115,7 @@ function parseUri(uri: string): { repoName?: string; resourceType: string; param
 /**
  * Read a resource and return its content
  */
-export async function readResource(uri: string, backend: LocalBackend): Promise<string> {
+export async function readResource(uri: string, backend: McpBackendLike): Promise<string> {
   const parsed = parseUri(uri);
 
   // Global repos list — no repo context needed
@@ -153,7 +153,7 @@ export async function readResource(uri: string, backend: LocalBackend): Promise<
 /**
  * Repos resource — list all indexed repositories
  */
-async function getReposResource(backend: LocalBackend): Promise<string> {
+async function getReposResource(backend: McpBackendLike): Promise<string> {
   const repos = await backend.listRepos();
 
   if (repos.length === 0) {
@@ -191,7 +191,7 @@ async function getReposResource(backend: LocalBackend): Promise<string> {
 /**
  * Context resource — codebase overview for a specific repo
  */
-async function getContextResource(backend: LocalBackend, repoName?: string): Promise<string> {
+async function getContextResource(backend: McpBackendLike, repoName?: string): Promise<string> {
   // Resolve repo
   const repo = await backend.resolveRepo(repoName);
   const repoId = repo.name.toLowerCase();
@@ -255,7 +255,7 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
 /**
  * Clusters resource — queries graph directly via backend.queryClusters()
  */
-async function getClustersResource(backend: LocalBackend, repoName?: string): Promise<string> {
+async function getClustersResource(backend: McpBackendLike, repoName?: string): Promise<string> {
   try {
     const result = await backend.queryClusters(repoName, 100);
 
@@ -289,7 +289,7 @@ async function getClustersResource(backend: LocalBackend, repoName?: string): Pr
 /**
  * Processes resource — queries graph directly via backend.queryProcesses()
  */
-async function getProcessesResource(backend: LocalBackend, repoName?: string): Promise<string> {
+async function getProcessesResource(backend: McpBackendLike, repoName?: string): Promise<string> {
   try {
     const result = await backend.queryProcesses(repoName, 50);
 
@@ -370,7 +370,7 @@ example_queries:
 /**
  * Cluster detail resource — queries graph directly via backend.queryClusterDetail()
  */
-async function getClusterDetailResource(name: string, backend: LocalBackend, repoName?: string): Promise<string> {
+async function getClusterDetailResource(name: string, backend: McpBackendLike, repoName?: string): Promise<string> {
   try {
     const result = await backend.queryClusterDetail(name, repoName);
 
@@ -412,7 +412,7 @@ async function getClusterDetailResource(name: string, backend: LocalBackend, rep
 /**
  * Process detail resource — queries graph directly via backend.queryProcessDetail()
  */
-async function getProcessDetailResource(name: string, backend: LocalBackend, repoName?: string): Promise<string> {
+async function getProcessDetailResource(name: string, backend: McpBackendLike, repoName?: string): Promise<string> {
   try {
     const result = await backend.queryProcessDetail(name, repoName);
 
@@ -447,7 +447,7 @@ async function getProcessDetailResource(name: string, backend: LocalBackend, rep
  * Setup resource — generates AGENTS.md content for all indexed repos.
  * Useful for `gitnexus setup` onboarding or dynamic content injection.
  */
-async function getSetupResource(backend: LocalBackend): Promise<string> {
+async function getSetupResource(backend: McpBackendLike): Promise<string> {
   const repos = await backend.listRepos();
 
   if (repos.length === 0) {

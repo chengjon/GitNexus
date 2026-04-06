@@ -23,7 +23,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { GITNEXUS_TOOLS } from './tools.js';
-import type { LocalBackend } from './local/local-backend.js';
+import type { McpBackendLike } from './backend-contract.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
 import { getGitNexusVersion } from '../cli/index-freshness.js';
 import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
@@ -81,7 +81,7 @@ function getNextStepHint(toolName: string, args: Record<string, any> | undefined
  * Create a configured MCP Server with all handlers registered.
  * Transport-agnostic — caller connects the desired transport.
  */
-export function createMCPServer(backend: LocalBackend): Server {
+export function createMCPServer(backend: McpBackendLike): Server {
   const server = new Server(
     {
       name: 'gitnexus',
@@ -149,7 +149,6 @@ export function createMCPServer(backend: LocalBackend): Server {
       };
     }
   });
-
 
   // Handle list tools request
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -272,7 +271,7 @@ Follow these steps:
 /**
  * Start the MCP server on stdio transport (for CLI use).
  */
-export async function startMCPServer(backend: LocalBackend): Promise<void> {
+export async function startMCPServer(backend: McpBackendLike): Promise<void> {
   const server = createMCPServer(backend);
 
   // Graceful shutdown helper

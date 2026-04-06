@@ -3,7 +3,7 @@
 // Heap re-spawn removed — only analyze.ts needs the 8GB heap (via its own ensureHeap()).
 // Removing it from here improves MCP server startup time significantly.
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createLazyAction } from './lazy-action.js';
 import { getGitNexusVersion } from './index-freshness.js';
 
@@ -20,10 +20,12 @@ program
   .action(createLazyAction(() => import('./setup.js'), 'setupCommand'));
 
 program
-  .command('doctor')
+  .command('doctor [path]')
   .description('Diagnose index, registry, and host MCP readiness')
   .option('--host <name>', 'Check a specific host configuration')
   .option('--repo <path>', 'Check a specific repository path')
+  .option('--gpu', 'Also run GPU readiness checks for Ollama / NVIDIA setups')
+  .option('--fix', 'Attempt safe GPU-related fixes and print remaining manual steps')
   .option('--json', 'Print structured JSON output')
   .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
 
@@ -91,10 +93,32 @@ program
   .option('--host <host>', 'Bind address (default: 127.0.0.1, use 0.0.0.0 for remote access)')
   .action(createLazyAction(() => import('./serve.js'), 'serveCommand'));
 
-program
+const mcpProgram = program
   .command('mcp')
   .description('Start MCP server (stdio) — serves all indexed repos')
+  .addOption(new Option('--repo-worker').hideHelp())
   .action(createLazyAction(() => import('./mcp.js'), 'mcpCommand'));
+
+mcpProgram
+  .command('ps')
+  .description('List GitNexus-owned MCP router and repo-worker processes')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./mcp.js'), 'mcpPsCommand'));
+
+mcpProgram
+  .command('gc')
+  .description('Clean stale MCP registry entries and orphaned workers')
+  .option('--dry-run', 'Show what would be cleaned without changing state')
+  .option('--force', 'Also terminate suspect GitNexus-owned processes')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./mcp.js'), 'mcpGcCommand'));
+
+mcpProgram
+  .command('drain')
+  .description('Cooperatively drain repo workers for one indexed repository')
+  .requiredOption('--repo <name>', 'Indexed repository name, id, or absolute path')
+  .option('--json', 'Print structured JSON output')
+  .action(createLazyAction(() => import('./mcp.js'), 'mcpDrainCommand'));
 
 program
   .command('list')

@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
 import path from 'path';
 import kuzu from 'kuzu';
 import { KnowledgeGraph } from '../graph/types.js';
@@ -302,23 +303,83 @@ export const executeWithReusedStatement = async (
   }
   if (paramsList.length === 0) return;
 
+  const stmt = await conn.prepare(cypher);
+  if (!stmt.isSuccess()) {
+    const errMsg = await stmt.getErrorMessage();
+    throw new Error(`Prepare failed: ${errMsg}`);
+  }
+
   const SUB_BATCH_SIZE = 4;
   for (let i = 0; i < paramsList.length; i += SUB_BATCH_SIZE) {
     const subBatch = paramsList.slice(i, i + SUB_BATCH_SIZE);
-    const stmt = await conn.prepare(cypher);
-    if (!stmt.isSuccess()) {
-      const errMsg = await stmt.getErrorMessage();
-      throw new Error(`Prepare failed: ${errMsg}`);
-    }
-    try {
-      for (const params of subBatch) {
+    for (const params of subBatch) {
+      try {
         await conn.execute(stmt, params);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Statement execution failed: ${message}`);
       }
-    } catch (e) {
-      // Log the error and continue with next batch
-      console.warn('Batch execution error:', e);
     }
     // Note: kuzu 0.8.2 PreparedStatement doesn't require explicit close()
+  }
+};
+
+export const restoreCachedEmbeddings = async (
+  entries: Array<{ nodeId: string; embedding: number[] }>,
+): Promise<void> => {
+  if (!conn) {
+    throw new Error('KuzuDB not initialized. Call initKuzu first.');
+  }
+  if (entries.length === 0) return;
+
+  const csvDir = currentDbPath ? path.join(path.dirname(currentDbPath), 'csv') : path.join(process.cwd(), '.gitnexus', 'csv');
+  await fs.mkdir(csvDir, { recursive: true });
+  const csvPath = path.join(csvDir, `embedding-restore-${process.pid}-${Date.now()}.csv`);
+  const ws = createWriteStream(csvPath, 'utf-8');
+
+  const escapeCsvField = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+  const formatEmbedding = (embedding: number[]): string => `[${embedding.map((value) => (
+    Number.isFinite(value) ? String(value) : '0'
+  )).join(',')}]`;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ws.on('error', reject);
+      ws.write('nodeId,embedding\n', (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    for (const entry of entries) {
+      const line = `${escapeCsvField(entry.nodeId)},${escapeCsvField(formatEmbedding(entry.embedding))}\n`;
+      await new Promise<void>((resolve, reject) => {
+        ws.once('error', reject);
+        const ok = ws.write(line);
+        if (ok) {
+          ws.removeListener('error', reject);
+          resolve();
+          return;
+        }
+        ws.once('drain', () => {
+          ws.removeListener('error', reject);
+          resolve();
+        });
+      });
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      ws.end((err?: Error | null) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    const copyQuery = `COPY ${EMBEDDING_TABLE_NAME}(nodeId, embedding) FROM "${normalizeCopyPath(csvPath)}" (HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
+    await conn.query(copyQuery);
+  } finally {
+    try { ws.destroy(); } catch {}
+    try { await fs.rm(csvPath, { force: true }); } catch {}
   }
 };
 

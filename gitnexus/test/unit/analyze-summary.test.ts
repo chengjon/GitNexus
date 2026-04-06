@@ -21,6 +21,7 @@ describe('analyze summary helpers', () => {
       repoPath: '/tmp/repo',
       contextFiles: ['AGENTS.md (updated)', 'CLAUDE.md (updated)'],
       kuzuWarnings: ['Function->Class (12 edges): warning', 'File->Method (3 edges): warning'],
+      embeddingPersistenceWarning: 'Embedding persistence mismatch: session counted 84546 rows but reopening Kuzu found 6380.',
       showIncrementalEmbeddingRefreshTip: true,
       showSetupTip: true,
     });
@@ -35,6 +36,7 @@ describe('analyze summary helpers', () => {
       '  /tmp/repo',
       '  Context: AGENTS.md (updated), CLAUDE.md (updated)',
       '  Note: 15 edges across 2 types inserted via fallback (schema will be updated in next release)',
+      '  Warning: Embedding persistence mismatch: session counted 84546 rows but reopening Kuzu found 6380.',
       '  Tip: Future refreshes usually omit `--force` so GitNexus can reuse existing embeddings.',
       '',
       '  Tip: Run `gitnexus setup` to configure MCP for your editor.',
@@ -60,6 +62,7 @@ describe('analyze summary helpers', () => {
       repoPath: '/tmp/repo',
       contextFiles: [],
       kuzuWarnings: [],
+      embeddingPersistenceWarning: '',
       showIncrementalEmbeddingRefreshTip: false,
       showSetupTip: false,
     });

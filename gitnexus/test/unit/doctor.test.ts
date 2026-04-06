@@ -437,4 +437,291 @@ describe('runDoctor', () => {
       ]),
     );
   });
+
+  it('reports healthy GPU checks when host, container, and Ollama offload are working', async () => {
+    const dockerInspectPayload = JSON.stringify([
+      {
+        State: { Running: true },
+        HostConfig: {
+          DeviceRequests: [
+            {
+              Capabilities: [['gpu']],
+            },
+          ],
+        },
+        Config: {
+          Env: [
+            'OLLAMA_LLM_LIBRARY=cuda_v12',
+            'NVIDIA_VISIBLE_DEVICES=all',
+            'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
+          ],
+        },
+      },
+    ]);
+
+    const result = await runDoctor(
+      { repo: '/repo', json: true, gpu: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://127.0.0.1:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+          },
+        }),
+        fetchJson: async (url: string) => {
+          if (url.endsWith('/api/ps')) {
+            return {
+              models: [
+                {
+                  name: 'qwen3-embedding:0.6b',
+                  model: 'qwen3-embedding:0.6b',
+                  size_vram: 1496576832,
+                },
+              ],
+            };
+          }
+          return { embeddings: [] };
+        },
+        probeOllama: async () => ({ status: 'pass', detail: 'source=ollama, embedProbe=http://127.0.0.1:11434/api/embed' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [],
+        getNativeRuntimeCheck: () => ({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
+        }),
+        pathExists: async (targetPath: string) => targetPath === '/dev/dxg',
+        runCommand: async (command: string, args: string[]) => {
+          const key = [command, ...args].join(' ');
+          if (key === 'nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.79 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker inspect ollama') {
+            return { ok: true, stdout: dockerInspectPayload, stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker exec ollama sh -lc nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.54 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          throw new Error(`Unexpected command: ${key}`);
+        },
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'gpu-device-node', status: 'pass' }),
+        expect.objectContaining({ name: 'gpu-host-runtime', status: 'pass' }),
+        expect.objectContaining({ name: 'gpu-docker-config', status: 'pass' }),
+        expect.objectContaining({ name: 'gpu-container-runtime', status: 'pass' }),
+        expect.objectContaining({ name: 'gpu-ollama-runtime', status: 'pass' }),
+      ]),
+    );
+  });
+
+  it('applies a safe fix by starting the ollama container when requested', async () => {
+    const inspectPayloadStopped = JSON.stringify([
+      {
+        State: { Running: false },
+        HostConfig: {
+          DeviceRequests: [
+            {
+              Capabilities: [['gpu']],
+            },
+          ],
+        },
+        Config: {
+          Env: [
+            'OLLAMA_LLM_LIBRARY=cuda_v12',
+            'NVIDIA_VISIBLE_DEVICES=all',
+            'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
+          ],
+        },
+      },
+    ]);
+
+    const inspectPayloadRunning = JSON.stringify([
+      {
+        State: { Running: true },
+        HostConfig: {
+          DeviceRequests: [
+            {
+              Capabilities: [['gpu']],
+            },
+          ],
+        },
+        Config: {
+          Env: [
+            'OLLAMA_LLM_LIBRARY=cuda_v12',
+            'NVIDIA_VISIBLE_DEVICES=all',
+            'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
+          ],
+        },
+      },
+    ]);
+
+    let inspectCount = 0;
+
+    const result = await runDoctor(
+      { repo: '/repo', json: true, gpu: true, fix: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://127.0.0.1:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+          },
+        }),
+        fetchJson: async (url: string) => {
+          if (url.endsWith('/api/ps')) {
+            return {
+              models: [
+                {
+                  name: 'qwen3-embedding:0.6b',
+                  model: 'qwen3-embedding:0.6b',
+                  size_vram: 1496576832,
+                },
+              ],
+            };
+          }
+          return { embeddings: [] };
+        },
+        probeOllama: async () => ({ status: 'pass', detail: 'source=ollama, embedProbe=http://127.0.0.1:11434/api/embed' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [],
+        getNativeRuntimeCheck: () => ({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
+        }),
+        pathExists: async (targetPath: string) => targetPath === '/dev/dxg',
+        runCommand: async (command: string, args: string[]) => {
+          const key = [command, ...args].join(' ');
+          if (key === 'nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.79 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker inspect ollama') {
+            inspectCount += 1;
+            return {
+              ok: true,
+              stdout: inspectCount === 1 ? inspectPayloadStopped : inspectPayloadRunning,
+              stderr: '',
+              exitCode: 0,
+            };
+          }
+          if (key === 'docker start ollama') {
+            return { ok: true, stdout: 'ollama', stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker exec ollama sh -lc nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.54 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          throw new Error(`Unexpected command: ${key}`);
+        },
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'gpu-docker-config', status: 'pass' }),
+        expect.objectContaining({
+          name: 'gpu-fix',
+          status: 'pass',
+          detail: expect.stringContaining('started Docker container "ollama"'),
+        }),
+      ]),
+    );
+  });
+
+  it('fails the GPU runtime check when Ollama falls back to CPU', async () => {
+    const dockerInspectPayload = JSON.stringify([
+      {
+        State: { Running: true },
+        HostConfig: {
+          DeviceRequests: [
+            {
+              Capabilities: [['gpu']],
+            },
+          ],
+        },
+        Config: {
+          Env: [
+            'OLLAMA_LLM_LIBRARY=cuda_v12',
+            'NVIDIA_VISIBLE_DEVICES=all',
+            'NVIDIA_DRIVER_CAPABILITIES=compute,utility',
+          ],
+        },
+      },
+    ]);
+
+    const result = await runDoctor(
+      { repo: '/repo', json: true, gpu: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({
+          embeddings: {
+            provider: 'ollama',
+            ollamaBaseUrl: 'http://127.0.0.1:11434',
+            ollamaModel: 'qwen3-embedding:0.6b',
+          },
+        }),
+        fetchJson: async (url: string) => {
+          if (url.endsWith('/api/ps')) {
+            return {
+              models: [
+                {
+                  name: 'qwen3-embedding:0.6b',
+                  model: 'qwen3-embedding:0.6b',
+                  size_vram: 0,
+                },
+              ],
+            };
+          }
+          return { embeddings: [] };
+        },
+        probeOllama: async () => ({ status: 'pass', detail: 'source=ollama, embedProbe=http://127.0.0.1:11434/api/embed' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [],
+        getNativeRuntimeCheck: () => ({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
+        }),
+        pathExists: async (targetPath: string) => targetPath === '/dev/dxg',
+        runCommand: async (command: string, args: string[]) => {
+          const key = [command, ...args].join(' ');
+          if (key === 'nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.79 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker inspect ollama') {
+            return { ok: true, stdout: dockerInspectPayload, stderr: '', exitCode: 0 };
+          }
+          if (key === 'docker exec ollama sh -lc nvidia-smi') {
+            return { ok: true, stdout: 'NVIDIA-SMI 595.54 Driver Version: 595.79 CUDA Version: 13.2', stderr: '', exitCode: 0 };
+          }
+          throw new Error(`Unexpected command: ${key}`);
+        },
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'gpu-ollama-runtime',
+          status: 'fail',
+          detail: expect.stringContaining('size_vram=0'),
+        }),
+      ]),
+    );
+  });
 });
