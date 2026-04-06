@@ -32,6 +32,7 @@ export interface AnalyzeEmbeddingOrchestrationOptions {
   embeddingRuntimeConfig: EmbeddingRuntimeConfig;
   cachedEmbeddingNodeIds: Set<string>;
   cachedEmbeddings: CachedEmbeddingRecord[];
+  restoreCachedEmbeddings: (entries: CachedEmbeddingRecord[]) => Promise<void>;
   executeQuery: (cypher: string) => Promise<any[]>;
   executeWithReusedStatement: (cypher: string, paramsList: Record<string, unknown>[]) => Promise<void>;
   updateBar: (value: number, phaseLabel: string) => void;
@@ -113,16 +114,20 @@ export async function runAnalyzeEmbeddingOrchestration(
 }> {
   if (options.cachedEmbeddings.length > 0) {
     options.updateBar(88, `Restoring ${options.cachedEmbeddings.length} cached embeddings...`);
-    for (let i = 0; i < options.cachedEmbeddings.length; i += DEFAULT_EMBED_BATCH) {
-      const batch = options.cachedEmbeddings.slice(i, i + DEFAULT_EMBED_BATCH);
-      const paramsList = batch.map((entry) => ({ nodeId: entry.nodeId, embedding: entry.embedding }));
-      try {
-        await options.executeWithReusedStatement(
-          `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`,
-          paramsList,
-        );
-      } catch {
-        // some may fail if nodes were removed during rebuild; keep best-effort semantics
+    try {
+      await options.restoreCachedEmbeddings(options.cachedEmbeddings);
+    } catch {
+      for (let i = 0; i < options.cachedEmbeddings.length; i += DEFAULT_EMBED_BATCH) {
+        const batch = options.cachedEmbeddings.slice(i, i + DEFAULT_EMBED_BATCH);
+        const paramsList = batch.map((entry) => ({ nodeId: entry.nodeId, embedding: entry.embedding }));
+        try {
+          await options.executeWithReusedStatement(
+            `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`,
+            paramsList,
+          );
+        } catch {
+          // some may fail if nodes were removed during rebuild; keep best-effort semantics
+        }
       }
     }
   }

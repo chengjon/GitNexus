@@ -394,6 +394,41 @@ to:
 Fallback remains necessary because the registry can be stale or missing.
 Holder scan is still the last-resort truth source.
 
+### 8.1 Reindex Lock Discipline
+
+The `2026-04-06` stale-lock incident clarified that MCP process management and
+reindex-lock discipline solve adjacent problems, not the same problem.
+
+The observed false "GitNexus is rebuilding the index" blocks were caused
+primarily by broken lock ownership semantics:
+
+- one `analyze` process could overwrite another process's `reindexing.lock`
+- a later cleanup path could remove a different process's live lock
+- MCP stale-lock cleanup needed to distinguish a dead pid from a newly written
+  live lock before deleting anything
+
+The incident also showed that mixed filesystem ownership is a secondary risk,
+not the main root cause for this specific failure. Ownership mismatches can
+still prevent stale-lock cleanup, but that must surface as an explicit
+stale-lock / permission problem, not be collapsed into a misleading
+"rebuilding" message.
+
+This design therefore needs one explicit constraint:
+
+- process registry, drain, and `mcp gc` complement reindex locks but do not
+  replace per-repo lock ownership guarantees
+- reindex-lock writes must remain atomic and refuse live owners
+- reindex-lock cleanup must remain pid-bound and revalidate before delete
+- read-path errors must distinguish:
+  - active rebuild with live pid
+  - stale lock for dead pid but deletion blocked
+  - unreadable or invalid lock payload
+
+One related non-goal should remain explicit: `detect_changes` and other MCP
+read tools cannot safely keep serving a "last-good" index during a true rebuild
+while `analyze` replaces Kuzu in place. Supporting that would require a shadow
+index plus atomic swap design, which is out of scope for this slice.
+
 ## 9. Status Model
 
 `gitnexus mcp ps` should report two dimensions, not one flattened status.

@@ -24,6 +24,9 @@ implementation sequence that fits the existing CLI and runtime layout.
 - Clean stale registry entries and orphaned workers through `gitnexus mcp gc`.
 - Make `gitnexus analyze` aware of registry-classified GitNexus-owned MCP
   holders.
+- Preserve per-repo reindex lock ownership so MCP stale-lock cleanup does not
+  delete a newer live analyze lock or misreport stale-lock failures as active
+  rebuilds.
 
 **Non-Goals:**
 - Build a daemon supervisor outside the current stdio router model.
@@ -32,6 +35,9 @@ implementation sequence that fits the existing CLI and runtime layout.
 - Deliver the full cooperative drain protocol in the first implementation
   slice.
 - Add Windows-specific process-management behavior in this change.
+- Keep serving a read-only "last-good" Kuzu index while `analyze` is rebuilding
+  the active index in place. That would require a shadow-index plus atomic swap
+  design.
 
 ## Decisions
 
@@ -107,12 +113,35 @@ Rationale:
 - fits this implementation slice
 - reduces risk versus introducing a new cross-process drain channel
 
+### 7. Reindex lock ownership must stay separate from MCP registry state
+
+The `2026-04-06` stale-lock incident showed that MCP registry visibility and
+reindex lock correctness are related but distinct concerns. The false
+"GitNexus is rebuilding the index" failures were caused primarily by broken
+reindex-lock ownership semantics, not by the absence of registry metadata.
+
+This implementation slice therefore keeps one explicit rule:
+- runtime registry improves process visibility and cleanup decisions
+- reindex lock acquisition and release still enforce per-repo ownership
+- stale-lock cleanup must revalidate ownership before deletion
+- read-path errors must distinguish live rebuild, stale undeletable lock,
+  unreadable lock, and invalid payload
+
+Rationale:
+- prevents one analyze session from deleting another session's live lock
+- keeps permission failures diagnosable instead of collapsing them into a
+  generic rebuild message
+- avoids reintroducing false-positive MCP read failures while registry work
+  continues
+
 ## Risks / Trade-offs
 
 - [Registry write overhead] -> Use per-process files, conservative heartbeat
   defaults, and atomic replace writes without per-heartbeat fsync.
 - [False positive cleanup] -> Require PID liveness and GitNexus command
   signature checks before signaling.
+- [False positive stale-lock cleanup] -> Require PID-bound reindex lock removal
+  and revalidate the lock before deletion on MCP read paths.
 - [Old sessions without registry records] -> Fall back to existing holder scan
   behavior; registry absence must not block startup or analyze.
 - [CLI scope creep] -> Keep `mcp ps` and `mcp gc` focused on GitNexus-owned

@@ -85,3 +85,25 @@ workers holding the target repo before sending termination signals.
   target repo's Kuzu path
 - **THEN** it first sends a cooperative drain request and waits for
   acknowledgement/completion before falling back to `SIGTERM`
+
+### Requirement: GitNexus SHALL preserve reindex lock ownership during analyze and MCP reads
+GitNexus SHALL treat per-repo reindex locks as owner-bound coordination state
+that remains valid independently of MCP runtime registry state.
+
+#### Scenario: A second analyze process cannot overwrite a live reindex lock
+- **WHEN** a second `gitnexus analyze` process starts while a live analyze PID
+  already owns `reindexing.lock`
+- **THEN** GitNexus refuses the second process instead of overwriting the live
+  lock file
+
+#### Scenario: MCP stale-lock cleanup must not delete a newer live lock
+- **WHEN** MCP reads detect a dead-pid stale lock but the lock changes to a new
+  live owner before deletion completes
+- **THEN** GitNexus revalidates the lock and reports the live rebuild owner
+  instead of deleting the newer lock
+
+#### Scenario: MCP distinguishes stale undeletable locks from active rebuilds
+- **WHEN** MCP reads find a dead-pid stale lock that cannot be removed because
+  of permissions or ownership mismatch
+- **THEN** GitNexus reports an explicit stale-lock cleanup error rather than a
+  generic "GitNexus is rebuilding the index" message

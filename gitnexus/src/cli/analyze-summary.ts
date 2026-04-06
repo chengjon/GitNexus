@@ -15,6 +15,7 @@ export interface AnalyzeSummaryInput {
   repoPath: string;
   contextFiles: string[];
   kuzuWarnings: string[];
+  embeddingPersistenceWarning: string;
   showIncrementalEmbeddingRefreshTip: boolean;
   showSetupTip: boolean;
 }
@@ -46,6 +47,10 @@ export function buildAnalyzeSummaryLines(input: AnalyzeSummaryInput): string[] {
   if (input.kuzuWarnings.length > 0) {
     const totalFallback = input.kuzuWarnings.reduce((sum, warning) => sum + parseFallbackEdgeCount(warning), 0);
     lines.push(`  Note: ${totalFallback} edges across ${input.kuzuWarnings.length} types inserted via fallback (schema will be updated in next release)`);
+  }
+
+  if (input.embeddingPersistenceWarning) {
+    lines.push(`  Warning: ${input.embeddingPersistenceWarning}`);
   }
 
   if (input.showIncrementalEmbeddingRefreshTip) {

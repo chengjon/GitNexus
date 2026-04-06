@@ -42,3 +42,10 @@
 - [x] 7.3 Add `gitnexus mcp drain --repo <name>` command wiring and reporting
 - [x] 7.4 Make `gitnexus analyze` attempt cooperative drain before signal fallback
 - [x] 7.5 Add unit and integration coverage for drain request, acknowledgement, completion, and fallback paths
+
+## 8. Reindex Lock Hardening
+
+- [x] 8.1 Enforce owner-bound reindex lock acquisition and release for `analyze`
+- [x] 8.2 Make MCP stale-lock cleanup revalidate ownership before deleting a stale lock
+- [x] 8.3 Distinguish active rebuild, stale undeletable lock, and invalid lock payload errors on MCP read paths
+- [x] 8.4 Add unit and integration regression coverage for stale-lock races and delete-permission failures

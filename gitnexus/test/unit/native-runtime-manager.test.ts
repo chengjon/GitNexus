@@ -2,10 +2,14 @@ import { EventEmitter } from 'node:events';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NativeRuntimeManager } from '../../src/runtime/native-runtime-manager.js';
 
 describe('NativeRuntimeManager', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('writes and removes reindex lock files', async () => {
     const manager = new NativeRuntimeManager();
     const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
@@ -42,6 +46,152 @@ describe('NativeRuntimeManager', () => {
     } finally {
       await fs.rm(storagePath, { recursive: true, force: true });
     }
+  });
+
+  it('refuses to overwrite a live reindex lock held by another pid', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+
+      await expect(manager.writeReindexLock(storagePath, 54321)).rejects.toThrow(/already active|rebuilding/i);
+
+      const payload = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+      expect(payload.pid).toBe(process.pid);
+    } finally {
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not delete a newer live lock while clearing a stale lock during analyze startup', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+    const realRemoveReindexLock = manager.removeReindexLock.bind(manager);
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: 999999999, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+      vi.spyOn(manager, 'removeReindexLock')
+        .mockImplementationOnce(async (targetPath, options) => {
+          await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: '2026-04-06T00:00:01.000Z' }), 'utf8');
+          return realRemoveReindexLock(targetPath, options);
+        })
+        .mockImplementation(realRemoveReindexLock);
+
+      await expect(manager.writeReindexLock(storagePath, 54321)).rejects.toThrow(
+        new RegExp(`already active with pid ${process.pid}`, 'i'),
+      );
+
+      const payload = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+      expect(payload.pid).toBe(process.pid);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not remove a reindex lock owned by another pid', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: 305228, createdAt: '2026-04-06T00:31:04.411Z' }), 'utf8');
+
+      await expect(manager.removeReindexLock(lockPath, { expectedPid: 278449 })).resolves.toBe(false);
+      await expect(fs.access(lockPath)).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces stale lock cleanup failures instead of silently treating them as cleared', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: 999999999, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+      vi.spyOn(fs, 'rm').mockRejectedValueOnce(Object.assign(new Error('permission denied'), { code: 'EPERM' }));
+
+      await expect(manager.clearStaleReindexLock(lockPath, () => false)).rejects.toThrow(/stale reindex lock|permission denied|EPERM/i);
+      await expect(fs.access(lockPath)).resolves.toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a live reindex lock as an active rebuild with the owning pid', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+
+      await expect(manager.assertNoActiveReindexLock(storagePath, 'repo-a')).rejects.toThrow(
+        new RegExp(`rebuilding the index \\(pid ${process.pid}\\)`, 'i'),
+      );
+    } finally {
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('reports stale undeletable locks differently from active rebuilds', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: 999999999, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+      vi.spyOn(fs, 'rm').mockRejectedValueOnce(Object.assign(new Error('permission denied'), { code: 'EPERM' }));
+
+      await expect(manager.assertNoActiveReindexLock(storagePath, 'repo-a')).rejects.toThrow(/stale reindex lock for dead pid 999999999/i);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('rechecks the lock before MCP cleanup so a new live analyze lock is not deleted', async () => {
+    const manager = new NativeRuntimeManager();
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-'));
+    const lockPath = path.join(storagePath, 'reindexing.lock');
+    const realRemoveReindexLock = manager.removeReindexLock.bind(manager);
+
+    try {
+      await fs.writeFile(lockPath, JSON.stringify({ pid: 999999999, createdAt: '2026-04-06T00:00:00.000Z' }), 'utf8');
+      vi.spyOn(manager, 'removeReindexLock')
+        .mockImplementationOnce(async () => {
+          await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, createdAt: '2026-04-06T00:00:01.000Z' }), 'utf8');
+          return false;
+        })
+        .mockImplementation(realRemoveReindexLock);
+
+      await expect(manager.assertNoActiveReindexLock(storagePath, 'repo-a')).rejects.toThrow(
+        new RegExp(`rebuilding the index \\(pid ${process.pid}\\)`, 'i'),
+      );
+
+      const payload = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+      expect(payload.pid).toBe(process.pid);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(storagePath, { recursive: true, force: true });
+    }
+  });
+
+  it('treats a pid as dead on linux when the pid probe reports it missing even if process.kill succeeds', () => {
+    const manager = new NativeRuntimeManager();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+
+    expect(manager.isPidAlive(267021, {
+      platform: 'linux',
+      pidProbe: () => false,
+    })).toBe(false);
+    expect(killSpy).not.toHaveBeenCalled();
   });
 
   it('tracks Kuzu repo active state', () => {
