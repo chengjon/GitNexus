@@ -20,8 +20,16 @@ interface PendingRequest {
 
 interface WorkerState {
   child: ChildProcess;
+  disconnected: boolean;
+  exited: boolean;
   pending: Map<string, PendingRequest>;
   repo: RepoHandle;
+}
+
+interface PendingWorkerSpawn {
+  abort: (error: Error) => void;
+  promise: Promise<WorkerState>;
+  state: WorkerState;
 }
 
 export interface RepoWorkerManagerOptions {
@@ -41,7 +49,7 @@ export class RepoWorkerManager {
   private routerPid: number;
   private requestSeq = 0;
   private sessionId: string;
-  private workerPromises = new Map<string, Promise<WorkerState>>();
+  private workerSpawns = new Map<string, PendingWorkerSpawn>();
   private workers = new Map<string, WorkerState>();
 
   constructor(options: RepoWorkerManagerOptions = {}) {
@@ -58,20 +66,28 @@ export class RepoWorkerManager {
       return existing;
     }
 
-    const inFlight = this.workerPromises.get(repo.id);
+    const inFlight = this.workerSpawns.get(repo.id);
     if (inFlight) {
-      return inFlight;
+      return inFlight.promise;
     }
 
-    const pendingSpawn = Promise.resolve(this.spawnWorker(repo));
-    this.workerPromises.set(repo.id, pendingSpawn);
+    const pendingSpawn = this.spawnWorker(repo);
+    this.workerSpawns.set(repo.id, pendingSpawn);
 
     try {
-      const state = await pendingSpawn;
+      const state = await pendingSpawn.promise;
+      if (state.disconnected) {
+        throw new Error(`Repo worker for ${repo.name} disconnected`);
+      }
+      if (state.exited) {
+        return this.ensureWorker(repo);
+      }
       this.workers.set(repo.id, state);
       return state;
     } finally {
-      this.workerPromises.delete(repo.id);
+      if (this.workerSpawns.get(repo.id) === pendingSpawn) {
+        this.workerSpawns.delete(repo.id);
+      }
     }
   }
 
@@ -104,11 +120,21 @@ export class RepoWorkerManager {
   }
 
   async disconnect(): Promise<void> {
-    const states = [...this.workers.values()];
+    const states = [
+      ...this.workers.values(),
+      ...Array.from(this.workerSpawns.values(), (spawn) => spawn.state),
+    ];
+    const uniqueStates = [...new Set(states)];
     this.workers.clear();
-    this.workerPromises.clear();
+    const pendingSpawns = [...this.workerSpawns.values()];
+    this.workerSpawns.clear();
 
-    for (const state of states) {
+    for (const spawn of pendingSpawns) {
+      spawn.state.disconnected = true;
+      spawn.abort(new Error(`Repo worker for ${spawn.state.repo.name} disconnected`));
+    }
+
+    for (const state of uniqueStates) {
       this.rejectPending(state, new Error(`Repo worker for ${state.repo.name} disconnected`));
       try {
         state.child.kill('SIGTERM');
@@ -120,7 +146,7 @@ export class RepoWorkerManager {
     return this.workers.get(repoId)?.child.pid ?? null;
   }
 
-  private spawnWorker(repo: RepoHandle): Promise<WorkerState> {
+  private spawnWorker(repo: RepoHandle): PendingWorkerSpawn {
     const child = this.forkWorker(this.cliEntry, ['mcp', '--repo-worker'], {
       execArgv: [],
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -128,11 +154,14 @@ export class RepoWorkerManager {
 
     const state: WorkerState = {
       child,
+      disconnected: false,
+      exited: false,
       pending: new Map(),
       repo,
     };
 
-    return new Promise((resolve, reject) => {
+    let abort = (_error: Error) => {};
+    const promise = new Promise<WorkerState>((resolve, reject) => {
       let ready = false;
       let settled = false;
 
@@ -142,6 +171,11 @@ export class RepoWorkerManager {
         }
         settled = true;
         fn();
+      };
+
+      abort = (error: Error) => {
+        state.disconnected = true;
+        settle(() => reject(error));
       };
 
       child.on('message', (message) => {
@@ -161,7 +195,8 @@ export class RepoWorkerManager {
 
       child.on('exit', (code, signal) => {
         this.workers.delete(repo.id);
-        this.workerPromises.delete(repo.id);
+        this.workerSpawns.delete(repo.id);
+        state.exited = true;
         const error = new Error(`Repo worker for ${repo.name} exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
         if (!ready) {
           settle(() => reject(error));
@@ -172,7 +207,8 @@ export class RepoWorkerManager {
 
       child.on('error', (error) => {
         this.workers.delete(repo.id);
-        this.workerPromises.delete(repo.id);
+        this.workerSpawns.delete(repo.id);
+        state.exited = true;
         const normalizedError = error instanceof Error ? error : new Error(String(error));
         if (!ready) {
           settle(() => reject(normalizedError));
@@ -194,6 +230,12 @@ export class RepoWorkerManager {
         settle(() => reject(error instanceof Error ? error : new Error(String(error))));
       }
     });
+
+    return {
+      abort,
+      promise,
+      state,
+    };
   }
 
   private handleMessage(state: WorkerState, message: unknown): void {
