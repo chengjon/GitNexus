@@ -185,4 +185,50 @@ describe('RepoWorkerManager', () => {
     expect(error.message).toContain('repo-a');
     expect(error.message).toContain('exited');
   });
+
+  it('retries startup when a worker exits right after ready', async () => {
+    const firstChild = createFakeChild();
+    const secondChild = createFakeChild();
+    secondChild.pid = 5252;
+    const forkWorker = vi.fn()
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(secondChild);
+    const manager = new RepoWorkerManager({
+      cliEntry: '/tmp/fake-cli.js',
+      forkWorker,
+      requestTimeoutMs: 1000,
+    });
+
+    const workerPromise = manager.ensureWorker(REPO);
+    firstChild.emit('message', { kind: 'ready' });
+    firstChild.emit('exit', 1, null);
+
+    await vi.waitFor(() => {
+      expect(forkWorker).toHaveBeenCalledTimes(2);
+    });
+    expect(forkWorker).toHaveBeenCalledTimes(2);
+
+    secondChild.emit('message', { kind: 'ready' });
+    const secondState = await workerPromise;
+    expect(secondState.child.pid).toBe(5252);
+    expect(manager.__testOnlyGetWorkerPid('repo-a')).toBe(5252);
+  });
+
+  it('disconnects workers that are still spawning and rejects their startup promises', async () => {
+    const child = createFakeChild();
+    const manager = new RepoWorkerManager({
+      cliEntry: '/tmp/fake-cli.js',
+      forkWorker: vi.fn().mockReturnValue(child),
+      requestTimeoutMs: 1000,
+    });
+
+    const workerPromise = manager.ensureWorker(REPO);
+    await manager.disconnect();
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    child.emit('message', { kind: 'ready' });
+    await expect(workerPromise).rejects.toThrow('disconnected');
+    expect(manager.__testOnlyGetWorkerPid('repo-a')).toBeNull();
+  });
 });
