@@ -25,6 +25,24 @@ const requireOptional = createRequire(import.meta.url);
 
 const defaultOptionalLanguageLoader: OptionalLanguageLoader = (moduleName) => requireOptional(moduleName);
 
+const BUILTIN_LANGUAGE_SUPPORT = [
+  { language: SupportedLanguages.JavaScript, source: 'bundled' },
+  { language: SupportedLanguages.TypeScript, source: 'bundled' },
+  { language: SupportedLanguages.Python, source: 'bundled' },
+  { language: SupportedLanguages.Java, source: 'bundled' },
+  { language: SupportedLanguages.C, source: 'bundled' },
+  { language: SupportedLanguages.CPlusPlus, source: 'bundled' },
+  { language: SupportedLanguages.CSharp, source: 'bundled' },
+  { language: SupportedLanguages.Go, source: 'bundled' },
+  { language: SupportedLanguages.Rust, source: 'bundled' },
+  { language: SupportedLanguages.PHP, source: 'bundled' },
+] as const;
+
+const OPTIONAL_LANGUAGE_SUPPORT = [
+  { language: SupportedLanguages.Kotlin, moduleName: 'tree-sitter-kotlin' },
+  { language: SupportedLanguages.Swift, moduleName: 'tree-sitter-swift' },
+] as const;
+
 const unwrapLanguageModule = (moduleValue: unknown): unknown => {
   if (moduleValue && typeof moduleValue === 'object' && 'default' in moduleValue) {
     return (moduleValue as { default: unknown }).default;
@@ -66,32 +84,15 @@ const loadOptionalLanguage = (
 export const getOptionalLanguageSupportSummary = (
   loadOptionalLanguageModule: OptionalLanguageLoader = defaultOptionalLanguageLoader,
 ): LanguageSupportSummaryEntry[] => {
-  const builtInLanguages: Array<{ language: SupportedLanguages; source: string }> = [
-    { language: SupportedLanguages.JavaScript, source: 'bundled' },
-    { language: SupportedLanguages.TypeScript, source: 'bundled' },
-    { language: SupportedLanguages.Python, source: 'bundled' },
-    { language: SupportedLanguages.Java, source: 'bundled' },
-    { language: SupportedLanguages.C, source: 'bundled' },
-    { language: SupportedLanguages.CPlusPlus, source: 'bundled' },
-    { language: SupportedLanguages.CSharp, source: 'bundled' },
-    { language: SupportedLanguages.Go, source: 'bundled' },
-    { language: SupportedLanguages.Rust, source: 'bundled' },
-    { language: SupportedLanguages.PHP, source: 'bundled' },
-  ];
-  const optionalLanguages: Array<{ language: SupportedLanguages; moduleName: string }> = [
-    { language: SupportedLanguages.Kotlin, moduleName: 'tree-sitter-kotlin' },
-    { language: SupportedLanguages.Swift, moduleName: 'tree-sitter-swift' },
-  ];
-
   return [
-    ...builtInLanguages.map(({ language, source }) => ({
+    ...BUILTIN_LANGUAGE_SUPPORT.map(({ language, source }) => ({
       language,
       tier: 'builtin' as const,
       status: 'available' as const,
       source,
       detail: 'bundled',
     })),
-    ...optionalLanguages.map(({ language, moduleName }) => {
+    ...OPTIONAL_LANGUAGE_SUPPORT.map(({ language, moduleName }) => {
       try {
         const loaded = unwrapLanguageModule(loadOptionalLanguageModule(moduleName));
         return {
@@ -117,6 +118,14 @@ export const getOptionalLanguageSupportSummary = (
     }),
   ];
 };
+
+export const getLanguageSupportPolicy = (): {
+  builtin: SupportedLanguages[];
+  optional: SupportedLanguages[];
+} => ({
+  builtin: BUILTIN_LANGUAGE_SUPPORT.map(({ language }) => language),
+  optional: OPTIONAL_LANGUAGE_SUPPORT.map(({ language }) => language),
+});
 
 export const createLanguageMap = (
   loadOptionalLanguageModule: OptionalLanguageLoader = defaultOptionalLanguageLoader,

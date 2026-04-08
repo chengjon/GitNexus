@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
-import { createLanguageMap, getOptionalLanguageSupportSummary } from '../../src/core/tree-sitter/language-registry.js';
+import * as languageRegistry from '../../src/core/tree-sitter/language-registry.js';
 
 describe('language-registry', () => {
   it('omits optional languages when their native bindings are unavailable', () => {
-    const map = createLanguageMap((moduleName) => {
+    const map = languageRegistry.createLanguageMap((moduleName) => {
       if (moduleName === 'tree-sitter-kotlin' || moduleName === 'tree-sitter-swift') {
         throw new Error(`No native build was found for ${moduleName}`);
       }
@@ -20,7 +20,7 @@ describe('language-registry', () => {
     const fakeKotlin = { grammar: 'kotlin' };
     const fakeSwift = { grammar: 'swift' };
 
-    const map = createLanguageMap((moduleName) => {
+    const map = languageRegistry.createLanguageMap((moduleName) => {
       if (moduleName === 'tree-sitter-kotlin') return fakeKotlin;
       if (moduleName === 'tree-sitter-swift') return fakeSwift;
 
@@ -32,7 +32,7 @@ describe('language-registry', () => {
   });
 
   it('rethrows unexpected loader failures', () => {
-    expect(() => createLanguageMap((moduleName) => {
+    expect(() => languageRegistry.createLanguageMap((moduleName) => {
       if (moduleName === 'tree-sitter-kotlin') {
         throw new Error('Unexpected parse error inside optional loader');
       }
@@ -46,7 +46,7 @@ describe('language-registry', () => {
   });
 
   it('reports optional language availability and unavailability with details', () => {
-    const support = getOptionalLanguageSupportSummary((moduleName) => {
+    const support = languageRegistry.getOptionalLanguageSupportSummary((moduleName) => {
       if (moduleName === 'tree-sitter-kotlin') {
         throw new Error('No native build was found for tree-sitter-kotlin');
       }
@@ -77,7 +77,7 @@ describe('language-registry', () => {
   });
 
   it('reports built-in language support as always available', () => {
-    const support = getOptionalLanguageSupportSummary();
+    const support = languageRegistry.getOptionalLanguageSupportSummary();
     const builtIn = support.find((entry) => entry.language === SupportedLanguages.TypeScript);
 
     expect(builtIn).toEqual({
@@ -86,6 +86,27 @@ describe('language-registry', () => {
       status: 'available',
       source: 'bundled',
       detail: 'bundled',
+    });
+  });
+
+  it('exposes a stable language-support policy for downstream tooling', () => {
+    expect(languageRegistry.getLanguageSupportPolicy()).toEqual({
+      builtin: [
+        SupportedLanguages.JavaScript,
+        SupportedLanguages.TypeScript,
+        SupportedLanguages.Python,
+        SupportedLanguages.Java,
+        SupportedLanguages.C,
+        SupportedLanguages.CPlusPlus,
+        SupportedLanguages.CSharp,
+        SupportedLanguages.Go,
+        SupportedLanguages.Rust,
+        SupportedLanguages.PHP,
+      ],
+      optional: [
+        SupportedLanguages.Kotlin,
+        SupportedLanguages.Swift,
+      ],
     });
   });
 });

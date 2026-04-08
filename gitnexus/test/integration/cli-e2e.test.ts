@@ -278,6 +278,15 @@ describe('CLI end-to-end', () => {
       expect(result.stdout).toMatch(/analyze|status|serve/i);
     });
 
+    it('shows Codex in setup help because setup supports the dual CLI workflow', () => {
+      const result = runCliRaw(['setup', '--help'], MINI_REPO);
+
+      if (result.status === null) return;
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('One-time setup: configure MCP for Cursor, Claude Code, Codex, OpenCode');
+    });
+
     it('fails with unknown command', () => {
       const result = runCliRaw(['nonexistent'], MINI_REPO);
 

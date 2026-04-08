@@ -1,10 +1,11 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { runDoctor } from '../../src/cli/doctor.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as doctorModule from '../../src/cli/doctor.js';
 import { getHostPlans } from '../../src/cli/setup.js';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
+import { nativeRuntimeManager } from '../../src/runtime/native-runtime-manager.js';
 
 const tempDirs: string[] = [];
 
@@ -22,7 +23,7 @@ afterEach(async () => {
 
 describe('runDoctor', () => {
   it('returns codex host checks as structured output', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { host: 'codex', repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -60,15 +61,57 @@ describe('runDoctor', () => {
     expect(result.overall).toBe('warn');
     expect(result.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'repo-indexed', status: 'pass' }),
-        expect.objectContaining({ name: 'registry-entry', status: 'pass' }),
-        expect.objectContaining({ name: 'host-config', status: 'warn' }),
+        expect.objectContaining({
+          name: 'git-repo',
+          status: 'pass',
+          data: {
+            requestedPath: '/repo',
+            repoPath: '/repo',
+            isGitRepo: true,
+          },
+        }),
+        expect.objectContaining({
+          name: 'repo-indexed',
+          status: 'pass',
+          data: {
+            repoPath: '/repo',
+            indexed: true,
+            indexPath: '/repo/.gitnexus',
+          },
+        }),
+        expect.objectContaining({
+          name: 'registry-entry',
+          status: 'pass',
+          data: {
+            repoPath: '/repo',
+            matched: true,
+            entry: {
+              name: 'repo',
+              path: '/repo',
+              storagePath: '/repo/.gitnexus',
+              indexedAt: expect.any(String),
+              lastCommit: 'abc123',
+            },
+          },
+        }),
+        expect.objectContaining({
+          name: 'host-config',
+          status: 'warn',
+          data: {
+            hostId: 'codex',
+            displayName: 'Codex',
+            detected: true,
+            configured: false,
+            needsManualConfig: true,
+            detectionReason: null,
+          },
+        }),
       ]),
     );
   });
 
   it('prompts to run analyze when repo is not indexed', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: false },
       {
         isGitRepo: () => true,
@@ -86,16 +129,104 @@ describe('runDoctor', () => {
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          name: 'git-repo',
+          status: 'pass',
+          data: {
+            requestedPath: '/repo',
+            repoPath: '/repo',
+            isGitRepo: true,
+          },
+        }),
+        expect.objectContaining({
           name: 'repo-indexed',
           status: 'fail',
           detail: expect.stringContaining('Run: gitnexus analyze'),
+          data: {
+            repoPath: '/repo',
+            indexed: false,
+            indexPath: '/repo/.gitnexus',
+          },
+        }),
+        expect.objectContaining({
+          name: 'registry-entry',
+          status: 'warn',
+          data: {
+            repoPath: '/repo',
+            matched: false,
+            entry: null,
+          },
+        }),
+        expect.objectContaining({
+          name: 'host-config',
+          status: 'pass',
+          data: {
+            requestedHost: null,
+            matchedHosts: [],
+            skipped: true,
+            reasonCode: 'no-host-requested',
+          },
         }),
       ]),
     );
   });
 
+  it('returns structured host-config failure when the requested host is unknown', async () => {
+    const result = await doctorModule.runDoctor(
+      { host: 'mystery-host', repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'host-config',
+          status: 'fail',
+          detail: 'Unknown host: mystery-host',
+          data: {
+            requestedHost: 'mystery-host',
+            matchedHosts: [],
+            skipped: true,
+            reasonCode: 'unknown-host',
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('returns structured git-repo failure when the path is not a git repository', async () => {
+    const result = await doctorModule.runDoctor(
+      { repo: '/not-a-repo', json: true },
+      {
+        isGitRepo: () => false,
+      } as any,
+    );
+
+    expect(result.overall).toBe('fail');
+    expect(result.checks).toEqual([
+      {
+        name: 'git-repo',
+        status: 'fail',
+        detail: 'Not a git repository.',
+        data: {
+          requestedPath: '/not-a-repo',
+          repoPath: null,
+          isGitRepo: false,
+        },
+      },
+    ]);
+  });
+
   it('returns structured checks instead of plain text logs', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -135,7 +266,7 @@ describe('runDoctor', () => {
       'utf-8',
     );
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { host: 'codex', repo: repoDir, json: true },
       {
         isGitRepo: () => true,
@@ -159,7 +290,18 @@ describe('runDoctor', () => {
 
     expect(result.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'host-config', status: 'pass' }),
+        expect.objectContaining({
+          name: 'host-config',
+          status: 'pass',
+          data: {
+            hostId: 'codex',
+            displayName: 'Codex',
+            detected: true,
+            configured: true,
+            needsManualConfig: true,
+            detectionReason: null,
+          },
+        }),
       ]),
     );
   });
@@ -181,7 +323,7 @@ describe('runDoctor', () => {
       'utf-8',
     );
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { host: 'claude-code', repo: repoDir, json: true },
       {
         isGitRepo: () => true,
@@ -205,7 +347,18 @@ describe('runDoctor', () => {
 
     expect(result.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'host-config', status: 'pass' }),
+        expect.objectContaining({
+          name: 'host-config',
+          status: 'pass',
+          data: {
+            hostId: 'claude-code',
+            displayName: 'Claude Code',
+            detected: true,
+            configured: true,
+            needsManualConfig: true,
+            detectionReason: null,
+          },
+        }),
       ]),
     );
   });
@@ -227,7 +380,7 @@ describe('runDoctor', () => {
       'utf-8',
     );
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { host: 'claude-code', repo: repoDir, json: true },
       {
         isGitRepo: () => true,
@@ -256,8 +409,178 @@ describe('runDoctor', () => {
     );
   });
 
+  it('adds Codex worktree guidance when a Codex host check is requested', async () => {
+    const result = await doctorModule.runDoctor(
+      { host: 'codex', repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [
+          {
+            name: 'repo',
+            path: '/repo',
+            storagePath: '/repo/.gitnexus',
+            indexedAt: new Date().toISOString(),
+            lastCommit: 'abc123',
+          },
+        ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [
+          {
+            adapter: {
+              id: 'codex',
+              displayName: 'Codex',
+              detect: async () => ({ detected: true }),
+              getMcpEntry: () => ({ command: 'npx', args: ['-y', 'gitnexus@latest', 'mcp'] }),
+              configure: async () => ({ status: 'manual' }),
+              manualInstructions: () => ['codex mcp add gitnexus -- npx -y gitnexus@latest mcp'],
+            },
+            checkConfigured: async () => true,
+            needsManualConfig: true,
+          },
+        ],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'host-detect-changes-guidance',
+          status: 'pass',
+          detail: expect.stringContaining('pass `cwd` explicitly'),
+          data: {
+            hostId: 'codex',
+            command: 'gitnexus_detect_changes',
+            repoArg: { recommended: true, when: ['multi_repo'] },
+            cwdArg: { recommended: true, when: ['worktree', 'server_runs_elsewhere'] },
+            reasonCode: 'host-session-context-may-drift',
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('adds Claude Code worktree guidance when a Claude Code host check is requested', async () => {
+    const result = await doctorModule.runDoctor(
+      { host: 'claude-code', repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [
+          {
+            name: 'repo',
+            path: '/repo',
+            storagePath: '/repo/.gitnexus',
+            indexedAt: new Date().toISOString(),
+            lastCommit: 'abc123',
+          },
+        ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [
+          {
+            adapter: {
+              id: 'claude-code',
+              displayName: 'Claude Code',
+              detect: async () => ({ detected: true }),
+              getMcpEntry: () => ({ command: 'npx', args: ['-y', 'gitnexus@latest', 'mcp'] }),
+              configure: async () => ({ status: 'manual' }),
+              manualInstructions: () => ['claude mcp add gitnexus -- npx -y gitnexus@latest mcp'],
+            },
+            checkConfigured: async () => true,
+            needsManualConfig: true,
+          },
+        ],
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'host-detect-changes-guidance',
+          status: 'pass',
+          detail: expect.stringContaining('active worktree'),
+          data: {
+            hostId: 'claude-code',
+            command: 'gitnexus_detect_changes',
+            repoArg: { recommended: true, when: ['multi_repo'] },
+            cwdArg: { recommended: true, when: ['server_cwd_mismatch'] },
+            reasonCode: 'server-cwd-mismatch',
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('does not add host worktree guidance when no specific host is requested', async () => {
+    const result = await doctorModule.runDoctor(
+      { repo: '/repo', json: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [
+          {
+            name: 'repo',
+            path: '/repo',
+            storagePath: '/repo/.gitnexus',
+            indexedAt: new Date().toISOString(),
+            lastCommit: 'abc123',
+          },
+        ],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [
+          {
+            adapter: {
+              id: 'codex',
+              displayName: 'Codex',
+              detect: async () => ({ detected: true }),
+              getMcpEntry: () => ({ command: 'npx', args: ['-y', 'gitnexus@latest', 'mcp'] }),
+              configure: async () => ({ status: 'manual' }),
+              manualInstructions: () => ['codex mcp add gitnexus -- npx -y gitnexus@latest mcp'],
+            },
+            checkConfigured: async () => true,
+            needsManualConfig: true,
+          },
+        ],
+      },
+    );
+
+    expect(result.checks).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'host-detect-changes-guidance' }),
+      ]),
+    );
+  });
+
+  it('doctorCommand honors Commander option-only invocation shape', async () => {
+    const repoDir = path.resolve(import.meta.dirname, '..', '..', '..');
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.join(' '));
+    });
+
+    await doctorModule.doctorCommand(undefined as any, {
+      host: 'codex',
+      repo: repoDir,
+      json: true,
+    });
+
+    const output = logs.join('\n');
+    expect(output.trim().startsWith('{')).toBe(true);
+    expect(output).toContain('"overall"');
+    expect(output).toContain('"host-detect-changes-guidance"');
+  });
+
   it('reports ollama embeddings config when embed probe succeeds', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -285,13 +608,33 @@ describe('runDoctor', () => {
           name: 'embeddings-config',
           status: 'pass',
           detail: expect.stringContaining('provider=ollama (config)'),
+          data: expect.objectContaining({
+            effective: expect.objectContaining({
+              provider: 'ollama',
+              ollamaBaseUrl: 'http://localhost:11434',
+              ollamaModel: 'qwen3-embedding:0.6b',
+              nodeLimit: 90000,
+              batchSize: 8,
+            }),
+            sources: expect.objectContaining({
+              provider: 'config',
+              ollamaBaseUrl: 'config',
+              ollamaModel: 'config',
+              nodeLimit: 'config',
+              batchSize: 'config',
+            }),
+            probe: {
+              status: 'pass',
+              detail: 'source=ollama, embedProbe=http://localhost:11434/api/embed',
+            },
+          }),
         }),
       ]),
     );
   });
 
   it('warns when ollama embed probe returns an invalid payload', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -317,13 +660,23 @@ describe('runDoctor', () => {
           name: 'embeddings-config',
           status: 'warn',
           detail: expect.stringContaining('embedding payload was invalid'),
+          data: expect.objectContaining({
+            effective: expect.objectContaining({
+              provider: 'ollama',
+              ollamaBaseUrl: 'http://localhost:11434',
+            }),
+            probe: {
+              status: 'warn',
+              detail: 'Ollama responded but embedding payload was invalid',
+            },
+          }),
         }),
       ]),
     );
   });
 
   it('includes connection details when ollama is unreachable', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -352,13 +705,23 @@ describe('runDoctor', () => {
           name: 'embeddings-config',
           status: 'warn',
           detail: expect.stringContaining('http://127.0.0.1:11434'),
+          data: expect.objectContaining({
+            effective: expect.objectContaining({
+              provider: 'ollama',
+              ollamaBaseUrl: 'http://127.0.0.1:11434',
+            }),
+            probe: expect.objectContaining({
+              status: 'warn',
+              detail: expect.stringContaining('ECONNREFUSED'),
+            }),
+          }),
         }),
       ]),
     );
   });
 
   it('warns when optional language grammars are unavailable', async () => {
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true },
       {
         isGitRepo: () => true,
@@ -401,41 +764,62 @@ describe('runDoctor', () => {
           name: 'language-support',
           status: 'warn',
           detail: expect.stringContaining('kotlin:optional=unavailable'),
+          data: expect.arrayContaining([
+            expect.objectContaining({
+              language: SupportedLanguages.Kotlin,
+              tier: 'optional',
+              status: 'unavailable',
+            }),
+            expect.objectContaining({
+              language: SupportedLanguages.TypeScript,
+              tier: 'builtin',
+              status: 'available',
+            }),
+          ]),
         }),
       ]),
     );
   });
 
   it('includes native runtime snapshot details', async () => {
-    const result = await runDoctor(
-      { repo: '/repo', json: true },
-      {
-        isGitRepo: () => true,
-        getGitRoot: () => '/repo',
-        hasIndex: async () => true,
-        readRegistry: async () => [],
-        loadCLIConfig: async () => ({}),
-        fetchJson: async () => ({ embeddings: [] }),
-        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
-        getHostPlans: () => [],
-        getLanguageSupportSummary: () => [],
-        getNativeRuntimeCheck: () => ({
-          name: 'native-runtime',
-          status: 'pass',
-          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
-        }),
-      },
-    );
+    nativeRuntimeManager.markKuzuRepoActive('repo-a');
+    nativeRuntimeManager.markEmbedderActive('core');
 
-    expect(result.checks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'native-runtime',
-          status: 'pass',
-          detail: expect.stringContaining('coreEmbedderActive=false'),
-        }),
-      ]),
-    );
+    try {
+      const result = await doctorModule.runDoctor(
+        { repo: '/repo', json: true },
+        {
+          isGitRepo: () => true,
+          getGitRoot: () => '/repo',
+          hasIndex: async () => true,
+          readRegistry: async () => [],
+          loadCLIConfig: async () => ({}),
+          fetchJson: async () => ({ embeddings: [] }),
+          probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+          getHostPlans: () => [],
+          getLanguageSupportSummary: () => [],
+        },
+      );
+
+      expect(result.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'native-runtime',
+            status: 'warn',
+            detail: expect.stringContaining('coreEmbedderActive=true'),
+            data: {
+              activeKuzuRepos: 1,
+              activeRepoIds: ['repo-a'],
+              coreEmbedderActive: true,
+              mcpEmbedderActive: false,
+            },
+          }),
+        ]),
+      );
+    } finally {
+      nativeRuntimeManager.markKuzuRepoInactive('repo-a');
+      nativeRuntimeManager.markEmbedderInactive('core');
+    }
   });
 
   it('reports healthy GPU checks when host, container, and Ollama offload are working', async () => {
@@ -459,7 +843,7 @@ describe('runDoctor', () => {
       },
     ]);
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true, gpu: true },
       {
         isGitRepo: () => true,
@@ -514,11 +898,156 @@ describe('runDoctor', () => {
 
     expect(result.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'gpu-device-node', status: 'pass' }),
-        expect.objectContaining({ name: 'gpu-host-runtime', status: 'pass' }),
-        expect.objectContaining({ name: 'gpu-docker-config', status: 'pass' }),
-        expect.objectContaining({ name: 'gpu-container-runtime', status: 'pass' }),
-        expect.objectContaining({ name: 'gpu-ollama-runtime', status: 'pass' }),
+        expect.objectContaining({
+          name: 'gpu-device-node',
+          status: 'pass',
+          data: {
+            platform: process.platform,
+            checkedPaths: ['/dev/dxg', '/dev/nvidia0'],
+            visibleNodes: ['/dev/dxg'],
+            skipped: false,
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-host-runtime',
+          status: 'pass',
+          data: {
+            command: 'nvidia-smi',
+            ok: true,
+            exitCode: 0,
+            errorCode: null,
+            summary: 'NVIDIA-SMI 595.79 Driver Version: 595.79 CUDA Version: 13.2',
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-docker-config',
+          status: 'pass',
+          data: {
+            dockerPresent: true,
+            inspectOk: true,
+            running: true,
+            hasGpuDeviceRequest: true,
+            llmLibrary: 'cuda_v12',
+            visibleDevices: 'all',
+            driverCapabilities: 'compute,utility',
+            missingConfig: [],
+            skipped: false,
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-container-runtime',
+          status: 'pass',
+          data: {
+            command: 'docker exec ollama sh -lc nvidia-smi',
+            attempted: true,
+            ok: true,
+            exitCode: 0,
+            errorCode: null,
+            summary: 'NVIDIA-SMI 595.54 Driver Version: 595.79 CUDA Version: 13.2',
+            skipped: false,
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-ollama-runtime',
+          status: 'pass',
+          data: {
+            provider: 'ollama',
+            probeStatus: 'pass',
+            queryAttempted: true,
+            queryOk: true,
+            model: 'qwen3-embedding:0.6b',
+            sizeVram: 1496576832,
+            skipped: false,
+            reason: null,
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('warns with structured gpu-device-node data when no Linux GPU nodes are visible', async () => {
+    const result = await doctorModule.runDoctor(
+      { repo: '/repo', json: true, gpu: true },
+      {
+        isGitRepo: () => true,
+        getGitRoot: () => '/repo',
+        hasIndex: async () => true,
+        readRegistry: async () => [],
+        loadCLIConfig: async () => ({}),
+        fetchJson: async () => ({ embeddings: [] }),
+        probeOllama: async () => ({ status: 'warn', detail: 'no ollama probe requested' }),
+        getHostPlans: () => [],
+        getLanguageSupportSummary: () => [],
+        getNativeRuntimeCheck: () => ({
+          name: 'native-runtime',
+          status: 'pass',
+          detail: 'kuzuActiveRepos=0, coreEmbedderActive=false, mcpEmbedderActive=false',
+        }),
+        pathExists: async () => false,
+        runCommand: async (command: string, args: string[]) => {
+          const key = [command, ...args].join(' ');
+          if (key === 'nvidia-smi') {
+            return { ok: false, stdout: '', stderr: 'nvidia-smi: command not found', exitCode: null, errorCode: 'ENOENT' };
+          }
+          if (key === 'docker inspect ollama') {
+            return { ok: false, stdout: '', stderr: 'Error: No such object: ollama', exitCode: 1, errorCode: 'ENOENT' };
+          }
+          throw new Error(`Unexpected command: ${key}`);
+        },
+      },
+    );
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'gpu-device-node',
+          status: 'warn',
+          data: {
+            platform: process.platform,
+            checkedPaths: ['/dev/dxg', '/dev/nvidia0'],
+            visibleNodes: [],
+            skipped: false,
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-host-runtime',
+          status: 'warn',
+          data: {
+            command: 'nvidia-smi',
+            ok: false,
+            exitCode: null,
+            errorCode: 'ENOENT',
+            summary: 'nvidia-smi: command not found',
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-docker-config',
+          status: 'pass',
+          data: {
+            dockerPresent: false,
+            inspectOk: false,
+            running: null,
+            hasGpuDeviceRequest: null,
+            llmLibrary: null,
+            visibleDevices: null,
+            driverCapabilities: null,
+            missingConfig: [],
+            skipped: true,
+          },
+        }),
+        expect.objectContaining({
+          name: 'gpu-container-runtime',
+          status: 'pass',
+          data: {
+            command: 'docker exec ollama sh -lc nvidia-smi',
+            attempted: false,
+            ok: false,
+            exitCode: null,
+            errorCode: null,
+            summary: 'No Docker container named "ollama" detected; skipping container runtime probe.',
+            skipped: true,
+          },
+        }),
       ]),
     );
   });
@@ -566,7 +1095,7 @@ describe('runDoctor', () => {
 
     let inspectCount = 0;
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true, gpu: true, fix: true },
       {
         isGitRepo: () => true,
@@ -635,6 +1164,10 @@ describe('runDoctor', () => {
           name: 'gpu-fix',
           status: 'pass',
           detail: expect.stringContaining('started Docker container "ollama"'),
+          data: {
+            appliedFixes: ['started Docker container "ollama"'],
+            manualFollowUps: [],
+          },
         }),
       ]),
     );
@@ -661,7 +1194,7 @@ describe('runDoctor', () => {
       },
     ]);
 
-    const result = await runDoctor(
+    const result = await doctorModule.runDoctor(
       { repo: '/repo', json: true, gpu: true },
       {
         isGitRepo: () => true,
@@ -720,6 +1253,16 @@ describe('runDoctor', () => {
           name: 'gpu-ollama-runtime',
           status: 'fail',
           detail: expect.stringContaining('size_vram=0'),
+          data: {
+            provider: 'ollama',
+            probeStatus: 'pass',
+            queryAttempted: true,
+            queryOk: true,
+            model: 'qwen3-embedding:0.6b',
+            sizeVram: 0,
+            skipped: false,
+            reason: null,
+          },
         }),
       ]),
     );

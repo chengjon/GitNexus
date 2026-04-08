@@ -233,6 +233,8 @@ gitnexus config embeddings clear
 \`\`\`
 
 > Claude Code users: A PostToolUse hook handles this automatically after \`git commit\` and \`git merge\`.
+>
+> Codex users: no equivalent automatic hook is installed today; rerun \`gitnexus analyze\` manually after \`git commit\` and \`git merge\` when you need a fresh index.
 
 ## CLI
 

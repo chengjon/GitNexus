@@ -16,7 +16,7 @@ program
 
 program
   .command('setup')
-  .description('One-time setup: configure MCP for Cursor, Claude Code, OpenCode')
+  .description('One-time setup: configure MCP for Cursor, Claude Code, Codex, OpenCode')
   .action(createLazyAction(() => import('./setup.js'), 'setupCommand'));
 
 program

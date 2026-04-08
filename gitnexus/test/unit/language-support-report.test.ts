@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { SupportedLanguages } from '../../src/config/supported-languages.js';
+import { getLanguageSupportPolicy } from '../../src/core/tree-sitter/language-registry.js';
 
 import {
   formatLanguageSupportSummary,
   extractLanguageSupportCheck,
   validateLanguageSupportPolicy,
-} from '../../scripts/ci/language-support-report.mjs';
+} from '../../src/ci/language-support-report.js';
 
 describe('language support CI report', () => {
   it('extracts the language-support check from doctor JSON', () => {
@@ -16,6 +18,11 @@ describe('language support CI report', () => {
           name: 'language-support',
           status: 'warn',
           detail: 'typescript:builtin=available (bundled), kotlin:optional=unavailable (missing native build), swift:optional=available (loaded)',
+          data: [
+            { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
+            { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+            { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+          ],
         },
       ],
     };
@@ -24,7 +31,29 @@ describe('language support CI report', () => {
       name: 'language-support',
       status: 'warn',
       detail: 'typescript:builtin=available (bundled), kotlin:optional=unavailable (missing native build), swift:optional=available (loaded)',
+      data: [
+        { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
+        { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+        { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+      ],
     });
+  });
+
+  it('formats a GitHub summary from structured language-support data when available', () => {
+    const summary = formatLanguageSupportSummary({
+      name: 'language-support',
+      status: 'warn',
+      detail: 'legacy fallback detail',
+      data: [
+        { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
+        { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+        { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+      ],
+    });
+
+    expect(summary).toContain('- builtin: `typescript` = `available`');
+    expect(summary).toContain('- optional: `kotlin` = `unavailable`');
+    expect(summary).toContain('- optional: `swift` = `available`');
   });
 
   it('formats a GitHub summary with builtin and optional language groups', () => {
@@ -127,5 +156,26 @@ describe('language support CI report', () => {
         'kotlin:optional=available (loaded)',
       ].join(', '),
     })).toThrow('optional language declaration missing: swift');
+  });
+
+  it('uses the runtime language-support policy as the CI validation source of truth', () => {
+    expect(getLanguageSupportPolicy()).toEqual({
+      builtin: [
+        SupportedLanguages.JavaScript,
+        SupportedLanguages.TypeScript,
+        SupportedLanguages.Python,
+        SupportedLanguages.Java,
+        SupportedLanguages.C,
+        SupportedLanguages.CPlusPlus,
+        SupportedLanguages.CSharp,
+        SupportedLanguages.Go,
+        SupportedLanguages.Rust,
+        SupportedLanguages.PHP,
+      ],
+      optional: [
+        SupportedLanguages.Kotlin,
+        SupportedLanguages.Swift,
+      ],
+    });
   });
 });

@@ -96,6 +96,17 @@ describe('generateAIContextFiles', () => {
     expect(content).toContain('language-support');
   });
 
+  it('documents post-mutation index freshness guidance for both Claude Code and Codex', async () => {
+    const stats = { nodes: 50, edges: 100, processes: 5 };
+    await generateAIContextFiles(tmpDir, storagePath, 'TestProject', stats);
+
+    const claudeMdPath = path.join(tmpDir, 'CLAUDE.md');
+    const content = await fs.readFile(claudeMdPath, 'utf-8');
+
+    expect(content).toContain('Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.');
+    expect(content).toContain('Codex users: no equivalent automatic hook is installed today; rerun `gitnexus analyze` manually after `git commit` and `git merge` when you need a fresh index.');
+  });
+
   it('installs skills files', async () => {
     const stats = { nodes: 10 };
     const result = await generateAIContextFiles(tmpDir, storagePath, 'TestProject', stats);
@@ -139,5 +150,24 @@ describe('generateAIContextFiles', () => {
     );
     const refactoringSkillContent = await fs.readFile(refactoringSkillPath, 'utf-8');
     expect(refactoringSkillContent).toContain('If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`');
+  });
+
+  it('keeps mini-repo fixture docs aligned with current detect_changes and freshness guidance', async () => {
+    const fixturePaths = [
+      path.join(process.cwd(), 'test', 'fixtures', 'mini-repo', 'AGENTS.md'),
+      path.join(process.cwd(), 'test', 'fixtures', 'mini-repo', 'CLAUDE.md'),
+    ];
+
+    for (const fixturePath of fixturePaths) {
+      const content = await fs.readFile(fixturePath, 'utf-8');
+      expect(content).toContain('This project is indexed by GitNexus.');
+      expect(content).not.toContain('35 symbols, 70 relationships, 4 execution flows');
+      expect(content).toContain('If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`');
+      expect(content).toContain('gitnexus_detect_changes({scope: "compare", base_ref: "main", repo: "mini-repo"})');
+      expect(content).toContain('gitnexus_detect_changes({scope: "all", repo: "mini-repo"})');
+      expect(content).toContain('gitnexus_detect_changes({scope: "staged", repo: "mini-repo"})');
+      expect(content).toContain('`gitnexus_detect_changes()` confirms changes match expected scope, with `repo: "mini-repo"` whenever multiple repos are indexed');
+      expect(content).toContain('Codex users: no equivalent automatic hook is installed today; rerun `gitnexus analyze` manually after `git commit` and `git merge` when you need a fresh index.');
+    }
   });
 });

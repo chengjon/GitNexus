@@ -20,6 +20,7 @@ export interface DoctorCheck {
   name: string;
   status: 'pass' | 'warn' | 'fail';
   detail: string;
+  data?: unknown;
 }
 
 export interface DoctorResult {
@@ -173,6 +174,7 @@ const DEFAULT_DEPS: DoctorDeps = {
         `coreEmbedderActive=${snapshot.coreEmbedderActive}`,
         `mcpEmbedderActive=${snapshot.mcpEmbedderActive}`,
       ].join(', '),
+      data: snapshot,
     };
   },
   pathExists: defaultPathExists,
@@ -195,6 +197,258 @@ function samePath(a: string, b: string): boolean {
 
 function formatCheck(check: DoctorCheck): string {
   return `${check.name}: ${check.status} - ${check.detail}`;
+}
+
+function buildHostDetectChangesGuidanceData(hostId: 'codex' | 'claude-code'): {
+  hostId: 'codex' | 'claude-code';
+  command: 'gitnexus_detect_changes';
+  repoArg: { recommended: true; when: ['multi_repo'] };
+  cwdArg: { recommended: true; when: ['worktree', 'server_runs_elsewhere'] | ['server_cwd_mismatch'] };
+  reasonCode: 'host-session-context-may-drift' | 'server-cwd-mismatch';
+} {
+  if (hostId === 'codex') {
+    return {
+      hostId,
+      command: 'gitnexus_detect_changes',
+      repoArg: { recommended: true, when: ['multi_repo'] },
+      cwdArg: { recommended: true, when: ['worktree', 'server_runs_elsewhere'] },
+      reasonCode: 'host-session-context-may-drift',
+    };
+  }
+
+  return {
+    hostId,
+    command: 'gitnexus_detect_changes',
+    repoArg: { recommended: true, when: ['multi_repo'] },
+    cwdArg: { recommended: true, when: ['server_cwd_mismatch'] },
+    reasonCode: 'server-cwd-mismatch',
+  };
+}
+
+function getHostDetectChangesGuidance(hostId: string): DoctorCheck | null {
+  if (hostId === 'codex') {
+    return {
+      name: 'host-detect-changes-guidance',
+      status: 'pass',
+      detail: 'Codex host sessions may not automatically preserve the active worktree context. In multi-repo sessions, pass `repo` explicitly to `gitnexus_detect_changes`; in worktrees or when the MCP server runs elsewhere, pass `cwd` explicitly.',
+      data: buildHostDetectChangesGuidanceData('codex'),
+    };
+  }
+
+  if (hostId === 'claude-code') {
+    return {
+      name: 'host-detect-changes-guidance',
+      status: 'pass',
+      detail: 'If Claude Code reports `gitnexus_detect_changes` metadata from a server cwd that does not match the active worktree, pass `repo` explicitly in multi-repo sessions and also pass `cwd` for the active worktree.',
+      data: buildHostDetectChangesGuidanceData('claude-code'),
+    };
+  }
+
+  return null;
+}
+
+function buildHostConfigData(
+  plan: {
+    adapter: { id: string; displayName: string };
+    needsManualConfig: boolean;
+  },
+  detection: { detected: boolean; reason?: string },
+  configured: boolean,
+): {
+  hostId: string;
+  displayName: string;
+  detected: boolean;
+  configured: boolean;
+  needsManualConfig: boolean;
+  detectionReason: string | null;
+} {
+  return {
+    hostId: plan.adapter.id,
+    displayName: plan.adapter.displayName,
+    detected: detection.detected,
+    configured,
+    needsManualConfig: plan.needsManualConfig,
+    detectionReason: detection.reason ?? null,
+  };
+}
+
+function buildHostConfigEdgeData(
+  requestedHost: string | null,
+  reasonCode: 'unknown-host' | 'no-host-requested',
+): {
+  requestedHost: string | null;
+  matchedHosts: string[];
+  skipped: true;
+  reasonCode: 'unknown-host' | 'no-host-requested';
+} {
+  return {
+    requestedHost,
+    matchedHosts: [],
+    skipped: true,
+    reasonCode,
+  };
+}
+
+function buildRegistryEntryData(
+  repoPath: string,
+  registryEntry: RegistryEntry | undefined,
+): {
+  repoPath: string;
+  matched: boolean;
+  entry: RegistryEntry | null;
+} {
+  return {
+    repoPath,
+    matched: Boolean(registryEntry),
+    entry: registryEntry ?? null,
+  };
+}
+
+function buildGitRepoData(
+  requestedPath: string,
+  repoPath: string | null,
+  isGitRepo: boolean,
+): {
+  requestedPath: string;
+  repoPath: string | null;
+  isGitRepo: boolean;
+} {
+  return {
+    requestedPath,
+    repoPath,
+    isGitRepo,
+  };
+}
+
+function buildRepoIndexedData(
+  repoPath: string,
+  indexed: boolean,
+): {
+  repoPath: string;
+  indexed: boolean;
+  indexPath: string;
+} {
+  return {
+    repoPath,
+    indexed,
+    indexPath: `${repoPath}/.gitnexus`,
+  };
+}
+
+function buildGpuDeviceNodeData(
+  platform: NodeJS.Platform,
+  visibleNodes: string[],
+): {
+  platform: NodeJS.Platform;
+  checkedPaths: string[];
+  visibleNodes: string[];
+  skipped: boolean;
+} {
+  const checkedPaths = platform === 'linux' ? ['/dev/dxg', '/dev/nvidia0'] : [];
+  return {
+    platform,
+    checkedPaths,
+    visibleNodes,
+    skipped: platform !== 'linux',
+  };
+}
+
+function buildCommandResultData(
+  command: string,
+  result: DoctorCommandResult,
+): {
+  command: string;
+  ok: boolean;
+  exitCode: number | null;
+  errorCode: string | null;
+  summary: string;
+} {
+  return {
+    command,
+    ok: result.ok,
+    exitCode: result.exitCode,
+    errorCode: result.errorCode ?? null,
+    summary: summarizeCommandOutput(result),
+  };
+}
+
+function buildGpuDockerConfigData(args: {
+  dockerPresent: boolean;
+  inspectOk: boolean;
+  running: boolean | null;
+  hasGpuDeviceRequest: boolean | null;
+  llmLibrary: string | null;
+  visibleDevices: string | null;
+  driverCapabilities: string | null;
+  missingConfig: string[];
+  skipped: boolean;
+}): {
+  dockerPresent: boolean;
+  inspectOk: boolean;
+  running: boolean | null;
+  hasGpuDeviceRequest: boolean | null;
+  llmLibrary: string | null;
+  visibleDevices: string | null;
+  driverCapabilities: string | null;
+  missingConfig: string[];
+  skipped: boolean;
+} {
+  return args;
+}
+
+function buildGpuContainerRuntimeData(args: {
+  command: string;
+  attempted: boolean;
+  ok: boolean;
+  exitCode: number | null;
+  errorCode: string | null;
+  summary: string;
+  skipped: boolean;
+}): {
+  command: string;
+  attempted: boolean;
+  ok: boolean;
+  exitCode: number | null;
+  errorCode: string | null;
+  summary: string;
+  skipped: boolean;
+} {
+  return args;
+}
+
+function buildGpuOllamaRuntimeData(args: {
+  provider: string;
+  probeStatus: 'pass' | 'warn' | null;
+  queryAttempted: boolean;
+  queryOk: boolean;
+  model: string | null;
+  sizeVram: number | null;
+  skipped: boolean;
+  reason: string | null;
+}): {
+  provider: string;
+  probeStatus: 'pass' | 'warn' | null;
+  queryAttempted: boolean;
+  queryOk: boolean;
+  model: string | null;
+  sizeVram: number | null;
+  skipped: boolean;
+  reason: string | null;
+} {
+  return args;
+}
+
+function buildGpuFixData(
+  appliedFixes: string[],
+  manualFollowUps: string[],
+): {
+  appliedFixes: string[];
+  manualFollowUps: string[];
+} {
+  return {
+    appliedFixes,
+    manualFollowUps,
+  };
 }
 
 function summarizeCommandOutput(result: DoctorCommandResult): string {
@@ -267,6 +521,7 @@ async function runGpuDoctorChecks(
       detail: visibleNodes.length > 0
         ? `Detected GPU device nodes: ${visibleNodes.join(', ')}`
         : 'No /dev/dxg or /dev/nvidia0 found. On WSL, run `wsl --shutdown` from Windows and reopen the distro.',
+      data: buildGpuDeviceNodeData(process.platform, visibleNodes),
     });
 
     if (visibleNodes.length === 0 && options.fix) {
@@ -277,6 +532,7 @@ async function runGpuDoctorChecks(
       name: 'gpu-device-node',
       status: 'pass',
       detail: `Platform ${process.platform} does not use Linux GPU device nodes; skipped.`,
+      data: buildGpuDeviceNodeData(process.platform, []),
     });
   }
 
@@ -289,6 +545,7 @@ async function runGpuDoctorChecks(
       : hostNvidia.errorCode === 'ENOENT'
         ? 'nvidia-smi not found; skipping NVIDIA host runtime check.'
         : `nvidia-smi failed: ${summarizeCommandOutput(hostNvidia)}`,
+    data: buildCommandResultData('nvidia-smi', hostNvidia),
   });
 
   if (!hostNvidia.ok && hostNvidia.errorCode !== 'ENOENT' && options.fix) {
@@ -315,22 +572,62 @@ async function runGpuDoctorChecks(
       name: 'gpu-docker-config',
       status: 'pass',
       detail: 'No Docker container named "ollama" detected; skipping container-specific GPU checks.',
+      data: buildGpuDockerConfigData({
+        dockerPresent: false,
+        inspectOk: false,
+        running: null,
+        hasGpuDeviceRequest: null,
+        llmLibrary: null,
+        visibleDevices: null,
+        driverCapabilities: null,
+        missingConfig: [],
+        skipped: true,
+      }),
     });
     checks.push({
       name: 'gpu-container-runtime',
       status: 'pass',
       detail: 'No Docker container named "ollama" detected; skipping container runtime probe.',
+      data: buildGpuContainerRuntimeData({
+        command: 'docker exec ollama sh -lc nvidia-smi',
+        attempted: false,
+        ok: false,
+        exitCode: null,
+        errorCode: null,
+        summary: 'No Docker container named "ollama" detected; skipping container runtime probe.',
+        skipped: true,
+      }),
     });
   } else if (!dockerInspect.ok || !dockerSummary) {
     checks.push({
       name: 'gpu-docker-config',
       status: 'warn',
       detail: `Unable to inspect Docker container "ollama": ${summarizeCommandOutput(dockerInspect)}`,
+      data: buildGpuDockerConfigData({
+        dockerPresent: true,
+        inspectOk: false,
+        running: null,
+        hasGpuDeviceRequest: null,
+        llmLibrary: null,
+        visibleDevices: null,
+        driverCapabilities: null,
+        missingConfig: [],
+        skipped: true,
+      }),
     });
     checks.push({
       name: 'gpu-container-runtime',
       status: 'warn',
       detail: 'Skipped container runtime probe because Docker inspect did not succeed.',
+      data: buildGpuContainerRuntimeData({
+        command: 'docker exec ollama sh -lc nvidia-smi',
+        attempted: false,
+        ok: false,
+        exitCode: null,
+        errorCode: null,
+        summary: 'Skipped container runtime probe because Docker inspect did not succeed.',
+        skipped: true,
+      }),
     });
   } else {
     const llmLibrary = dockerSummary.env.OLLAMA_LLM_LIBRARY;
@@ -356,6 +653,17 @@ async function runGpuDoctorChecks(
         `NVIDIA_DRIVER_CAPABILITIES=${driverCapabilities || 'missing'}`,
         missingConfig.length > 0 ? `missing=${missingConfig.join('; ')}` : 'config=ok',
       ].join(', '),
+      data: buildGpuDockerConfigData({
+        dockerPresent: true,
+        inspectOk: true,
+        running: dockerSummary.running,
+        hasGpuDeviceRequest: dockerSummary.hasGpuDeviceRequest,
+        llmLibrary: llmLibrary ?? null,
+        visibleDevices: visibleDevices ?? null,
+        driverCapabilities: driverCapabilities || null,
+        missingConfig,
+        skipped: false,
+      }),
     });
 
     if (missingConfig.length > 0 && options.fix) {
@@ -370,6 +678,15 @@ async function runGpuDoctorChecks(
         detail: containerNvidia.ok
           ? summarizeCommandOutput(containerNvidia)
           : `docker exec ollama nvidia-smi failed: ${summarizeCommandOutput(containerNvidia)}`,
+        data: buildGpuContainerRuntimeData({
+          command: 'docker exec ollama sh -lc nvidia-smi',
+          attempted: true,
+          ok: containerNvidia.ok,
+          exitCode: containerNvidia.exitCode,
+          errorCode: containerNvidia.errorCode ?? null,
+          summary: summarizeCommandOutput(containerNvidia),
+          skipped: false,
+        }),
       });
 
       if (!containerNvidia.ok && options.fix) {
@@ -380,6 +697,15 @@ async function runGpuDoctorChecks(
         name: 'gpu-container-runtime',
         status: 'warn',
         detail: 'Skipped container runtime probe because Docker container "ollama" is not running.',
+        data: buildGpuContainerRuntimeData({
+          command: 'docker exec ollama sh -lc nvidia-smi',
+          attempted: false,
+          ok: false,
+          exitCode: null,
+          errorCode: null,
+          summary: 'Skipped container runtime probe because Docker container "ollama" is not running.',
+          skipped: true,
+        }),
       });
     }
   }
@@ -389,12 +715,32 @@ async function runGpuDoctorChecks(
       name: 'gpu-ollama-runtime',
       status: 'warn',
       detail: `GPU runtime probe currently supports only Ollama embeddings. Current provider=${embeddingRuntime.provider}.`,
+      data: buildGpuOllamaRuntimeData({
+        provider: embeddingRuntime.provider,
+        probeStatus: embeddingProbe?.status ?? null,
+        queryAttempted: false,
+        queryOk: false,
+        model: null,
+        sizeVram: null,
+        skipped: true,
+        reason: 'provider-not-ollama',
+      }),
     });
   } else if (!embeddingProbe || embeddingProbe.status !== 'pass') {
     checks.push({
       name: 'gpu-ollama-runtime',
       status: 'warn',
       detail: `Skipped GPU offload verification because the Ollama embed probe did not pass (${embeddingProbe?.detail ?? 'no probe detail'}).`,
+      data: buildGpuOllamaRuntimeData({
+        provider: embeddingRuntime.provider,
+        probeStatus: embeddingProbe?.status ?? null,
+        queryAttempted: false,
+        queryOk: false,
+        model: null,
+        sizeVram: null,
+        skipped: true,
+        reason: 'embed-probe-not-pass',
+      }),
     });
   } else {
     try {
@@ -407,15 +753,36 @@ async function runGpuDoctorChecks(
           name: 'gpu-ollama-runtime',
           status: 'warn',
           detail: `Ollama embed probe passed, but ${embeddingRuntime.ollamaModel} was not listed by /api/ps immediately afterward.`,
+          data: buildGpuOllamaRuntimeData({
+            provider: embeddingRuntime.provider,
+            probeStatus: embeddingProbe.status,
+            queryAttempted: true,
+            queryOk: true,
+            model: null,
+            sizeVram: null,
+            skipped: false,
+            reason: 'model-not-listed',
+          }),
         });
       } else {
         const sizeVram = Number(loadedModel.size_vram ?? 0);
+        const modelName = loadedModel.model ?? loadedModel.name ?? null;
         checks.push({
           name: 'gpu-ollama-runtime',
           status: sizeVram > 0 ? 'pass' : 'fail',
           detail: sizeVram > 0
-            ? `model=${loadedModel.model ?? loadedModel.name}, size_vram=${sizeVram}`
-            : `model=${loadedModel.model ?? loadedModel.name}, size_vram=0 (CPU fallback likely)`,
+            ? `model=${modelName}, size_vram=${sizeVram}`
+            : `model=${modelName}, size_vram=0 (CPU fallback likely)`,
+          data: buildGpuOllamaRuntimeData({
+            provider: embeddingRuntime.provider,
+            probeStatus: embeddingProbe.status,
+            queryAttempted: true,
+            queryOk: true,
+            model: modelName,
+            sizeVram,
+            skipped: false,
+            reason: null,
+          }),
         });
 
         if (sizeVram === 0 && options.fix) {
@@ -427,6 +794,16 @@ async function runGpuDoctorChecks(
         name: 'gpu-ollama-runtime',
         status: 'warn',
         detail: `Could not query Ollama /api/ps after embed probe: ${error?.message ?? 'unknown error'}`,
+        data: buildGpuOllamaRuntimeData({
+          provider: embeddingRuntime.provider,
+          probeStatus: embeddingProbe.status,
+          queryAttempted: true,
+          queryOk: false,
+          model: null,
+          sizeVram: null,
+          skipped: false,
+          reason: 'query-error',
+        }),
       });
     }
   }
@@ -439,6 +816,7 @@ async function runGpuDoctorChecks(
         fixActions.length > 0 ? `Applied safe fixes: ${fixActions.join('; ')}` : 'No safe automatic fixes were needed.',
         manualActions.length > 0 ? `Manual follow-up: ${manualActions.join(' ')}` : null,
       ].filter(Boolean).join(' '),
+      data: buildGpuFixData(fixActions, manualActions),
     });
   }
 
@@ -457,6 +835,7 @@ export async function runDoctor(
       name: 'git-repo',
       status: 'fail',
       detail: 'Not a git repository.',
+      data: buildGitRepoData(requestedRepo, null, false),
     });
     return { overall: resolveOverall(checks), checks };
   }
@@ -466,6 +845,7 @@ export async function runDoctor(
     name: 'git-repo',
     status: 'pass',
     detail: `Git repository detected at ${repoRoot}`,
+    data: buildGitRepoData(requestedRepo, repoRoot, true),
   });
 
   checks.push((deps.getNativeRuntimeCheck ?? DEFAULT_DEPS.getNativeRuntimeCheck)!());
@@ -477,6 +857,7 @@ export async function runDoctor(
     detail: indexed
       ? `Index found at ${repoRoot}/.gitnexus`
       : 'Repository not indexed. Run: gitnexus analyze',
+    data: buildRepoIndexedData(repoRoot, indexed),
   });
 
   const cliConfig = await deps.loadCLIConfig();
@@ -489,6 +870,7 @@ export async function runDoctor(
       detail: languageSupport
         .map((entry) => `${entry.language}:${entry.tier}=${entry.status}${entry.detail ? ` (${entry.detail})` : ''}`)
         .join(', '),
+      data: languageSupport,
     });
   }
 
@@ -510,12 +892,24 @@ export async function runDoctor(
       name: 'embeddings-config',
       status: embeddingProbe.status,
       detail: `${embeddingDetail}, ${embeddingProbe.detail}`,
+      data: {
+        effective: embeddingSnapshot.effective,
+        sources: embeddingSnapshot.sources,
+        precedence: embeddingSnapshot.precedence,
+        probe: embeddingProbe,
+      },
     });
   } else {
     checks.push({
       name: 'embeddings-config',
       status: 'pass',
       detail: `${embeddingDetail}, source=huggingface`,
+      data: {
+        effective: embeddingSnapshot.effective,
+        sources: embeddingSnapshot.sources,
+        precedence: embeddingSnapshot.precedence,
+        probe: null,
+      },
     });
   }
 
@@ -536,6 +930,7 @@ export async function runDoctor(
     detail: registryEntry
       ? `Registry entry found for ${registryEntry.name}`
       : 'No registry entry found for this repository.',
+    data: buildRegistryEntryData(repoRoot, registryEntry),
   });
 
   const hostPlans = deps.getHostPlans({ repoPath: repoRoot }).filter((plan) => {
@@ -549,6 +944,7 @@ export async function runDoctor(
       name: 'host-config',
       status: 'fail',
       detail: `Unknown host: ${options.host}`,
+      data: buildHostConfigEdgeData(options.host, 'unknown-host'),
     });
     return { overall: resolveOverall(checks), checks };
   }
@@ -558,6 +954,7 @@ export async function runDoctor(
       name: 'host-config',
       status: 'pass',
       detail: 'No host checks requested.',
+      data: buildHostConfigEdgeData(null, 'no-host-requested'),
     });
     return { overall: resolveOverall(checks), checks };
   }
@@ -569,6 +966,7 @@ export async function runDoctor(
         name: 'host-config',
         status: 'warn',
         detail: `${plan.adapter.displayName} not detected (${detection.reason ?? 'not installed'}).`,
+        data: buildHostConfigData(plan, detection, false),
       });
       continue;
     }
@@ -579,6 +977,7 @@ export async function runDoctor(
         name: 'host-config',
         status: 'pass',
         detail: `${plan.adapter.displayName} host config is present.`,
+        data: buildHostConfigData(plan, detection, true),
       });
       continue;
     }
@@ -589,7 +988,17 @@ export async function runDoctor(
       detail: plan.needsManualConfig
         ? `${plan.adapter.displayName} requires a manual MCP setup step.`
         : `${plan.adapter.displayName} host config is missing.`,
+      data: buildHostConfigData(plan, detection, false),
     });
+  }
+
+  if (options.host) {
+    for (const plan of hostPlans) {
+      const guidance = getHostDetectChangesGuidance(plan.adapter.id);
+      if (guidance) {
+        checks.push(guidance);
+      }
+    }
   }
 
   return {
@@ -612,18 +1021,32 @@ function printDoctorResult(result: DoctorResult): void {
   console.log('');
 }
 
+function extractDoctorOptions(candidate: unknown): DoctorOptions | null {
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+
+  const optionCandidate = candidate as Record<string, unknown>;
+  const knownKeys = ['host', 'repo', 'json', 'gpu', 'fix'];
+  return knownKeys.some((key) => key in optionCandidate)
+    ? optionCandidate as DoctorOptions
+    : null;
+}
+
 function normalizeDoctorOptions(
   pathOrOptions?: string | DoctorOptions,
   maybeOptions: DoctorOptions = {},
 ): DoctorOptions {
+  const parsedMaybeOptions = extractDoctorOptions(maybeOptions) ?? {};
+
   if (typeof pathOrOptions === 'string') {
     return {
-      ...maybeOptions,
-      repo: maybeOptions.repo ?? pathOrOptions,
+      ...parsedMaybeOptions,
+      repo: parsedMaybeOptions.repo ?? pathOrOptions,
     };
   }
 
-  return pathOrOptions ?? {};
+  return extractDoctorOptions(pathOrOptions) ?? parsedMaybeOptions;
 }
 
 export async function doctorCommand(

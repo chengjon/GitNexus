@@ -1,9 +1,7 @@
 import os from 'os';
 import path from 'path';
-import { dirExists, getDefaultMcpEntry } from './shared.js';
+import { dirExists, formatManualMcpAddCommand, getDefaultMcpEntry } from './shared.js';
 import type { HostAdapter, HostConfigureResult } from './types.js';
-
-const CLAUDE_MCP_COMMAND = 'claude mcp add gitnexus -- npx -y gitnexus@latest mcp';
 
 export function createClaudeCodeAdapter(options?: { homeDir?: string }): HostAdapter {
   const homeDir = options?.homeDir ?? os.homedir();
@@ -18,7 +16,7 @@ export function createClaudeCodeAdapter(options?: { homeDir?: string }): HostAda
 
   const manualInstructions = () => [
     'Claude Code detected. Run this command to add GitNexus MCP:',
-    `  ${CLAUDE_MCP_COMMAND}`,
+    `  ${formatManualMcpAddCommand('claude', getDefaultMcpEntry())}`,
   ];
 
   const configure = async (): Promise<HostConfigureResult> => {

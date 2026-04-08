@@ -14,6 +14,23 @@ const expectedDefaultArgs = process.platform === 'win32'
   ? ['/c', 'npx', '-y', 'gitnexus@latest', 'mcp']
   : ['-y', 'gitnexus@latest', 'mcp'];
 
+async function withPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', {
+    configurable: true,
+    enumerable: true,
+    value: platform,
+  });
+
+  try {
+    return await fn();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(process, 'platform', descriptor);
+    }
+  }
+}
+
 async function createTempHome(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
@@ -44,6 +61,19 @@ describe('host adapters', () => {
     expect(adapter.manualInstructions().join('\n')).toContain('claude mcp add gitnexus');
   });
 
+  it('Claude Code adapter renders Windows manual MCP instructions from the platform entry', async () => {
+    await withPlatform('win32', async () => {
+      const homeDir = await createTempHome('gitnexus-claude-host-win-');
+      await fs.mkdir(path.join(homeDir, '.claude'), { recursive: true });
+
+      const adapter = createClaudeCodeAdapter({ homeDir });
+
+      expect(adapter.manualInstructions().join('\n')).toContain(
+        'claude mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp',
+      );
+    });
+  });
+
   it('Codex adapter returns codex mcp add command', async () => {
     const homeDir = await createTempHome('gitnexus-codex-host-');
     await fs.mkdir(path.join(homeDir, '.codex'), { recursive: true });
@@ -60,6 +90,19 @@ describe('host adapters', () => {
     expect(adapter.manualInstructions().join('\n')).toContain(
       'codex mcp add gitnexus -- npx -y gitnexus@latest mcp',
     );
+  });
+
+  it('Codex adapter renders Windows manual MCP instructions from the platform entry', async () => {
+    await withPlatform('win32', async () => {
+      const homeDir = await createTempHome('gitnexus-codex-host-win-');
+      await fs.mkdir(path.join(homeDir, '.codex'), { recursive: true });
+
+      const adapter = createCodexAdapter({ homeDir });
+
+      expect(adapter.manualInstructions().join('\n')).toContain(
+        'codex mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp',
+      );
+    });
   });
 
   it('Cursor adapter writes mcp.json config', async () => {

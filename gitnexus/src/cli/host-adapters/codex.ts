@@ -1,9 +1,7 @@
 import os from 'os';
 import path from 'path';
-import { dirExists, getDefaultMcpEntry } from './shared.js';
+import { dirExists, formatManualMcpAddCommand, getDefaultMcpEntry } from './shared.js';
 import type { HostAdapter, HostConfigureResult } from './types.js';
-
-const CODEX_MCP_COMMAND = 'codex mcp add gitnexus -- npx -y gitnexus@latest mcp';
 
 export function createCodexAdapter(options?: { homeDir?: string }): HostAdapter {
   const homeDir = options?.homeDir ?? os.homedir();
@@ -18,7 +16,7 @@ export function createCodexAdapter(options?: { homeDir?: string }): HostAdapter 
 
   const manualInstructions = () => [
     'Codex detected. Run this command to add GitNexus MCP:',
-    `  ${CODEX_MCP_COMMAND}`,
+    `  ${formatManualMcpAddCommand('codex', getDefaultMcpEntry())}`,
   ];
 
   const configure = async (): Promise<HostConfigureResult> => {

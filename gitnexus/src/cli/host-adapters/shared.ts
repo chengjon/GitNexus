@@ -16,6 +16,22 @@ export function getDefaultMcpEntry(): McpEntry {
   };
 }
 
+function quoteShellToken(token: string): string {
+  if (!/[\s"]/.test(token)) {
+    return token;
+  }
+
+  return `"${token.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+export function formatManualMcpAddCommand(hostCli: string, entry: McpEntry): string {
+  const renderedEntry = [entry.command, ...entry.args]
+    .map(quoteShellToken)
+    .join(' ');
+
+  return `${hostCli} mcp add gitnexus -- ${renderedEntry}`;
+}
+
 export async function readJsonFile(filePath: string): Promise<Record<string, any> | null> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
