@@ -4,11 +4,45 @@
 **基于审核报告**: `docs/gitnexus-skills-review.md`  
 **目的**: 基于代码库最新变更，优化审核报告中的修改建议
 
+Status sync (2026-04-08): This report remains useful as a 2026-03-26
+suggestion baseline, but several recommendation blocks below no longer
+represent current skill-doc follow-up. Since then, the repository has already
+closed the documented drift for `gitnexus-cli`, `gitnexus-guide`,
+`gitnexus-impact-analysis`, `gitnexus-refactoring`, and `gitnexus-pr-review`,
+while `gitnexus-debugging` has absorbed the suggested regression-debugging
+note. Treat the remaining open-looking recommendations here as historical
+suggestion context unless they are still confirmed by the current skill docs
+and the remediation roadmap.
+
+---
+
+## Development Governance
+
+如果你基于这份修改建议直接调整当前 GitNexus 仓库，顶层开发治理规则在 [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md)。
+
+涉及 migrations、compatibility layers、duplicate implementations、deletions、metric claims、temporary entry points 或 backup files 时，把该文档视为强制规则，而不是可选建议。
+
 ---
 
 ## 执行摘要
 
 本次修改建议基于对 `docs/gitnexus-skills-review.md` 审核报告的复核，结合项目 README.md 中记录的最新功能更新，对原审核报告中的建议进行补充和修正。
+
+## Current Follow-Up Snapshot (2026-04-08)
+
+| 技能文件 | 2026-04-08 读法 |
+|----------|------------------|
+| `gitnexus-cli/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
+| `gitnexus-guide/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
+| `gitnexus-impact-analysis/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
+| `gitnexus-debugging/SKILL.md` | 建议中的 regression note 已被当前 skill 吸收 |
+| `gitnexus-refactoring/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
+| `gitnexus-pr-review/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
+
+当前治理入口请优先看：
+
+- `docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md`
+- 2026-04-08 之后的 skills/doc convergence 审计与 OpenSpec 记录
 
 ### 主要变更点
 
@@ -158,7 +192,17 @@ gitnexus analyze --embeddings
 | `detect_impact` | 预提交变更分析 — 范围、受影响的进程、风险级别                          |
 | `generate_map`  | 从知识图谱生成架构文档 — 包含 mermaid 图表                              |
 
-## Usage in Claude Code
+## Prompt Invocation Example
+
+The direct `@gitnexus ...` invocation below is a Claude Code specific host
+example. Keep this wording explicit so the document does not imply that every
+primary or optional host exposes the same prompt UX.
+
+Codex remains part of the repository's primary maintained CLI surface for MCP
+tool workflows, but this section should not claim an equivalent direct prompt
+syntax unless that host-specific behavior is separately documented and verified.
+
+### Claude Code
 
 When Claude Code has GitNexus MCP configured, you can invoke these prompts directly:
 

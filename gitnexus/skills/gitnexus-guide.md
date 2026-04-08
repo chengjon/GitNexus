@@ -40,6 +40,8 @@ For any task involving code understanding, debugging, impact analysis, or refact
 | `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
 | `list_repos`     | Discover indexed repos                                                   |
 
+> **Aliases:** `search` → `query`, `explore` → `context`
+
 ## Resources Reference
 
 Lightweight reads (~100-500 tokens) for navigation:
@@ -55,8 +57,11 @@ Lightweight reads (~100-500 tokens) for navigation:
 
 ## Graph Schema
 
-**Nodes:** File, Function, Class, Interface, Method, Community, Process
-**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
+**Nodes:** File, Folder, Function, Class, Interface, Method, CodeElement,
+Community, Process
+**Multi-language nodes:** `Struct`, `Enum`, `Trait`, `Impl`
+**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS,
+DEFINES, MEMBER_OF, STEP_IN_PROCESS, HAS_METHOD, OVERRIDES
 
 ```cypher
 MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})

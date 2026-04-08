@@ -2,7 +2,9 @@
 
 **Graph-powered code intelligence for AI agents.** Index any codebase into a knowledge graph, then query it via MCP or CLI.
 
-Works with **Cursor**, **Claude Code**, **Windsurf**, **Cline**, **OpenCode**, and any MCP-compatible tool.
+Primary maintained CLI surface: **Claude Code + Codex**. GitNexus also works
+with optional MCP hosts such as **Cursor**, **Windsurf**, **OpenCode**,
+**Cline**, and other MCP-compatible tools.
 
 [![npm version](https://img.shields.io/npm/v/gitnexus.svg)](https://www.npmjs.com/package/gitnexus)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
@@ -14,6 +16,12 @@ Works with **Cursor**, **Claude Code**, **Windsurf**, **Cline**, **OpenCode**, a
 AI coding tools don't understand your codebase structure. They edit a function without knowing 47 other functions depend on it. GitNexus fixes this by **precomputing every dependency, call chain, and relationship** into a queryable graph.
 
 **Three commands to give your AI agent full codebase awareness.**
+
+## Development Governance
+
+If you are modifying this repository itself, top-level development governance lives in [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md).
+
+Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
 ## Quick Start
 
@@ -36,7 +44,7 @@ To configure MCP for your editor, run `npx gitnexus setup` once — or set it up
 
 `gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
 
-Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host <name>` checks whether host config, registry entries, and repo indexing are all ready.
+Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host codex --repo .` or `npx gitnexus doctor --host claude-code --repo .` checks whether host config, registry entries, and repo indexing are all ready for the current repository. In multi-repo sessions, pass `repo` explicitly to `gitnexus_detect_changes`; in worktrees or when the MCP server cwd differs from the active worktree, also pass `cwd`.
 
 ### AI-Readable Quick Start
 
@@ -70,8 +78,8 @@ gitnexus analyze --with-context
 # - .claude/skills/gitnexus/
 
 # 3. Verify MCP readiness for the host you are using
-gitnexus doctor --host codex
-gitnexus doctor --host claude
+gitnexus doctor --host codex --repo .
+gitnexus doctor --host claude-code --repo .
 
 # 4. Only initialize project-local files
 gitnexus init-project
@@ -87,20 +95,31 @@ If `gitnexus` is not on `PATH`, use the local build directly:
 
 ```bash
 node /opt/claude/GitNexus/gitnexus/dist/cli/index.js analyze
-node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host codex
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host codex --repo .
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host claude-code --repo .
 node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 ```
 
 ### Editor Support
 
-| Editor | MCP | Skills | Hooks (auto-augment) | Support |
-|--------|-----|--------|---------------------|---------|
-| **Claude Code** | Yes | Yes | Yes (PreToolUse) | **Full** |
+Primary maintained CLI surface in this repository: **Claude Code + Codex**.
+Other MCP hosts below remain usable integrations, but they are optional
+follow-up surfaces rather than the repository's required day-to-day support
+pair.
+
+| Editor | MCP | Skills | Hooks (auto-augment) | Integration Profile |
+|--------|-----|--------|---------------------|---------------------|
+| **Claude Code** | Yes | Yes | Yes (PreToolUse) | MCP + Skills + Hooks |
+| **Codex** | Yes | — | — | MCP |
 | **Cursor** | Yes | Yes | — | MCP + Skills |
 | **Windsurf** | Yes | — | — | MCP |
 | **OpenCode** | Yes | Yes | — | MCP + Skills |
 
-> **Claude Code** gets the deepest integration: MCP tools + agent skills + PreToolUse hooks that automatically enrich grep/glob/bash calls with knowledge graph context.
+> **Claude Code** currently gets the deepest host-side integration: MCP tools +
+> agent skills + PreToolUse hooks that automatically enrich grep/glob/bash
+> calls with knowledge graph context. **Codex** remains part of the primary
+> maintained CLI surface; the current difference is integration depth and
+> automation, not support-tier status.
 
 ### Community Integrations
 
@@ -110,13 +129,38 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 
 ## MCP Setup (manual)
 
-If you prefer to configure manually instead of using `gitnexus setup`:
+If you prefer to configure manually instead of using `gitnexus setup`, start
+with the primary maintained pair:
 
-### Claude Code (full support — MCP + skills + hooks)
+### Claude Code (primary maintained CLI; deepest host-side integration today: MCP + skills + hooks)
+
+macOS / Linux:
 
 ```bash
 claude mcp add gitnexus -- npx -y gitnexus@latest mcp
 ```
+
+Windows:
+
+```powershell
+claude mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp
+```
+
+### Codex (primary maintained CLI; current setup path is manual MCP registration)
+
+macOS / Linux:
+
+```bash
+codex mcp add gitnexus -- npx -y gitnexus@latest mcp
+```
+
+Windows:
+
+```powershell
+codex mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp
+```
+
+### Optional MCP integrations
 
 ### Cursor / Windsurf
 
@@ -200,7 +244,8 @@ Your AI agent gets these tools automatically:
 
 ```bash
 gitnexus setup                    # Configure MCP for your editors (one-time)
-gitnexus doctor --host codex      # Verify host MCP readiness and repo/index state
+gitnexus doctor --host codex --repo .        # Verify Codex MCP readiness for the current repo
+gitnexus doctor --host claude-code --repo .  # Verify Claude Code MCP readiness for the current repo
 gitnexus analyze [path]           # Index a repository (default: no repo-context refresh)
 gitnexus analyze --force          # Force full re-index
 gitnexus analyze --skills         # Generate repo-specific skill files from detected communities

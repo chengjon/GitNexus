@@ -34,7 +34,15 @@ https://github.com/user-attachments/assets/172685ba-8e54-4ea7-9ad1-e31a3398da72
 
 > *Like DeepWiki, but deeper.* DeepWiki helps you *understand* code. GitNexus lets you *analyze* it — because a knowledge graph tracks every relationship, not just descriptions.
 
-**TL;DR:** The **Web UI** is a quick way to chat with any repo. The **CLI + MCP** is how you make your AI agent actually reliable — it gives Cursor, Claude Code, and friends a deep architectural view of your codebase so they stop missing dependencies, breaking call chains, and shipping blind edits. Even smaller models get full architectural clarity, making it compete with goliath models.
+**TL;DR:** The **Web UI** is a quick way to chat with any repo. The **CLI + MCP** is how you make your AI agent actually reliable — it gives **Claude Code** and **Codex** a deep architectural view of your codebase, and it also works with optional MCP hosts such as Cursor, Windsurf, and OpenCode. That means agents stop missing dependencies, breaking call chains, and shipping blind edits. Even smaller models get full architectural clarity, making it compete with goliath models.
+
+---
+
+## Development Governance
+
+Repository-wide development rules live in [`DEVELOPMENT_RULES.md`](DEVELOPMENT_RULES.md).
+
+If your change touches migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, or backup files, treat that document as mandatory review policy rather than optional guidance.
 
 ---
 
@@ -111,7 +119,7 @@ If you are upgrading from an older checkout, the most important practical differ
 |                   | **CLI + MCP**                                            | **Web UI**                                             |
 | ----------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
 | **What**    | Index repos locally, connect AI agents via MCP                 | Visual graph explorer + AI chat in browser                   |
-| **For**     | Daily development with Cursor, Claude Code, Windsurf, OpenCode | Quick exploration, demos, one-off analysis                   |
+| **For**     | Daily development with Claude Code and Codex; optional MCP/manual setup for Cursor, Windsurf, OpenCode | Quick exploration, demos, one-off analysis                   |
 | **Scale**   | Full repos, any size                                           | Limited by browser memory (~5k files), or unlimited via backend mode |
 | **Install** | `npm install -g gitnexus`                                    | No install —[gitnexus.vercel.app](https://gitnexus.vercel.app) |
 | **Storage** | KuzuDB native (fast, persistent)                               | KuzuDB WASM (in-memory, per session)                         |
@@ -145,14 +153,14 @@ Use `npx gitnexus analyze --with-gitignore` if you explicitly want `.gitignore` 
 
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
-Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host <name>` checks whether host config, registry entries, and repo indexing are all ready.
+Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host codex --repo .` or `npx gitnexus doctor --host claude-code --repo .` checks whether host config, registry entries, and repo indexing are all ready for the current repository. In multi-repo sessions, pass `repo` explicitly to `gitnexus_detect_changes`; in worktrees or when the MCP server cwd differs from the active worktree, also pass `cwd`.
 
 ### AI-Readable Quick Start
 
 For AI CLIs or local agents on this machine, prefer the linked local command instead of `npx`:
 
 Canonical single-file reference:
-[`docs/ai-cli-local-quick-start.md`](/opt/claude/GitNexus/docs/ai-cli-local-quick-start.md)
+[`docs/ai-cli-local-quick-start.md`](docs/ai-cli-local-quick-start.md)
 
 ```bash
 # 0. Optional: verify that the local fork is active
@@ -178,9 +186,9 @@ gitnexus analyze --with-context
 # - CLAUDE.md
 # - .claude/skills/gitnexus/
 
-# 3. Verify host wiring
-gitnexus doctor --host codex
-gitnexus doctor --host claude
+# 3. Verify host wiring for the current repository
+gitnexus doctor --host codex --repo .
+gitnexus doctor --host claude-code --repo .
 
 # 4. Context-only workflows
 gitnexus init-project
@@ -194,7 +202,8 @@ If `gitnexus` is not on `PATH`, use the local build directly:
 
 ```bash
 node /opt/claude/GitNexus/gitnexus/dist/cli/index.js analyze
-node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host codex
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host codex --repo .
+node /opt/claude/GitNexus/gitnexus/dist/cli/index.js doctor --host claude-code --repo .
 node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 ```
 
@@ -204,14 +213,24 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 
 ### Editor Support
 
-| Editor                | MCP | Skills | Hooks (auto-augment) | Support        |
-| --------------------- | --- | ------ | -------------------- | -------------- |
-| **Claude Code** | Yes | Yes    | Yes (PreToolUse + PostToolUse) | **Full** |
-| **Cursor**      | Yes | Yes    | —                   | MCP + Skills   |
-| **Windsurf**    | Yes | —     | —                   | MCP            |
-| **OpenCode**    | Yes | Yes    | —                   | MCP + Skills   |
+Primary maintained CLI surface in this repository: **Claude Code + Codex**.
+Other MCP hosts below remain usable integrations, but they are optional
+follow-up surfaces rather than the repository's required day-to-day support
+pair.
 
-> **Claude Code** gets the deepest integration: MCP tools + agent skills + PreToolUse hooks that enrich searches with graph context + PostToolUse hooks that auto-reindex after commits.
+| Editor                | MCP | Skills | Hooks (auto-augment) | Integration Profile |
+| --------------------- | --- | ------ | -------------------- | ------------------- |
+| **Claude Code** | Yes | Yes    | Yes (PreToolUse + PostToolUse) | MCP + Skills + Hooks |
+| **Codex**       | Yes | —     | —                   | MCP                 |
+| **Cursor**      | Yes | Yes    | —                   | MCP + Skills        |
+| **Windsurf**    | Yes | —     | —                   | MCP                 |
+| **OpenCode**    | Yes | Yes    | —                   | MCP + Skills        |
+
+> **Claude Code** currently gets the deepest host-side integration: MCP tools +
+> agent skills + PreToolUse hooks that enrich searches with graph context +
+> PostToolUse hooks that auto-reindex after commits. **Codex** remains part of
+> the primary maintained CLI surface; the current difference is integration
+> depth and automation, not support-tier status.
 
 ### Community Integrations
 
@@ -219,13 +238,39 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 |-------|---------|--------|
 | [pi](https://pi.dev) | `pi install npm:pi-gitnexus` | [pi-gitnexus](https://github.com/tintinweb/pi-gitnexus) |
 
-If you prefer manual configuration:
+If you prefer manual configuration, start with the primary maintained pair:
 
-**Claude Code** (full support — MCP + skills + hooks):
+**Claude Code** (primary maintained CLI; deepest host-side integration today:
+MCP + skills + hooks):
+
+macOS / Linux:
 
 ```bash
 claude mcp add gitnexus -- npx -y gitnexus@latest mcp
 ```
+
+Windows:
+
+```powershell
+claude mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp
+```
+
+**Codex** (primary maintained CLI; current setup path is manual MCP
+registration):
+
+macOS / Linux:
+
+```bash
+codex mcp add gitnexus -- npx -y gitnexus@latest mcp
+```
+
+Windows:
+
+```powershell
+codex mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp
+```
+
+Optional MCP integrations:
 
 **Cursor** (`~/.cursor/mcp.json` — global, works for all projects):
 
@@ -257,7 +302,8 @@ claude mcp add gitnexus -- npx -y gitnexus@latest mcp
 
 ```bash
 gitnexus setup                    # Configure MCP for your editors (one-time)
-gitnexus doctor --host codex      # Verify host MCP readiness and repo/index state
+gitnexus doctor --host codex --repo .        # Verify Codex MCP readiness for the current repo
+gitnexus doctor --host claude-code --repo .  # Verify Claude Code MCP readiness for the current repo
 gitnexus analyze [path]           # Index a repository (default: no repo-context refresh)
 gitnexus analyze --force          # Force full re-index
 gitnexus analyze --skills         # Generate repo-specific skill files from detected communities
@@ -361,6 +407,11 @@ Environment variables still take precedence over `~/.gitnexus/config.json`.
 
 In Claude Code with GitNexus MCP configured, invoke prompts directly:
 
+This direct `@gitnexus ...` syntax is a Claude Code specific host example.
+Codex remains part of the repository's primary maintained CLI surface for MCP
+tools, but equivalent prompt-invocation UX should not be assumed here unless it
+is separately documented for that host.
+
 ```
 @gitnexus detect_impact
 @gitnexus generate_map
@@ -456,7 +507,9 @@ The web UI uses the same indexing pipeline as the CLI but runs entirely in WebAs
 
 ## The Problem GitNexus Solves
 
-Tools like **Cursor**, **Claude Code**, **Cline**, **Roo Code**, and **Windsurf** are powerful — but they don't truly know your codebase structure.
+Tools like **Claude Code**, **Codex**, and optional MCP hosts such as
+**Cursor**, **Cline**, **Roo Code**, and **Windsurf** are powerful — but they
+don't truly know your codebase structure.
 
 **What happens:**
 
@@ -587,7 +640,7 @@ processes:
 ### Detect Changes (Pre-Commit)
 
 ```
-detect_changes({scope: "all"})
+detect_changes({scope: "all", repo: "my-app"})
 
 summary:
   changed_count: 12
@@ -598,6 +651,8 @@ summary:
 changed_symbols: [validateUser, AuthService, ...]
 affected_processes: [LoginFlow, RegistrationFlow, ...]
 ```
+
+In multi-repo sessions, keep `repo` explicit. If the active worktree does not match the MCP server cwd, also pass `cwd`.
 
 ### Rename (Multi-File)
 

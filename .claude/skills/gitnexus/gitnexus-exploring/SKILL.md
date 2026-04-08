@@ -47,8 +47,6 @@ description: "Use when the user asks how code works, wants to understand archite
 
 ## Tools
 
-> **Note:** `gitnexus_query` can also be called via the `search` alias, and `gitnexus_context` can also be called via the `explore` alias.
-
 **gitnexus_query** — find execution flows related to a concept:
 
 ```

@@ -22,7 +22,7 @@ Run from the project root. This parses all source files, builds the knowledge gr
 | `--force`      | Force full re-index even if up to date                           |
 | `--embeddings` | Enable embedding generation for semantic search (off by default) |
 
-**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated.
+**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook runs `analyze` automatically after `git commit` and `git merge`, preserving embeddings if previously generated. In Codex, no equivalent automatic hook is installed today, so rerun `gitnexus analyze` manually after those mutations when you need a fresh index.
 
 Use plain `npx gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
 
@@ -144,5 +144,5 @@ Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_
 ## Troubleshooting
 
 - **"Not inside a git repository"**: Run from a directory inside a git repo
-- **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
+- **Index is stale after re-analyzing**: Restart the MCP host session so it reconnects to the updated index. In Claude Code, restart Claude Code. In Codex, restart the Codex session if the existing MCP connection still shows stale context.
 - **Embeddings timeout on Hugging Face**: Set `HF_ENDPOINT` / `GITNEXUS_HF_REMOTE_HOST`, configure `GITNEXUS_HF_CACHE_DIR`, or switch to the local Ollama provider via `GITNEXUS_EMBEDDING_PROVIDER=ollama`

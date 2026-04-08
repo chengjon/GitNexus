@@ -4,9 +4,45 @@
 **审核范围**: `.claude/skills/gitnexus/` 下的 7 个技能文件
 **目的**: 识别技能文件与当前代码功能的差异，提出修改建议
 
+Status sync (2026-04-08): This report remains useful as a 2026-03-26 baseline,
+but its summary table is no longer a current-state status board. Since then,
+the repository has already closed the documented drift for `gitnexus-cli`,
+`gitnexus-guide`, `gitnexus-impact-analysis`, `gitnexus-refactoring`, and
+`gitnexus-pr-review`, while `gitnexus-debugging` has absorbed the suggested
+regression-debugging note.
+Treat the remaining open items here as historical review context unless they
+are still confirmed by the current skill docs and the remediation roadmap.
+
+---
+
+## Development Governance
+
+如果你基于这份审核报告修改当前 GitNexus 仓库，顶层开发治理规则在 [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md)。
+
+涉及 migrations、compatibility layers、duplicate implementations、deletions、metric claims、temporary entry points 或 backup files 时，把该文档视为强制规则，而不是可选建议。
+
 ---
 
 ## 审核摘要
+
+## Current Follow-Up Snapshot (2026-04-08)
+
+| 技能文件 | 2026-04-08 读法 |
+|----------|------------------|
+| `gitnexus-cli/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
+| `gitnexus-guide/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
+| `gitnexus-exploring/SKILL.md` | 原始“低优先级小改进建议”仍可视为可选 follow-up |
+| `gitnexus-impact-analysis/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
+| `gitnexus-debugging/SKILL.md` | 建议中的 regression note 已被当前 skill 吸收 |
+| `gitnexus-refactoring/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
+| `gitnexus-pr-review/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
+
+当前治理入口请优先看：
+
+- `docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md`
+- 2026-04-08 之后的 skills/doc convergence 审计与 OpenSpec 记录
+
+---
 
 | 技能文件 | 状态 | 优先级 |
 |----------|------|--------|
