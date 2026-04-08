@@ -41,6 +41,10 @@ export interface RepoWorkerManagerOptions {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const FATAL_WORKER_ERROR_RE = /Buffer manager exception|Mmap for size/i;
+
+const isFatalWorkerError = (error: Error): boolean =>
+  FATAL_WORKER_ERROR_RE.test(error.message);
 
 export class RepoWorkerManager {
   private cliEntry: string;
@@ -92,6 +96,28 @@ export class RepoWorkerManager {
   }
 
   async call(repo: RepoHandle, method: WorkerRequestMethod, ...args: unknown[]): Promise<unknown> {
+    return this.callWithRetry(repo, method, args, 1);
+  }
+
+  private async callWithRetry(
+    repo: RepoHandle,
+    method: WorkerRequestMethod,
+    args: unknown[],
+    remainingRetries: number,
+  ): Promise<unknown> {
+    try {
+      return await this.callOnce(repo, method, ...args);
+    } catch (error) {
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      if (remainingRetries > 0 && isFatalWorkerError(normalizedError)) {
+        this.recycleWorker(repo.id, normalizedError);
+        return this.callWithRetry(repo, method, args, remainingRetries - 1);
+      }
+      throw normalizedError;
+    }
+  }
+
+  private async callOnce(repo: RepoHandle, method: WorkerRequestMethod, ...args: unknown[]): Promise<unknown> {
     const state = await this.ensureWorker(repo);
     const requestId = `worker-request-${++this.requestSeq}`;
     const message: WorkerRequestMessage = {
@@ -144,6 +170,19 @@ export class RepoWorkerManager {
 
   __testOnlyGetWorkerPid(repoId: string): number | null {
     return this.workers.get(repoId)?.child.pid ?? null;
+  }
+
+  private recycleWorker(repoId: string, error: Error): void {
+    const state = this.workers.get(repoId);
+    if (!state) {
+      return;
+    }
+
+    this.workers.delete(repoId);
+    this.rejectPending(state, error);
+    try {
+      state.child.kill('SIGTERM');
+    } catch {}
   }
 
   private spawnWorker(repo: RepoHandle): PendingWorkerSpawn {

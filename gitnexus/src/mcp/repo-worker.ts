@@ -8,8 +8,12 @@ import {
 import {
   createMcpProcessRegistration,
   type McpProcessRegistration,
+  readMcpProcessCommand,
+  removeMcpProcessCommand,
 } from '../runtime/mcp-process-registry.js';
 import { getDefaultMcpProcessTimingConfig } from '../runtime/mcp-process-config.js';
+
+const DEFAULT_CONTROL_CHECK_INTERVAL_MS = 250;
 
 const isPidAlive = (pid: number): boolean => {
   try {
@@ -53,14 +57,28 @@ export async function startRepoWorkerProcess(): Promise<void> {
   let draining = false;
   let exitRequested = false;
   let inFlightRequests = 0;
+  let controlCheckTimer: ReturnType<typeof setInterval> | null = null;
   let ownerCheckTimer: ReturnType<typeof setInterval> | null = null;
   let registration: McpProcessRegistration | null = null;
   let shutdownPromise: Promise<void> | null = null;
+  let workerSessionId: string | null = null;
+  let workerStoragePath: string | null = null;
+  const controlCheckIntervalMs = Math.max(100, Math.min(
+    timing.heartbeatIntervalMs,
+    DEFAULT_CONTROL_CHECK_INTERVAL_MS,
+  ));
 
   const stopOwnerCheck = () => {
     if (ownerCheckTimer) {
       clearInterval(ownerCheckTimer);
       ownerCheckTimer = null;
+    }
+  };
+
+  const stopControlCheck = () => {
+    if (controlCheckTimer) {
+      clearInterval(controlCheckTimer);
+      controlCheckTimer = null;
     }
   };
 
@@ -72,6 +90,13 @@ export async function startRepoWorkerProcess(): Promise<void> {
 
     shutdownPromise = (async () => {
       stopOwnerCheck();
+      stopControlCheck();
+      try {
+        await backend?.disconnect();
+      } finally {
+        backend = null;
+      }
+
       try {
         await registration?.stop();
       } finally {
@@ -79,9 +104,17 @@ export async function startRepoWorkerProcess(): Promise<void> {
       }
 
       try {
-        await backend?.disconnect();
+        if (workerSessionId) {
+          await removeMcpProcessCommand(process.pid, workerSessionId);
+          if (workerStoragePath) {
+            await removeMcpProcessCommand(process.pid, workerSessionId, {
+              storagePath: workerStoragePath,
+            });
+          }
+        }
       } finally {
-        backend = null;
+        workerSessionId = null;
+        workerStoragePath = null;
       }
     })();
 
@@ -114,6 +147,43 @@ export async function startRepoWorkerProcess(): Promise<void> {
     draining = true;
     await registration?.updateState('draining');
     await exitWhenDrained();
+  };
+
+  const checkForControlCommands = async (): Promise<void> => {
+    if (!workerSessionId || exitRequested) {
+      return;
+    }
+
+    const command = await readMcpProcessCommand(process.pid, workerSessionId)
+      ?? (workerStoragePath
+        ? await readMcpProcessCommand(process.pid, workerSessionId, {
+          storagePath: workerStoragePath,
+        })
+        : null);
+    if (!command) {
+      return;
+    }
+
+    if (command.command === 'drain') {
+      await beginDrain();
+      await removeMcpProcessCommand(process.pid, workerSessionId);
+      if (workerStoragePath) {
+        await removeMcpProcessCommand(process.pid, workerSessionId, {
+          storagePath: workerStoragePath,
+        });
+      }
+    }
+  };
+
+  const startControlCheck = () => {
+    stopControlCheck();
+    controlCheckTimer = setInterval(() => {
+      void checkForControlCommands().catch((error) => {
+        const err = error instanceof Error ? error.message : String(error);
+        console.error(`GitNexus repo worker control check failed: ${err}`);
+      });
+    }, controlCheckIntervalMs);
+    controlCheckTimer.unref?.();
   };
 
   const startOwnerCheck = (routerPid: number) => {
@@ -155,6 +225,8 @@ export async function startRepoWorkerProcess(): Promise<void> {
   process.on('message', async (message: unknown) => {
     if (!backend && isWorkerBootstrapMessage(message)) {
       try {
+        workerSessionId = message.sessionId;
+        workerStoragePath = message.repo.storagePath;
         registration = createMcpProcessRegistration({
           pid: process.pid,
           ppid: process.ppid,
@@ -178,7 +250,9 @@ export async function startRepoWorkerProcess(): Promise<void> {
           lastActivityAt: new Date().toISOString(),
         });
         startOwnerCheck(message.routerPid);
+        startControlCheck();
         process.send?.({ kind: 'ready' });
+        await checkForControlCommands();
         await exitWhenDrained();
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);

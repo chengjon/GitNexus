@@ -8,6 +8,7 @@ import {
   type McpProcessRecord,
   type McpProcessRole,
   type McpProcessState,
+  writeMcpProcessCommand,
 } from '../runtime/mcp-process-registry.js';
 import { getDefaultMcpProcessTimingConfig } from '../runtime/mcp-process-config.js';
 
@@ -15,10 +16,14 @@ const DEFAULT_MCP_QUIESCE_TIMEOUT_MS = 15_000;
 const DEFAULT_MCP_POLL_INTERVAL_MS = 250;
 
 export interface ProcScanOptions {
+  isPidAlive?: (pid: number) => boolean;
+  listRecords?: () => Promise<McpProcessRecord[]>;
+  now?: Date;
   procRoot?: string;
   platform?: NodeJS.Platform;
   runLsof?: (targetPath: string) => Promise<string>;
   readPidArgv?: (pid: string) => Promise<string[]>;
+  runtimeDir?: string;
 }
 
 export interface QuiesceGitNexusMcpHoldersOptions {
@@ -41,7 +46,8 @@ export interface DrainGitNexusMcpPidsOptions {
   completionTimeoutMs?: number;
   isPidAlive?: (pid: number) => boolean;
   listRecords?: () => Promise<McpProcessRecord[]>;
-  requestDrainPid?: (pid: number) => Promise<void>;
+  requestDrainPid?: (pid: number, record?: McpProcessRecord) => Promise<void>;
+  runtimeDir?: string;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -108,44 +114,75 @@ const parseLsofPidOutput = (raw: string): string[] => {
   return [...holderPids].sort((left, right) => Number(left) - Number(right));
 };
 
+const listRegisteredGitNexusMcpPidsHoldingPath = async (
+  normalizedTarget: string,
+  options: ProcScanOptions = {},
+): Promise<string[]> => {
+  const records = await (options.listRecords ?? (() => listMcpProcessRecords({
+    runtimeDir: options.runtimeDir,
+  })))();
+  const holderPids = new Set<string>();
+
+  for (const record of records) {
+    if (record.role !== 'repo-worker' || !record.storagePath) {
+      continue;
+    }
+
+    const repoKuzuPath = path.resolve(path.join(record.storagePath, 'kuzu'));
+    if (repoKuzuPath !== normalizedTarget) {
+      continue;
+    }
+
+    const health = deriveMcpProcessHealth(record, {
+      isPidAlive: options.isPidAlive,
+      now: options.now,
+    });
+    if (health === 'stale') {
+      continue;
+    }
+
+    holderPids.add(String(record.pid));
+  }
+
+  return [...holderPids].sort((left, right) => Number(left) - Number(right));
+};
+
 export const listGitNexusMcpPidsHoldingPath = async (
   targetPath: string,
   options: ProcScanOptions = {},
 ): Promise<string[]> => {
   const platform = options.platform ?? process.platform;
   const procRoot = options.procRoot ?? '/proc';
+  const normalizedTarget = path.resolve(targetPath);
+  const registeredHolderPids = await listRegisteredGitNexusMcpPidsHoldingPath(normalizedTarget, options);
+  const holderPidSet = new Set<string>(registeredHolderPids);
   if (!options.procRoot && platform !== 'linux') {
     try {
       const runLsof = options.runLsof ?? defaultRunLsof;
       const readPidArgv = options.readPidArgv ?? defaultReadPidArgv;
       const output = await runLsof(targetPath);
       const pids = parseLsofPidOutput(output);
-      const holderPids: string[] = [];
       for (const pid of pids) {
         try {
           const argv = await readPidArgv(pid);
           if (isGitNexusMcpCommand(argv)) {
-            holderPids.push(pid);
+            holderPidSet.add(pid);
           }
         } catch {
           // process may disappear while scanning; ignore
         }
       }
-      holderPids.sort((left, right) => Number(left) - Number(right));
-      return holderPids;
+      return [...holderPidSet].sort((left, right) => Number(left) - Number(right));
     } catch {
-      return [];
+      return [...holderPidSet].sort((left, right) => Number(left) - Number(right));
     }
   }
-
-  const normalizedTarget = path.resolve(targetPath);
-  const holderPids: string[] = [];
 
   let entries: string[] = [];
   try {
     entries = await fs.readdir(procRoot);
   } catch {
-    return [];
+    return [...holderPidSet].sort((left, right) => Number(left) - Number(right));
   }
 
   for (const entry of entries) {
@@ -173,7 +210,7 @@ export const listGitNexusMcpPidsHoldingPath = async (
       try {
         const linkTarget = await fs.readlink(path.join(pidDir, 'fd', fdEntry));
         if (path.resolve(linkTarget) === normalizedTarget) {
-          holderPids.push(entry);
+          holderPidSet.add(entry);
           break;
         }
       } catch {
@@ -182,12 +219,24 @@ export const listGitNexusMcpPidsHoldingPath = async (
     }
   }
 
-  holderPids.sort((left, right) => Number(left) - Number(right));
-  return holderPids;
+  return [...holderPidSet].sort((left, right) => Number(left) - Number(right));
 };
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
+
+const hasFreshHeartbeat = (
+  record: Pick<McpProcessRecord, 'lastHeartbeatAt'> | undefined,
+  nowMs: number,
+  staleThresholdMs: number,
+): boolean => {
+  if (!record) {
+    return false;
+  }
+
+  const heartbeatAgeMs = nowMs - Date.parse(record.lastHeartbeatAt);
+  return Number.isFinite(heartbeatAgeMs) && heartbeatAgeMs <= staleThresholdMs;
+};
 
 const isPidAlive = (pid: number): boolean => {
   try {
@@ -201,11 +250,42 @@ const isPidAlive = (pid: number): boolean => {
   }
 };
 
-const requestDrainPid = async (pid: number): Promise<void> => {
+const requestDrainPid = async (
+  pid: number,
+  record?: McpProcessRecord,
+  runtimeDir?: string,
+): Promise<void> => {
+  let wroteCommand = false;
+  if (record?.sessionId) {
+    const command = {
+      command: 'drain' as const,
+      pid,
+      sessionId: record.sessionId,
+      requestedAt: new Date().toISOString(),
+      requestedByPid: process.pid,
+    };
+
+    if (record.storagePath) {
+      try {
+        await writeMcpProcessCommand(command, { storagePath: record.storagePath });
+        wroteCommand = true;
+      } catch {
+        // repo-local command delivery is best-effort
+      }
+    }
+
+    try {
+      await writeMcpProcessCommand(command, { runtimeDir });
+      wroteCommand = true;
+    } catch {
+      // global runtime command delivery is best-effort
+    }
+  }
+
   try {
     process.kill(pid, 'SIGUSR1');
   } catch (err: any) {
-    if (err?.code !== 'ESRCH') {
+    if (err?.code !== 'ESRCH' && !wroteCommand) {
       throw err;
     }
   }
@@ -287,15 +367,19 @@ export const drainGitNexusMcpPids = async (
   const listRecords = options.listRecords ?? listMcpProcessRecords;
   const delay = options.sleep ?? sleep;
   const checkPidAlive = options.isPidAlive ?? isPidAlive;
-  const askPidToDrain = options.requestDrainPid ?? requestDrainPid;
+  const askPidToDrain = options.requestDrainPid ?? ((pid, record) => requestDrainPid(pid, record, options.runtimeDir));
   const ackTimeoutMs = options.ackTimeoutMs ?? timing.drainAckTimeoutMs;
   const completionTimeoutMs = options.completionTimeoutMs ?? timing.drainCompletionTimeoutMs;
+  const staleThresholdMs = timing.staleThresholdMs;
   const acknowledgedPids = new Set<number>();
   const completedPids = new Set<number>();
+  const initialRecords = await listRecords();
+  const initialRecordsByPid = new Map(initialRecords.map(record => [record.pid, record]));
 
   const refreshDrainState = async () => {
     const records = await listRecords();
     const recordsByPid = new Map(records.map(record => [record.pid, record]));
+    const nowMs = Date.now();
 
     for (const pid of requestedPids) {
       if (completedPids.has(pid)) {
@@ -304,18 +388,20 @@ export const drainGitNexusMcpPids = async (
 
       const alive = checkPidAlive(pid);
       const record = recordsByPid.get(pid);
-      if (record?.state === 'draining' || record?.state === 'stopping' || !alive) {
+      const recordIsFresh = hasFreshHeartbeat(record, nowMs, staleThresholdMs);
+      if (record?.state === 'draining' || record?.state === 'stopping') {
         acknowledgedPids.add(pid);
       }
 
-      if (!alive) {
+      if (!alive && !recordIsFresh) {
+        acknowledgedPids.add(pid);
         completedPids.add(pid);
       }
     }
   };
 
   for (const pid of requestedPids) {
-    await askPidToDrain(pid);
+    await askPidToDrain(pid, initialRecordsByPid.get(pid));
   }
 
   await refreshDrainState();

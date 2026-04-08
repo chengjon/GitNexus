@@ -12,7 +12,10 @@ import type {
   WorkerResponseMessage,
 } from '../../src/mcp/repo-worker-protocol.js';
 import type { RepoHandle } from '../../src/mcp/local/runtime/types.js';
-import { listMcpProcessRecords } from '../../src/runtime/mcp-process-registry.js';
+import {
+  listMcpProcessRecords,
+  writeMcpProcessCommand,
+} from '../../src/runtime/mcp-process-registry.js';
 
 const activeChildren = new Set<ChildProcess>();
 
@@ -353,12 +356,158 @@ withTestKuzuDB('repo-worker', (handle) => {
       } satisfies WorkerBootstrapMessage);
       await waitForWorkerReady(child);
 
+      const exitPromise = waitForWorkerExit(child, 2000);
       process.kill(child.pid!, 'SIGUSR1');
-      const exitResult = await waitForWorkerExit(child, 2000);
+      const exitResult = await exitPromise;
       activeChildren.delete(child);
 
       expect(exitResult.code).toBe(0);
       expect(exitResult.signal).toBeNull();
+    });
+
+    it('cooperatively drains on a runtime control command and exits', async () => {
+      const repoPath = path.join(handle.tmpHandle.dbPath, 'repo-drain-command');
+      const workerKuzuPath = path.join(handle.tmpHandle.dbPath, 'worker-kuzu-drain-command');
+      const runtimeDir = path.join(handle.tmpHandle.dbPath, `drain-command-runtime-${Date.now()}`);
+      await fs.mkdir(path.join(repoPath, 'src'), { recursive: true });
+      await fs.cp(handle.dbPath, workerKuzuPath, { recursive: true });
+
+      const repo: RepoHandle = {
+        id: `${handle.repoId}-drain-command`,
+        name: 'test-repo-drain-command',
+        repoPath,
+        storagePath: handle.tmpHandle.dbPath,
+        kuzuPath: workerKuzuPath,
+        indexedAt: new Date().toISOString(),
+        lastCommit: 'drain-command',
+        stats: { files: 1, nodes: 1, communities: 1, processes: 1 },
+      };
+
+      const cliEntry = fileURLToPath(new URL('../../dist/cli/index.js', import.meta.url));
+      const child = fork(cliEntry, ['mcp', '--repo-worker'], {
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
+        env: {
+          ...process.env,
+          GITNEXUS_RUNTIME_DIR: runtimeDir,
+          GITNEXUS_MCP_HEARTBEAT_INTERVAL_MS: '25',
+        },
+        execArgv: [],
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      });
+      activeChildren.add(child);
+
+      child.send({
+        kind: 'init',
+        repo,
+        routerPid: process.pid,
+        sessionId: 'session-drain-command',
+      } satisfies WorkerBootstrapMessage);
+      await waitForWorkerReady(child);
+
+      await vi.waitFor(async () => {
+        const records = await listMcpProcessRecords({ runtimeDir });
+        expect(records).toEqual([
+          expect.objectContaining({
+            pid: child.pid,
+            role: 'repo-worker',
+            sessionId: 'session-drain-command',
+            state: 'ready',
+          }),
+        ]);
+      });
+
+      const exitPromise = waitForWorkerExit(child, 2000);
+      await writeMcpProcessCommand({
+        command: 'drain',
+        pid: child.pid!,
+        sessionId: 'session-drain-command',
+        requestedAt: new Date().toISOString(),
+        requestedByPid: process.pid,
+      }, { runtimeDir });
+
+      await vi.waitFor(async () => {
+        const records = await listMcpProcessRecords({ runtimeDir });
+        expect(records[0]?.state).not.toBe('ready');
+      });
+
+      const exitResult = await exitPromise;
+      activeChildren.delete(child);
+
+      expect(exitResult.code).toBe(0);
+      expect(exitResult.signal).toBeNull();
+      await vi.waitFor(async () => {
+        expect(await listMcpProcessRecords({ runtimeDir })).toEqual([]);
+      });
+    });
+
+    it('cooperatively drains on a repo-local control command and exits', async () => {
+      const repoPath = path.join(handle.tmpHandle.dbPath, 'repo-drain-storage-command');
+      const workerKuzuPath = path.join(handle.tmpHandle.dbPath, 'worker-kuzu-drain-storage-command');
+      const runtimeDir = path.join(handle.tmpHandle.dbPath, `drain-storage-command-runtime-${Date.now()}`);
+      await fs.mkdir(path.join(repoPath, 'src'), { recursive: true });
+      await fs.cp(handle.dbPath, workerKuzuPath, { recursive: true });
+
+      const repo: RepoHandle = {
+        id: `${handle.repoId}-drain-storage-command`,
+        name: 'test-repo-drain-storage-command',
+        repoPath,
+        storagePath: handle.tmpHandle.dbPath,
+        kuzuPath: workerKuzuPath,
+        indexedAt: new Date().toISOString(),
+        lastCommit: 'drain-storage-command',
+        stats: { files: 1, nodes: 1, communities: 1, processes: 1 },
+      };
+
+      const cliEntry = fileURLToPath(new URL('../../dist/cli/index.js', import.meta.url));
+      const child = fork(cliEntry, ['mcp', '--repo-worker'], {
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
+        env: {
+          ...process.env,
+          GITNEXUS_RUNTIME_DIR: runtimeDir,
+          GITNEXUS_MCP_HEARTBEAT_INTERVAL_MS: '25',
+        },
+        execArgv: [],
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      });
+      activeChildren.add(child);
+
+      child.send({
+        kind: 'init',
+        repo,
+        routerPid: process.pid,
+        sessionId: 'session-drain-storage-command',
+      } satisfies WorkerBootstrapMessage);
+      await waitForWorkerReady(child);
+
+      await vi.waitFor(async () => {
+        const records = await listMcpProcessRecords({ runtimeDir });
+        expect(records).toEqual([
+          expect.objectContaining({
+            pid: child.pid,
+            role: 'repo-worker',
+            sessionId: 'session-drain-storage-command',
+            state: 'ready',
+          }),
+        ]);
+      });
+
+      const exitPromise = waitForWorkerExit(child, 2000);
+      await writeMcpProcessCommand({
+        command: 'drain',
+        pid: child.pid!,
+        sessionId: 'session-drain-storage-command',
+        requestedAt: new Date().toISOString(),
+        requestedByPid: process.pid,
+      }, { storagePath: repo.storagePath });
+
+      const exitResult = await exitPromise;
+      activeChildren.delete(child);
+
+      expect(exitResult.code).toBe(0);
+      expect(exitResult.signal).toBeNull();
+      await vi.waitFor(async () => {
+        expect(await listMcpProcessRecords({ runtimeDir })).toEqual([]);
+      });
     });
   });
 }, {

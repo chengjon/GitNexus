@@ -6,9 +6,13 @@ import {
   cleanupMcpProcessRegistry,
   createMcpSessionId,
   deriveMcpProcessHealth,
+  getMcpProcessCommandPath,
   getMcpProcessRecordPath,
   listMcpProcessRecords,
+  readMcpProcessCommand,
+  removeMcpProcessCommand,
   writeMcpProcessRecord,
+  writeMcpProcessCommand,
   type McpProcessRecord,
 } from '../../src/runtime/mcp-process-registry.js';
 
@@ -50,6 +54,37 @@ describe('mcp-process-registry', () => {
     expect(records).toEqual([record]);
   });
 
+  it('writes, reads, and removes repo-local process commands via storagePath', async () => {
+    const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-storage-command-'));
+    cleanupDirs.push(storagePath);
+    const commandPath = getMcpProcessCommandPath(4242, 'session-4242', { storagePath });
+
+    await writeMcpProcessCommand({
+      command: 'drain',
+      pid: 4242,
+      sessionId: 'session-4242',
+      requestedAt: '2026-04-08T00:00:00.000Z',
+      requestedByPid: 1,
+    }, { storagePath });
+
+    expect(commandPath).toContain(path.join('mcp-commands', '4242.session-4242.json'));
+    await expect(fs.stat(commandPath)).resolves.toMatchObject({
+      isFile: expect.any(Function),
+    });
+
+    await expect(readMcpProcessCommand(4242, 'session-4242', { storagePath })).resolves.toEqual({
+      command: 'drain',
+      pid: 4242,
+      sessionId: 'session-4242',
+      requestedAt: '2026-04-08T00:00:00.000Z',
+      requestedByPid: 1,
+    });
+
+    await removeMcpProcessCommand(4242, 'session-4242', { storagePath });
+
+    await expect(readMcpProcessCommand(4242, 'session-4242', { storagePath })).resolves.toBeNull();
+  });
+
   it('derives orphaned and stale health from liveness checks', () => {
     const now = new Date('2026-04-05T00:01:00.000Z');
 
@@ -84,7 +119,7 @@ describe('mcp-process-registry', () => {
       role: 'router',
       sessionId: 'session-2',
       startedAt: '2026-04-05T00:00:00.000Z',
-      lastHeartbeatAt: '2026-04-05T00:00:10.000Z',
+      lastHeartbeatAt: '2026-04-04T23:59:00.000Z',
       cwd: '/tmp/project',
       command: 'gitnexus mcp',
       state: 'ready',
@@ -98,6 +133,28 @@ describe('mcp-process-registry', () => {
     })).toBe('stale');
   });
 
+  it('treats fresh-heartbeat pid visibility failures as suspect instead of stale', () => {
+    const now = new Date('2026-04-05T00:01:00.000Z');
+    const freshRouter: McpProcessRecord = {
+      pid: 601,
+      ppid: 1,
+      role: 'router',
+      sessionId: 'session-fresh',
+      startedAt: '2026-04-05T00:00:00.000Z',
+      lastHeartbeatAt: '2026-04-05T00:00:55.000Z',
+      cwd: '/tmp/project',
+      command: 'gitnexus mcp',
+      state: 'ready',
+    };
+
+    expect(deriveMcpProcessHealth(freshRouter, {
+      now,
+      isPidAlive: () => false,
+      staleThresholdMs: 60_000,
+      idleThresholdMs: 120_000,
+    })).toBe('suspect');
+  });
+
   it('cleans stale records and terminates orphaned workers', async () => {
     const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-mcp-gc-'));
     cleanupDirs.push(runtimeDir);
@@ -108,7 +165,7 @@ describe('mcp-process-registry', () => {
       role: 'router',
       sessionId: 'session-stale',
       startedAt: '2026-04-05T00:00:00.000Z',
-      lastHeartbeatAt: '2026-04-05T00:00:00.000Z',
+      lastHeartbeatAt: '2026-04-04T23:59:00.000Z',
       cwd: '/tmp/project',
       command: 'gitnexus mcp',
       state: 'ready',

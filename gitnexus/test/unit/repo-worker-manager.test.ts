@@ -186,6 +186,71 @@ describe('RepoWorkerManager', () => {
     expect(error.message).toContain('exited');
   });
 
+  it('recycles the worker and retries once after a fatal native error response', async () => {
+    const firstChild = createFakeChild();
+    const secondChild = createFakeChild();
+    secondChild.pid = 5252;
+    const forkWorker = vi.fn()
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(secondChild);
+    const manager = new RepoWorkerManager({
+      cliEntry: '/tmp/fake-cli.js',
+      forkWorker,
+      requestTimeoutMs: 1000,
+    });
+
+    const promise = manager.call(REPO, 'queryClusters', 'repo-a', 100);
+    firstChild.emit('message', { kind: 'ready' });
+
+    await vi.waitFor(() => {
+      const sentRequests = firstChild.send.mock.calls
+        .map(([message]) => message)
+        .filter((message): message is WorkerRequestMessage => message?.kind === 'request');
+
+      expect(sentRequests).toHaveLength(1);
+    });
+
+    const firstRequest = firstChild.send.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is WorkerRequestMessage => message?.kind === 'request')[0];
+
+    firstChild.emit('message', {
+      kind: 'response',
+      requestId: firstRequest.requestId,
+      ok: false,
+      error: 'Buffer manager exception: Mmap for size 8796093022208 failed.',
+    });
+
+    await vi.waitFor(() => {
+      expect(forkWorker).toHaveBeenCalledTimes(2);
+      expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
+    secondChild.emit('message', { kind: 'ready' });
+
+    await vi.waitFor(() => {
+      const sentRequests = secondChild.send.mock.calls
+        .map(([message]) => message)
+        .filter((message): message is WorkerRequestMessage => message?.kind === 'request');
+
+      expect(sentRequests).toHaveLength(1);
+    });
+
+    const secondRequest = secondChild.send.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is WorkerRequestMessage => message?.kind === 'request')[0];
+
+    secondChild.emit('message', {
+      kind: 'response',
+      requestId: secondRequest.requestId,
+      ok: true,
+      result: { clusters: [{ heuristicLabel: 'RecoveredFlow' }] },
+    });
+
+    await expect(promise).resolves.toEqual({ clusters: [{ heuristicLabel: 'RecoveredFlow' }] });
+    expect(manager.__testOnlyGetWorkerPid('repo-a')).toBe(5252);
+  });
+
   it('retries startup when a worker exits right after ready', async () => {
     const firstChild = createFakeChild();
     const secondChild = createFakeChild();

@@ -172,6 +172,40 @@ describe('analyze MCP lock-holder helpers', () => {
     })).resolves.toEqual(['101']);
   });
 
+  it('falls back to registered repo workers when proc scanning cannot see host-side holders', async () => {
+    const procRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-proc-empty-'));
+    const targetPath = '/tmp/example/.gitnexus/repo-a/kuzu';
+
+    try {
+      await expect(listGitNexusMcpPidsHoldingPath(targetPath, {
+        procRoot,
+        listRecords: async () => [
+          {
+            pid: 101,
+            ppid: 1,
+            role: 'repo-worker',
+            sessionId: 'session-101',
+            startedAt: '2026-04-05T00:00:00.000Z',
+            lastHeartbeatAt: '2026-04-05T00:00:50.000Z',
+            lastActivityAt: '2026-04-05T00:00:50.000Z',
+            cwd: '/tmp/repo-a',
+            command: 'gitnexus mcp --repo-worker',
+            state: 'ready',
+            repoId: 'repo-a',
+            repoName: 'repo-a',
+            repoPath: '/tmp/repo-a',
+            storagePath: '/tmp/example/.gitnexus/repo-a',
+            routerPid: 999,
+          },
+        ],
+        isPidAlive: () => false,
+        now: new Date('2026-04-05T00:00:55.000Z'),
+      })).resolves.toEqual(['101']);
+    } finally {
+      await fs.rm(procRoot, { recursive: true, force: true });
+    }
+  });
+
   it('is a no-op when no MCP holders exist', async () => {
     const result = await quiesceGitNexusMcpHolders('/tmp/example/.gitnexus/kuzu', {
       findHolders: async () => [],
@@ -320,6 +354,44 @@ describe('analyze MCP lock-holder helpers', () => {
       drainedPids: [101],
       terminatedPids: [],
       waitTimedOut: false,
+    });
+  });
+
+  it('does not report drain completion when pid visibility fails but heartbeat is still fresh', async () => {
+    const requested: number[] = [];
+    const result = await drainGitNexusMcpRepoWorkers({
+      repo: 'repo-a',
+      listRecords: async () => [
+        {
+          pid: 101,
+          ppid: 1,
+          role: 'repo-worker',
+          sessionId: 'session-101',
+          startedAt: '2026-04-05T00:00:00.000Z',
+          lastHeartbeatAt: new Date().toISOString(),
+          cwd: '/tmp/repo-a',
+          command: 'gitnexus mcp --repo-worker',
+          state: 'ready',
+          repoId: 'repo-a',
+          repoName: 'repo-a',
+          repoPath: '/tmp/repo-a',
+          storagePath: '/tmp/.gitnexus/repo-a',
+          routerPid: 999,
+        },
+      ],
+      isPidAlive: () => false,
+      requestDrainPid: async (pid) => { requested.push(pid); },
+      sleep: async () => {},
+      ackTimeoutMs: 5,
+      completionTimeoutMs: 5,
+    });
+
+    expect(requested).toEqual([101]);
+    expect(result).toEqual({
+      requestedPids: [101],
+      acknowledgedPids: [],
+      completedPids: [],
+      waitTimedOut: true,
     });
   });
 });
