@@ -60,6 +60,7 @@ jobs:
             await downloadArtifact('pr-meta', path.join(temp, 'dl'));
             await downloadArtifact('test-reports', path.join(temp, 'dl'));
             await downloadArtifact('integration-reports', path.join(temp, 'dl'));
+            await downloadArtifact('language-support-report', path.join(temp, 'dl'));
 
       - name: Extract artifacts
         shell: bash
@@ -108,9 +109,10 @@ jobs:
             esac
           }
 
-          echo "quality=$(validate_result "$DIR/quality_result")"        >> "$GITHUB_OUTPUT"
-          echo "unit=$(validate_result "$DIR/unit_result")"              >> "$GITHUB_OUTPUT"
-          echo "integration=$(validate_result "$DIR/integration_result")" >> "$GITHUB_OUTPUT"
+          echo "quality=$(validate_result "$DIR/quality_result")"                 >> "$GITHUB_OUTPUT"
+          echo "unit=$(validate_result "$DIR/unit_result")"                       >> "$GITHUB_OUTPUT"
+          echo "language=$(validate_result "$DIR/language_support_result")"       >> "$GITHUB_OUTPUT"
+          echo "integration=$(validate_result "$DIR/integration_result")"         >> "$GITHUB_OUTPUT"
 
       - name: Checkout (for vitest config)
         if: steps.meta.outputs.skip != 'true'
@@ -181,12 +183,14 @@ jobs:
         env:
           QUALITY: ${{ steps.meta.outputs.quality }}
           UNIT: ${{ steps.meta.outputs.unit }}
+          LANG_SUPPORT: ${{ steps.meta.outputs.language }}
           INTEG: ${{ steps.meta.outputs.integration }}
           HAS_MERGED: ${{ steps.coverage.outputs.has_merged }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           DIR="$RUNNER_TEMP/artifacts"
           MERGED_DIR="$RUNNER_TEMP/merged-coverage"
+          LANG_SUPPORT_SUMMARY=$(find "$DIR/language-support-report" -name "language-support-summary.md" -type f 2>/dev/null | head -1)
 
           # ── Helper: read coverage summary into prefixed vars ──
           # Uses printf -v for safe variable assignment (no eval).
@@ -308,7 +312,7 @@ jobs:
           }
 
           # ── Overall status ──
-          if [[ "$QUALITY" == "success" && "$UNIT" == "success" && "$INTEG" == "success" ]]; then
+          if [[ "$QUALITY" == "success" && "$UNIT" == "success" && "$LANG_SUPPORT" == "success" && "$INTEG" == "success" ]]; then
             OVERALL="✅ **All checks passed**"
           else
             OVERALL="❌ **Some checks failed**"
@@ -327,8 +331,21 @@ jobs:
             echo "|-------|--------|---------|"
             echo "| $(status_icon "$QUALITY") Typecheck | \`${QUALITY}\` | tsc --noEmit |"
             echo "| $(status_icon "$UNIT") Unit Tests | \`${UNIT}\` | 3 platforms |"
+            echo "| $(status_icon "$LANG_SUPPORT") Language Support | \`${LANG_SUPPORT}\` | doctor --json + language-support-report |"
             echo "| $(status_icon "$INTEG") Integration | \`${INTEG}\` | 3 OS x 4 groups = 12 jobs |"
             echo ""
+
+            if [ -n "$LANG_SUPPORT_SUMMARY" ] && [ -f "$LANG_SUPPORT_SUMMARY" ]; then
+              echo "### Language Support Details"
+              echo ""
+              echo "<details>"
+              echo "<summary>Language Support Summary</summary>"
+              echo ""
+              cat "$LANG_SUPPORT_SUMMARY"
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
 
             if [ "$TOTAL" -gt 0 ] 2>/dev/null; then
               echo "### Test Results"

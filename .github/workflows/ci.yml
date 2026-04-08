@@ -48,7 +48,17 @@ jobs:
         run: node dist/cli/index.js doctor --json > doctor-output.json
       - name: Summarize language support
         working-directory: gitnexus
-        run: node scripts/ci/language-support-report.mjs doctor-output.json
+        run: node dist/ci/language-support-report.js doctor-output.json | tee language-support-summary.md
+
+      - name: Upload language support report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: language-support-report
+          path: |
+            gitnexus/doctor-output.json
+            gitnexus/language-support-summary.md
+          retention-days: 5
 
   integration:
     uses: ./.github/workflows/ci-integration.yml
@@ -75,14 +85,14 @@ jobs:
           PR_NUMBER: ${{ github.event.number }}
           QUALITY: ${{ needs.quality.result }}
           UNIT: ${{ needs.unit-tests.result }}
-          LANG: ${{ needs.language-support.result }}
+          LANG_SUPPORT: ${{ needs.language-support.result }}
           INTEG: ${{ needs.integration.result }}
         run: |
           mkdir -p pr-meta
           echo "$PR_NUMBER"  > pr-meta/pr_number
           echo "$QUALITY"    > pr-meta/quality_result
           echo "$UNIT"       > pr-meta/unit_result
-          echo "$LANG"       > pr-meta/language_support_result
+          echo "$LANG_SUPPORT" > pr-meta/language_support_result
           echo "$INTEG"      > pr-meta/integration_result
 
       - name: Upload PR metadata
@@ -106,16 +116,16 @@ jobs:
         env:
           QUALITY: ${{ needs.quality.result }}
           UNIT: ${{ needs.unit-tests.result }}
-          LANG: ${{ needs.language-support.result }}
+          LANG_SUPPORT: ${{ needs.language-support.result }}
           INTEG: ${{ needs.integration.result }}
         run: |
           echo "Quality:     $QUALITY"
           echo "Unit Tests:  $UNIT"
-          echo "Lang Support:$LANG"
+          echo "Lang Support:$LANG_SUPPORT"
           echo "Integration: $INTEG"
           if [[ "$QUALITY" != "success" ]] ||
              [[ "$UNIT" != "success" ]] ||
-             [[ "$LANG" != "success" ]] ||
+             [[ "$LANG_SUPPORT" != "success" ]] ||
              [[ "$INTEG" != "success" ]]; then
             echo "::error::One or more CI jobs failed"
             exit 1

@@ -60,14 +60,16 @@ Status sync (2026-04-08):
   several review/doc drift items have since been truth-synced in dedicated
   2026-04-08 repository-local truth-sync slices cataloged from the remediation
   roadmap
-- the remediation roadmap is the right entrypoint for deciding which stale-doc
-  residuals still remain open:
+- the remediation roadmap is the current backlog entrypoint and current
+  stale-doc follow-up index for deciding which stale-doc residuals still
+  remain open:
   [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md)
 - current stale-doc follow-up index: the remediation roadmap and the 2026-04-08
   repository-local truth-sync slices it explicitly links
 - reader note: the Evidence / Why this matters / Recommended direction text
   below remains preserved as audit-capture baseline context; current stale-doc
-  prioritization should defer to the remediation roadmap entrypoint above
+  prioritization should defer to the remediation roadmap backlog-entrypoint /
+  stale-doc-follow-up-index described above
 
 Evidence:
 
@@ -252,7 +254,7 @@ Later status sync for the `detect_changes` host-validation finding:
 Broader stale-doc / repair-order follow-up is intentionally tracked in
 separate governance slices; use
 [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md)
-as the current in-repo entrypoint for backlog reading.
+as the current in-repo backlog entrypoint and stale-doc follow-up index.
 
 The repository-local follow-up slices linked from that roadmap capture the
 expected repair scope for:
