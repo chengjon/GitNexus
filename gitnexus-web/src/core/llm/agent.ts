@@ -115,6 +115,8 @@ Think like a senior architect. Be concise—no fluff, short, precise and to the 
 
 ## MERMAID RULES
 When generating diagrams:
+- Only generate Mermaid flowcharts using graph TD or graph LR.
+- Do not emit sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, journey, pie, architecture, mindmap, or other Mermaid diagram types.
 - NO special characters in node labels: quotes, (), /, &, <, >
 - Wrap labels with spaces in quotes: A["My Label"]
 - Use simple IDs: A, B, C or auth, db, api
@@ -280,12 +282,7 @@ export const createGraphRAGAgent = (
   const systemPrompt = codebaseContext 
     ? buildDynamicSystemPrompt(BASE_SYSTEM_PROMPT, codebaseContext)
     : BASE_SYSTEM_PROMPT;
-  
-  // Log the full prompt for debugging
-  if (import.meta.env.DEV) {
-    console.log('🤖 AGENT SYSTEM PROMPT:\n', systemPrompt);
-  }
-  
+
   const agent = createReactAgent({
     llm: model as any,
     tools: tools as any,
@@ -360,13 +357,6 @@ export async function* streamAgentResponse(
         data = event;
       }
       
-      // DEBUG: Enhanced logging
-      if (import.meta.env.DEV) {
-        const msgType = mode === 'messages' && data?.[0]?._getType?.() || 'n/a';
-        const hasContent = mode === 'messages' && data?.[0]?.content;
-        const hasToolCalls = mode === 'messages' && data?.[0]?.tool_calls?.length > 0;
-        console.log(`🔄 [${mode}] type:${msgType} content:${!!hasContent} tools:${hasToolCalls}`);
-      }
       // Handle 'messages' mode - token-by-token streaming
       if (mode === 'messages') {
         const [msg] = Array.isArray(data) ? data : [data];
@@ -506,10 +496,6 @@ export async function* streamAgentResponse(
       }
     }
     
-    // DEBUG: Stream completed normally
-    if (import.meta.env.DEV) {
-      console.log('✅ Stream completed normally, yielding done');
-    }
     yield { type: 'done' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -543,4 +529,3 @@ export const invokeAgent = async (
   const lastMessage = result.messages[result.messages.length - 1];
   return lastMessage?.content?.toString() ?? 'No response generated.';
 };
-

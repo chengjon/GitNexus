@@ -6,8 +6,9 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { X, GitBranch, Copy, Focus, Layers, ZoomIn, ZoomOut } from 'lucide-react';
-import mermaid from 'mermaid';
 import { ProcessData, generateProcessMermaid } from '../lib/mermaid-generator';
+import { detectMermaidCapability } from '../lib/mermaid-capability';
+import { getProcessFlowMermaid } from '../lib/mermaid-loader';
 
 interface ProcessFlowModalProps {
     process: ProcessData | null;
@@ -15,42 +16,6 @@ interface ProcessFlowModalProps {
     onFocusInGraph?: (nodeIds: string[], processId: string) => void;
     isFullScreen?: boolean;
 }
-
-// Initialize mermaid with cyan/purple theme matching GitNexus
-// Initialize mermaid with cyan/purple theme matching GitNexus
-mermaid.initialize({
-    startOnLoad: false,
-    suppressErrorRendering: true, // Try to suppress if supported
-    maxTextSize: 900000, // Increase from default 50000 to handle large combined diagrams
-    theme: 'base',
-    themeVariables: {
-        primaryColor: '#1e293b', // node bg
-        primaryTextColor: '#f1f5f9',
-        primaryBorderColor: '#22d3ee',
-        lineColor: '#94a3b8',
-        secondaryColor: '#1e293b',
-        tertiaryColor: '#0f172a',
-        mainBkg: '#1e293b', // background
-        nodeBorder: '#22d3ee',
-        clusterBkg: '#1e293b',
-        clusterBorder: '#475569',
-        titleColor: '#f1f5f9',
-        edgeLabelBackground: '#0f172a',
-    },
-    flowchart: {
-        curve: 'basis',
-        padding: 50,
-        nodeSpacing: 120,
-        rankSpacing: 140,
-        htmlLabels: true,
-    },
-});
-
-// Suppress distinct syntax error overlay
-mermaid.parseError = (err) => {
-    // Suppress visual error - we handle errors in the render try/catch
-    console.debug('Mermaid parse error (suppressed):', err);
-};
 
 export const ProcessFlowModal = ({ process, onClose, onFocusInGraph, isFullScreen = false }: ProcessFlowModalProps) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +30,27 @@ export const ProcessFlowModal = ({ process, onClose, onFocusInGraph, isFullScree
     const [pan, setPan] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+    const getRenderableMermaidCode = useCallback(() => {
+        if (!process) {
+            return null;
+        }
+
+        const rawMermaid = (process as any).rawMermaid as string | undefined;
+        const mermaidCode = rawMermaid ?? generateProcessMermaid(process);
+        const capability = detectMermaidCapability(mermaidCode);
+
+        if (rawMermaid && !capability.supported) {
+            return {
+                error: `GitNexus Web currently supports Mermaid flowcharts only. Detected ${capability.diagramType} syntax.`,
+                mermaidCode,
+            };
+        }
+
+        return {
+            mermaidCode,
+        };
+    }, [process]);
     
     // Reset zoom when switching between full screen and regular mode
     useEffect(() => {
@@ -135,16 +121,29 @@ export const ProcessFlowModal = ({ process, onClose, onFocusInGraph, isFullScree
 
         const renderDiagram = async () => {
             try {
-                // Check if we have raw mermaid code (from AI chat) or need to generate it
-                const mermaidCode = (process as any).rawMermaid
-                    ? (process as any).rawMermaid
-                    : generateProcessMermaid(process);
+                const renderTarget = getRenderableMermaidCode();
+                if (!renderTarget || !diagramRef.current) {
+                    return;
+                }
+
+                if (renderTarget.error) {
+                    diagramRef.current!.innerHTML = `
+          <div class="text-center p-8">
+            <div class="text-amber-300 text-sm font-medium mb-2">
+              Supported Boundary
+            </div>
+            <div class="text-slate-400 text-xs max-w-md">
+              ${renderTarget.error}
+            </div>
+          </div>
+        `;
+                    return;
+                }
+
                 const id = `mermaid-${Date.now()}`;
-
-                // Clear previous content
                 diagramRef.current!.innerHTML = '';
-
-                const { svg } = await mermaid.render(id, mermaidCode);
+                const mermaid = await getProcessFlowMermaid();
+                const { svg } = await mermaid.render(id, renderTarget.mermaidCode);
                 diagramRef.current!.innerHTML = svg;
             } catch (error) {
                 console.error('Mermaid render error:', error);
@@ -168,7 +167,7 @@ export const ProcessFlowModal = ({ process, onClose, onFocusInGraph, isFullScree
         };
 
         renderDiagram();
-    }, [process]);
+    }, [getRenderableMermaidCode, process]);
 
     // Close on escape
     useEffect(() => {
@@ -189,7 +188,9 @@ export const ProcessFlowModal = ({ process, onClose, onFocusInGraph, isFullScree
     // Copy mermaid code to clipboard
     const handleCopyMermaid = useCallback(async () => {
         if (!process) return;
-        const mermaidCode = generateProcessMermaid(process);
+        const mermaidCode = (process as any).rawMermaid
+            ? (process as any).rawMermaid
+            : generateProcessMermaid(process);
         await navigator.clipboard.writeText(mermaidCode);
     }, [process]);
 

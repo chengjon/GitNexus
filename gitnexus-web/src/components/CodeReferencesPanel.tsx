@@ -1,25 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Code, PanelLeftClose, PanelLeft, Trash2, X, Target, FileCode, Sparkles, MousePointerClick } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useAppState } from '../hooks/useAppState';
 import { NODE_COLORS } from '../lib/constants';
+import {
+  SyntaxHighlighter,
+  baseSyntaxHighlighterTheme,
+  detectCodeLanguageFromPath,
+} from '../lib/syntax-highlighter';
 
 // Match the code theme used elsewhere in the app
 const customTheme = {
-  ...vscDarkPlus,
+  ...baseSyntaxHighlighterTheme,
   'pre[class*="language-"]': {
-    ...vscDarkPlus['pre[class*="language-"]'],
-    background: '#0a0a10',
+    ...baseSyntaxHighlighterTheme['pre[class*="language-"]'],
     margin: 0,
     padding: '12px 0',
     fontSize: '13px',
     lineHeight: '1.6',
   },
   'code[class*="language-"]': {
-    ...vscDarkPlus['code[class*="language-"]'],
-    background: 'transparent',
-    fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+    ...baseSyntaxHighlighterTheme['code[class*="language-"]'],
   },
 };
 
@@ -267,12 +267,7 @@ export const CodeReferencesPanel = ({ onFocusNode }: CodeReferencesPanelProps) =
             <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
               {selectedFileContent ? (
                 <SyntaxHighlighter
-                  language={
-                    selectedFilePath?.endsWith('.py') ? 'python' :
-                    selectedFilePath?.endsWith('.js') || selectedFilePath?.endsWith('.jsx') ? 'javascript' :
-                    selectedFilePath?.endsWith('.ts') || selectedFilePath?.endsWith('.tsx') ? 'typescript' :
-                    'text'
-                  }
+                  language={detectCodeLanguageFromPath(selectedFilePath)}
                   style={customTheme as any}
                   showLineNumbers
                   startingLineNumber={1}
@@ -283,7 +278,7 @@ export const CodeReferencesPanel = ({ onFocusNode }: CodeReferencesPanelProps) =
                     textAlign: 'right',
                     userSelect: 'none',
                   }}
-                  lineProps={(lineNumber) => {
+                  lineProps={(lineNumber: number) => {
                     const startLine = selectedNode?.properties?.startLine;
                     const endLine = selectedNode?.properties?.endLine ?? startLine;
                     const isHighlighted =
@@ -340,10 +335,7 @@ export const CodeReferencesPanel = ({ onFocusNode }: CodeReferencesPanelProps) =
           const startDisplay = hasRange ? (ref.startLine ?? 0) + 1 : undefined;
           const endDisplay = hasRange ? (ref.endLine ?? ref.startLine ?? 0) + 1 : undefined;
           const language =
-            ref.filePath.endsWith('.py') ? 'python' :
-            ref.filePath.endsWith('.js') || ref.filePath.endsWith('.jsx') ? 'javascript' :
-            ref.filePath.endsWith('.ts') || ref.filePath.endsWith('.tsx') ? 'typescript' :
-            'text';
+            detectCodeLanguageFromPath(ref.filePath);
 
           const isGlowing = glowRefId === ref.id;
 
@@ -422,7 +414,7 @@ export const CodeReferencesPanel = ({ onFocusNode }: CodeReferencesPanelProps) =
                       textAlign: 'right',
                       userSelect: 'none',
                     }}
-                    lineProps={(lineNumber) => {
+                    lineProps={(lineNumber: number) => {
                       const isHighlighted =
                         hasRange &&
                         lineNumber >= start + highlightStart + 1 &&

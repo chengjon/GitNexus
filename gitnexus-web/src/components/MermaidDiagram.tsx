@@ -1,51 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import mermaid from 'mermaid';
 import { AlertTriangle, Maximize2 } from 'lucide-react';
 import { ProcessFlowModal } from './ProcessFlowModal';
 import type { ProcessData } from '../lib/mermaid-generator';
-
-// Initialize mermaid with cyan theme matching ProcessFlowModal
-mermaid.initialize({
-  startOnLoad: false,
-  maxTextSize: 900000,
-  theme: 'base',
-  themeVariables: {
-    primaryColor: '#1e293b', // node bg - slate
-    primaryTextColor: '#f1f5f9',
-    primaryBorderColor: '#22d3ee', // cyan
-    lineColor: '#94a3b8',
-    secondaryColor: '#1e293b',
-    tertiaryColor: '#0f172a',
-    mainBkg: '#1e293b',
-    nodeBorder: '#22d3ee', // cyan
-    clusterBkg: '#1e293b',
-    clusterBorder: '#475569',
-    titleColor: '#f1f5f9',
-    edgeLabelBackground: '#0f172a',
-  },
-  flowchart: {
-    curve: 'basis',
-    padding: 15,
-    nodeSpacing: 50,
-    rankSpacing: 50,
-    htmlLabels: true,
-  },
-  sequence: {
-    actorMargin: 50,
-    boxMargin: 10,
-    boxTextMargin: 5,
-    noteMargin: 10,
-    messageMargin: 35,
-  },
-  fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-  fontSize: 13,
-  suppressErrorRendering: true,
-});
-
-// Override the default error handler to prevent it from logging to UI
-mermaid.parseError = (_err) => {
-  // Silent catch
-};
+import { detectMermaidCapability } from '../lib/mermaid-capability';
+import { getInlineMermaid } from '../lib/mermaid-loader';
 
 interface MermaidDiagramProps {
   code: string;
@@ -55,19 +13,29 @@ export const MermaidDiagram = ({ code }: MermaidDiagramProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [svg, setSvg] = useState<string>('');
 
   useEffect(() => {
     const renderDiagram = async () => {
       if (!containerRef.current) return;
 
-      try {
-        // Generate unique ID for this diagram
-        const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const capability = detectMermaidCapability(code);
 
-        // Render the diagram
-        const { svg: renderedSvg } = await mermaid.render(id, code.trim());
-        setSvg(renderedSvg);
+      if (!capability.supported) {
+        if (capability.diagramType === 'unknown') {
+          setError(null);
+        } else {
+          setError(
+            `GitNexus Web currently supports Mermaid flowcharts only. Detected ${capability.diagramType} syntax.`,
+          );
+        }
+        return;
+      }
+
+      try {
+        const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const mermaid = await getInlineMermaid();
+        const { svg } = await mermaid.render(id, code.trim());
+        containerRef.current.innerHTML = svg;
         setError(null);
       } catch (err) {
         // Silent catch for streaming: 
@@ -140,7 +108,6 @@ export const MermaidDiagram = ({ code }: MermaidDiagramProps) => {
           <div
             ref={containerRef}
             className="flex items-center justify-center p-4 overflow-auto max-h-[400px]"
-            dangerouslySetInnerHTML={{ __html: svg }}
           />
         </div>
       </div>

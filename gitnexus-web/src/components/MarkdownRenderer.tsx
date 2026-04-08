@@ -1,27 +1,27 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { MermaidDiagram } from './MermaidDiagram';
 import { ToolCallCard } from './ToolCallCard';
 import { Copy, Check } from 'lucide-react';
+import {
+    SyntaxHighlighter,
+    baseSyntaxHighlighterTheme,
+    normalizeCodeLanguage,
+} from '../lib/syntax-highlighter';
 
 // Custom syntax theme
 const customTheme = {
-    ...vscDarkPlus,
+    ...baseSyntaxHighlighterTheme,
     'pre[class*="language-"]': {
-        ...vscDarkPlus['pre[class*="language-"]'],
-        background: '#0a0a10',
+        ...baseSyntaxHighlighterTheme['pre[class*="language-"]'],
         margin: 0,
         padding: '16px 0',
         fontSize: '13px',
         lineHeight: '1.6',
     },
     'code[class*="language-"]': {
-        ...vscDarkPlus['code[class*="language-"]'],
-        background: 'transparent',
-        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+        ...baseSyntaxHighlighterTheme['code[class*="language-"]'],
     },
 };
 
@@ -138,7 +138,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 return <code {...props}>{children}</code>;
             }
 
-            const language = match ? match[1] : 'text';
+            const language = normalizeCodeLanguage(match ? match[1] : 'text');
 
             // Render Mermaid diagrams
             if (language === 'mermaid') {
@@ -205,5 +205,4 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         </div>
     );
 };
-
 
