@@ -55,6 +55,10 @@ coverage/
 # Local OpenCode/OMC state
 .omc/
 
+# Archived brainstorming/export staging directories
+.sisyphus/
+tmp_exports/
+
 # Assets (screenshots, images)
 assets/
 
