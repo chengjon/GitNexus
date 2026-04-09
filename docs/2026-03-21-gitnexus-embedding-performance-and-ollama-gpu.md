@@ -3,6 +3,12 @@
 Date: 2026-03-21
 Updated: 2026-04-05
 
+## Development Governance
+
+If you are using this note to change the current GitNexus repository, top-level development governance lives in [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md).
+
+Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
+
 ## Scope
 
 This note captures the highest-value ways to reduce `gitnexus analyze --embeddings`

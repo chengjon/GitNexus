@@ -104,6 +104,16 @@
   node gitnexus/dist/cli/index.js impact writeMcpProcessCommand --direction upstream -r GitNexus --include-tests
   ```
 
+- `scope: git history and latest upstream cross-check, time: 2026-04-09`
+  再次执行 `git fetch upstream` 后，`upstream/main` 已前进到 `d9ba9aa`。
+  复核结论：
+  - 本地这条 mmap 修复链仍只存在于当前 fork / `origin/main`，对应提交包括
+    `0f4bc8b`、`f0bd8f4`、`de3b682`、`4f83342`
+  - 最新 `upstream/main` 仍未包含这组 repo-worker / runtime-drain 修补提交
+  - upstream 对同类 Kuzu runtime 风险的主线路径仍是更早的
+    `5a58508 refactor: migrate from KuzuDB to LadybugDB v0.15 (#275)`，
+    而不是在 Kuzu MCP 路径上继续补同一组 drain / recycle 修复
+
 ### 2.2 Inferred
 
 - `scope: root cause analysis, time: 2026-04-08`
@@ -122,6 +132,15 @@
   更符合“当前会话绑定的 MCP transport 被手动终止后尚未重建”的宿主连接问题，
   不再指向仓库内 GitNexus 代码本身仍有 `Mmap` 故障。
 
+- `scope: current local verification boundary, time: 2026-04-09`
+  当前继续验证 docs slice 时暴露出的真实阻塞已经不是 `Mmap for size ... failed`，
+  而是根仓库 `.git` 被只读挂载，导致真实 index / object store 不可写。
+  这意味着：
+  - `detect_changes` 的 staged-slice 验证仍可通过 `/tmp` 中的替代
+    `GIT_INDEX_FILE` 与替代 `GIT_OBJECT_DIRECTORY` 恢复
+  - 但该阻塞属于当前宿主 / 文件系统边界，不能再被归因于这条已修复的
+    MCP mmap 故障
+
 ### 2.3 Historical Baseline
 
 - `scope: original failure baseline, time: 2026-04-06 to 2026-04-08 before repair`
@@ -135,6 +154,12 @@
   - `0f4bc8b feat: isolate mcp repos in per-repo workers`
   - `f0bd8f4 feat: add MCP process registry and cooperative drain`
   - `de3b682 fix(mcp): harden repo worker startup lifecycle`
+
+- `scope: upstream architectural divergence baseline, time: 2026-03-07 to 2026-04-09`
+  upstream 在 `5a58508 refactor: migrate from KuzuDB to LadybugDB v0.15 (#275)`
+  后已经把主线 runtime 从 Kuzu 迁到 Ladybug。
+  因此截至 `2026-04-09` 的最新 `upstream/main`，并不存在与本地 fork
+  这一组 Kuzu repo-worker drain / recycle 修复完全同构的后续上游补丁链。
 
 - `scope: pre-repair CLI behavior, time: 2026-04-08 before runtime command fallback`
   沙箱内执行 `mcp drain` 会因为写 `~/.gitnexus/runtime` 失败而退化，
