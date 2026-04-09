@@ -54,6 +54,7 @@ coverage/
 
 # Local OpenCode/OMC state
 .omc/
+.omx/
 
 # Archived brainstorming/export staging directories
 .sisyphus/
