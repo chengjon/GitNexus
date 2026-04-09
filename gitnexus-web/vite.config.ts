@@ -6,7 +6,12 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
 import { createAppManualChunks, createWorkerManualChunks } from './scripts/vite-chunking.mjs';
-import { createMermaidEntryAlias, onnxRuntimeResolveConditions } from './scripts/vite-resolution.mjs';
+import { createStaticCopyTargets } from './scripts/vite-static-copy.mjs';
+import {
+  createMermaidEntryAlias,
+  createTreeSitterBrowserAliasEntries,
+  onnxRuntimeResolveConditions,
+} from './scripts/vite-resolution.mjs';
 
 export default defineConfig({
   plugins: [
@@ -14,14 +19,8 @@ export default defineConfig({
     tailwindcss(),
     wasm(),
     topLevelAwait(),
-    // Copy kuzu-wasm worker file to assets folder for production
     viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/kuzu-wasm/kuzu_wasm_worker.js',
-          dest: 'assets'
-        }
-      ]
+      targets: createStaticCopyTargets(),
     }),
   ],
   resolve: {
@@ -39,6 +38,9 @@ export default defineConfig({
       // Keep the Vercel workaround on the bare package only; subpath imports must bypass it.
       createMermaidEntryAlias(
         path.resolve(__dirname, 'node_modules/mermaid/dist/mermaid.esm.min.mjs'),
+      ),
+      ...createTreeSitterBrowserAliasEntries(
+        path.resolve(__dirname, 'src/shims/empty-browser-module.js'),
       ),
     ],
   },

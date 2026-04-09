@@ -25,6 +25,7 @@ const workerChunkGroups = [
   ['worker-langgraph', ['/node_modules/@langchain/langgraph/', '/node_modules/@langchain/langgraph-checkpoint/', '/node_modules/@langchain/langgraph-sdk/']],
   ['worker-llm-providers', ['/node_modules/langchain/', '/node_modules/@langchain/openai/', '/node_modules/@langchain/anthropic/', '/node_modules/@langchain/google-genai/', '/node_modules/@langchain/ollama/', '/node_modules/openai/', '/node_modules/@anthropic-ai/', '/node_modules/@google/']],
   ['worker-transformers', ['/node_modules/@huggingface/transformers/', '/node_modules/@xenova/']],
+  ['worker-onnx-support', ['/node_modules/onnxruntime-common/', '/node_modules/protobufjs/', '/node_modules/flatbuffers/', '/node_modules/long/', '/node_modules/platform/', '/node_modules/guid-typescript/']],
   ['worker-onnx', ['/node_modules/onnxruntime-', '/node_modules/onnxruntime/']],
   ['worker-tree-sitter', ['/node_modules/web-tree-sitter/', '/node_modules/tree-sitter-wasms/']],
   ['worker-graph', ['/node_modules/graphology', '/node_modules/d3-', '/node_modules/sigma/', '/node_modules/cose-bilkent/', '/node_modules/dagre/', '/node_modules/@dagrejs/']],

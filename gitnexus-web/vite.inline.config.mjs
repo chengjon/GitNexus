@@ -6,7 +6,12 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
 import { createAppManualChunks, createWorkerManualChunks } from './scripts/vite-chunking.mjs';
-import { createMermaidEntryAlias, onnxRuntimeResolveConditions } from './scripts/vite-resolution.mjs';
+import { createStaticCopyTargets } from './scripts/vite-static-copy.mjs';
+import {
+  createMermaidEntryAlias,
+  createTreeSitterBrowserAliasEntries,
+  onnxRuntimeResolveConditions,
+} from './scripts/vite-resolution.mjs';
 
 const rootDir = path.dirname(new URL(import.meta.url).pathname);
 
@@ -17,12 +22,7 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
     viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/kuzu-wasm/kuzu_wasm_worker.js',
-          dest: 'assets'
-        }
-      ]
+      targets: createStaticCopyTargets(),
     }),
   ],
   resolve: {
@@ -38,6 +38,9 @@ export default defineConfig({
       },
       createMermaidEntryAlias(
         path.resolve(rootDir, 'node_modules/mermaid/dist/mermaid.esm.min.mjs'),
+      ),
+      ...createTreeSitterBrowserAliasEntries(
+        path.resolve(rootDir, 'src/shims/empty-browser-module.js'),
       ),
     ],
   },

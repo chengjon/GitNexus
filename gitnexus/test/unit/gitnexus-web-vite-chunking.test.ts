@@ -29,4 +29,13 @@ describe('gitnexus-web vite chunking', () => {
     expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/langsmith/dist/index.js')).toBe('worker-langchain-core');
     expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/onnxruntime-web/dist/ort.all.min.mjs')).toBe('worker-onnx');
   });
+
+  it('keeps heavy ONNX support libraries out of the main worker-onnx runtime chunk', () => {
+    const workerChunks = createWorkerManualChunks();
+
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/onnxruntime-common/dist/cjs/index.js')).toBe('worker-onnx-support');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/protobufjs/minimal.js')).toBe('worker-onnx-support');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/flatbuffers/js/flatbuffers.js')).toBe('worker-onnx-support');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/onnxruntime-web/dist/ort.all.min.mjs')).toBe('worker-onnx');
+  });
 });

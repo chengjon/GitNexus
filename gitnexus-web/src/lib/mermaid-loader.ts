@@ -2,11 +2,17 @@ import type mermaid from 'mermaid';
 
 type MermaidInstance = typeof mermaid;
 
+const MERMAID_RUNTIME_ASSET_PATH = '/vendor/mermaid/mermaid.esm.min.mjs';
+
 let mermaidPromise: Promise<MermaidInstance> | null = null;
 
 const loadMermaid = async (): Promise<MermaidInstance> => {
   if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then((module) => module.default);
+    mermaidPromise = (
+      import.meta.env.PROD
+        ? import(/* @vite-ignore */ MERMAID_RUNTIME_ASSET_PATH)
+        : import('mermaid')
+    ).then((module) => module.default);
   }
 
   return mermaidPromise;

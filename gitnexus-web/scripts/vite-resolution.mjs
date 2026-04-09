@@ -6,3 +6,16 @@ export const createMermaidEntryAlias = (mermaidEntryPath) => {
     replacement: mermaidEntryPath,
   };
 };
+
+export const createTreeSitterBrowserAliasEntries = (emptyBrowserModulePath) => {
+  return [
+    {
+      find: /^fs$/,
+      replacement: emptyBrowserModulePath,
+    },
+    {
+      find: /^path$/,
+      replacement: emptyBrowserModulePath,
+    },
+  ];
+};
