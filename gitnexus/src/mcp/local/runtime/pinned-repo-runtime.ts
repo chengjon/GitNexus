@@ -1,5 +1,5 @@
-import path from 'node:path';
 import { closeKuzu, initKuzu, isKuzuReady } from '../../core/kuzu-adapter.js';
+import { normalizePlatformPath } from '../../../lib/path-comparison.js';
 import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './types.js';
 
 export class PinnedRepoRuntime implements LocalBackendRuntimeLike {
@@ -76,7 +76,6 @@ export class PinnedRepoRuntime implements LocalBackendRuntimeLike {
   }
 
   private normalizePath(candidate: string): string {
-    const resolved = path.resolve(candidate);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    return normalizePlatformPath(candidate);
   }
 }
