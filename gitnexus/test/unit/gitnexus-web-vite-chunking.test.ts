@@ -30,6 +30,18 @@ describe('gitnexus-web vite chunking', () => {
     expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/onnxruntime-web/dist/ort.all.min.mjs')).toBe('worker-onnx');
   });
 
+  it('keeps shared LangChain vendor dependencies off the main worker-langchain-core chunk', () => {
+    const workerChunks = createWorkerManualChunks();
+
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/zod/v3/types.js')).toBe('worker-langchain-vendor');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/@cfworker/json-schema/dist/esm/validate.js')).toBe('worker-langchain-vendor');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/uuid/dist/esm-browser/index.js')).toBe('worker-langchain-vendor');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/p-queue/dist/index.js')).toBe('worker-langchain-vendor');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/mustache/mustache.mjs')).toBe('worker-langchain-vendor');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/@langchain/core/dist/messages/base.js')).toBe('worker-langchain-core');
+    expect(workerChunks('/opt/claude/GitNexus/gitnexus-web/node_modules/langsmith/dist/index.js')).toBe('worker-langchain-core');
+  });
+
   it('keeps heavy ONNX support libraries out of the main worker-onnx runtime chunk', () => {
     const workerChunks = createWorkerManualChunks();
 

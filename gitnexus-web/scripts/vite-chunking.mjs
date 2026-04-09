@@ -21,6 +21,7 @@ const appChunkGroups = [
 ];
 
 const workerChunkGroups = [
+  ['worker-langchain-vendor', ['/node_modules/zod/', '/node_modules/@cfworker/json-schema/', '/node_modules/uuid/', '/node_modules/p-queue/', '/node_modules/mustache/', '/node_modules/ansi-styles/', '/node_modules/camelcase/', '/node_modules/decamelize/']],
   ['worker-langchain-core', ['/node_modules/@langchain/core/', '/node_modules/langsmith/']],
   ['worker-langgraph', ['/node_modules/@langchain/langgraph/', '/node_modules/@langchain/langgraph-checkpoint/', '/node_modules/@langchain/langgraph-sdk/']],
   ['worker-llm-providers', ['/node_modules/langchain/', '/node_modules/@langchain/openai/', '/node_modules/@langchain/anthropic/', '/node_modules/@langchain/google-genai/', '/node_modules/@langchain/ollama/', '/node_modules/openai/', '/node_modules/@anthropic-ai/', '/node_modules/@google/']],
