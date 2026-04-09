@@ -316,6 +316,18 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
     - 只过滤这一个 `EVAL + web-tree-sitter/tree-sitter.js` 组合
     - 其他 Rollup warning 仍保持透传
     - 当前 `gitnexus-web` 构建日志已不再出现本地可控 warning
+  - 同日还复测过一条 embedding runtime narrow-entry 路线：
+    - 目标是绕开 `@huggingface/transformers` 顶层 `pipeline()` 宽入口
+    - 实验确实把 `worker-transformers-*` 从 `451.39 KB` 压到 `317.90 KB`
+    - 但 `worker-onnx-*` 反而从 `581.07 KB` 回升到 `587.37 KB`
+    - 同时重新引入了 `node:*` / `sharp` / `detect-libc` 的 browser externalization warning
+    - 因此该路线已回退，并记录为新的已证伪方向
+  - 同日也复测了 `onnxruntime-web` bare-package runtime shim 路线：
+    - 目标是把 `webgpu/wasm` 子入口拆成更细的 ONNX runtime chunks
+    - 结果虽然形成了 `worker-onnx-webgpu 580.93 KB` 与 `worker-onnx-wasm 91.24 KB`
+    - 但 `worker-transformers-*` 同时膨胀到 `904.51 KB`
+    - 这在工程效果上再次复现了已证伪的 provider shim 失败模式
+    - 因此该路线也已回退，并记录为新的已证伪方向
 
 ### Phase P2：语言支持确定性工程
 
