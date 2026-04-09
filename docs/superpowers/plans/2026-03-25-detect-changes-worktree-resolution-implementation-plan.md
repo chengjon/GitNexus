@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, Node.js child_process, git CLI, path normalization
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. This slice predates the current OpenSpec workflow, so use [2026-03-25-detect-changes-worktree-resolution-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-design.md), [2026-03-25-detect-changes-worktree-resolution-review.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-review.md), and [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md) as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -33,7 +35,7 @@ This is a targeted correctness fix, not a registry redesign or broader MCP refac
 - Modify: `gitnexus/src/storage/git.ts`
 - Modify: `gitnexus/test/unit/git.test.ts`
 
-- [ ] **Step 1: Write the failing git-helper tests**
+- [x] **Step 1: Write the failing git-helper tests**
 
 Extend `git.test.ts` with focused tests for:
 
@@ -43,7 +45,7 @@ Extend `git.test.ts` with focused tests for:
 
 Use the existing mocked `execSync` pattern in `git.test.ts`.
 
-- [ ] **Step 2: Run the new helper tests to verify failure**
+- [x] **Step 2: Run the new helper tests to verify failure**
 
 Run:
 
@@ -55,7 +57,7 @@ npx vitest run test/unit/git.test.ts
 Expected:
 - new tests fail because `getGitCommonDir()` / combined identity helper does not exist yet
 
-- [ ] **Step 3: Add minimal git-identity helpers**
+- [x] **Step 3: Add minimal git-identity helpers**
 
 Add one or both of:
 
@@ -75,7 +77,7 @@ Requirements:
 - normalize to absolute paths
 - return `null` on failure instead of throwing
 
-- [ ] **Step 4: Run helper tests and commit**
+- [x] **Step 4: Run helper tests and commit**
 
 Run:
 
@@ -100,7 +102,7 @@ git commit -m "feat: add git worktree identity helpers"
 - Modify: `gitnexus/src/mcp/local/tools/handlers/detect-changes-handler.ts`
 - Modify: `gitnexus/test/unit/calltool-dispatch.test.ts`
 
-- [ ] **Step 1: Write the failing worktree-resolution tests**
+- [x] **Step 1: Write the failing worktree-resolution tests**
 
 Extend `calltool-dispatch.test.ts` with focused `detect_changes` cases for:
 
@@ -114,7 +116,7 @@ Extend `calltool-dispatch.test.ts` with focused `detect_changes` cases for:
 
 Mock the new git helper(s), not the entire handler logic.
 
-- [ ] **Step 2: Run targeted unit tests to verify failure**
+- [x] **Step 2: Run targeted unit tests to verify failure**
 
 Run:
 
@@ -126,7 +128,7 @@ npx vitest run test/unit/calltool-dispatch.test.ts
 Expected:
 - new `detect_changes` resolution assertions fail before implementation
 
-- [ ] **Step 3: Implement path resolution in `runDetectChangesTool()`**
+- [x] **Step 3: Implement path resolution in `runDetectChangesTool()`**
 
 Add a small helper inside `detect-changes-handler.ts`, for example:
 
@@ -151,7 +153,7 @@ Required behavior:
 - only warn on meaningful ambiguity/fallback
 - do not warn merely because paths differ
 
-- [ ] **Step 4: Wire metadata fields**
+- [x] **Step 4: Wire metadata fields**
 
 Ensure `detect_changes` responses now include additive metadata:
 
@@ -168,7 +170,7 @@ metadata: {
 
 Keep all existing summary / changed_symbols / affected_processes fields intact.
 
-- [ ] **Step 5: Run targeted unit tests and commit**
+- [x] **Step 5: Run targeted unit tests and commit**
 
 Run:
 
@@ -192,7 +194,7 @@ git commit -m "fix: resolve detect_changes against active worktree"
 **Files:**
 - Modify: `gitnexus/test/integration/local-backend.test.ts`
 
-- [ ] **Step 1: Add failing integration regression for path resolution metadata**
+- [x] **Step 1: Add failing integration regression for path resolution metadata**
 
 Add integration-oriented tests for:
 
@@ -202,7 +204,7 @@ Add integration-oriented tests for:
 
 This can stay semi-isolated by mocking the git helper layer while still exercising `runDetectChangesTool()` end-to-end with a realistic handler context.
 
-- [ ] **Step 2: Run integration test to verify failure**
+- [x] **Step 2: Run integration test to verify failure**
 
 Run:
 
@@ -214,7 +216,7 @@ npx vitest run --config vitest.integration.native.config.ts test/integration/loc
 Expected:
 - new `detect_changes` path-resolution assertions fail before final implementation is complete
 
-- [ ] **Step 3: Complete any metadata/warning refinements discovered by the integration test**
+- [x] **Step 3: Complete any metadata/warning refinements discovered by the integration test**
 
 Only make bounded adjustments:
 
@@ -224,7 +226,7 @@ Only make bounded adjustments:
 
 Do not broaden into symbol-mapping or risk-score redesign.
 
-- [ ] **Step 4: Run the final detect_changes-focused verification and commit**
+- [x] **Step 4: Run the final detect_changes-focused verification and commit**
 
 Run:
 
@@ -249,7 +251,7 @@ git commit -m "test: cover detect_changes worktree resolution"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-design.md` (only if implementation meaningfully differs)
 
-- [ ] **Step 1: Run final verification commands**
+- [x] **Step 1: Run final verification commands**
 
 Run:
 
@@ -264,7 +266,7 @@ Expected:
 - all targeted tests pass
 - build passes
 
-- [ ] **Step 2: Run final diff review**
+- [x] **Step 2: Run final diff review**
 
 Run:
 
@@ -276,16 +278,29 @@ git diff -- gitnexus/src/storage/git.ts gitnexus/src/mcp/local/tools/handlers/de
 Expected:
 - changes stay concentrated in git helper + detect_changes path + targeted tests
 
-- [ ] **Step 3: Update the spec if implementation required a bounded deviation**
+- [x] **Step 3: Update the spec if implementation required a bounded deviation**
 
 Only update the design doc if the actual implementation meaningfully differs from the approved behavior.
 
-- [ ] **Step 4: Commit spec sync if needed**
+- [x] **Step 4: Commit spec sync if needed**
 
 ```bash
 git add docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-design.md
 git commit -m "docs: sync detect_changes worktree design"
 ```
+
+## Historical Verification Summary
+
+- The historical design record now states the worktree resolution contract is
+  implemented and truth-synced to current behavior.
+- The historical review record now states the handler logic, explicit `cwd`
+  precedence, and dual-CLI host guidance are already closed on the GitNexus
+  side, with only external host behavior left as follow-up research.
+- The repository now contains the planned implementation anchors:
+  `getGitCommonDir()` / `getGitIdentity()` in `storage/git.ts`,
+  additive `path_resolution` / `fallback_reason` metadata in
+  `detect-changes-handler.ts`, and explicit `cwd` precedence coverage in
+  `git.test.ts`, `calltool-dispatch.test.ts`, and `local-backend.test.ts`.
 
 ## Execution Notes
 
