@@ -12,10 +12,9 @@ import {
   type NodeTableName,
 } from './schema.js';
 import { streamAllCSVsToDisk } from './csv-generator.js';
+import { normalizeKuzuCopyPath } from './copy-path.js';
 
 export type KuzuProgressCallback = (message: string) => void;
-
-const normalizeCopyPath = (filePath: string): string => filePath.replace(/\\/g, '/');
 
 const COPY_CSV_OPTS = `(HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
 
@@ -119,7 +118,7 @@ export const loadGraphToKuzu = async (
   for (const [table, { csvPath, rows }] of nodeFiles) {
     stepsDone++;
     log(`Loading nodes ${stepsDone}/${totalSteps}: ${table} (${rows.toLocaleString()} rows)`);
-    const normalizedPath = normalizeCopyPath(csvPath);
+    const normalizedPath = normalizeKuzuCopyPath(csvPath);
     const copyQuery = getCopyQuery(table, normalizedPath);
 
     try {
@@ -172,7 +171,7 @@ export const loadGraphToKuzu = async (
       const [fromLabel, toLabel] = pairKey.split('|');
       const pairCsvPath = path.join(csvDir, `rel_${fromLabel}_${toLabel}.csv`);
       await fs.writeFile(pairCsvPath, `${relHeader}\n${lines.join('\n')}`, 'utf-8');
-      const normalizedPath = normalizeCopyPath(pairCsvPath);
+      const normalizedPath = normalizeKuzuCopyPath(pairCsvPath);
       const copyQuery = `COPY ${REL_TABLE_NAME} FROM "${normalizedPath}" (from="${fromLabel}", to="${toLabel}", HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
 
       if (pairIdx % 5 === 0 || lines.length > 1000) {

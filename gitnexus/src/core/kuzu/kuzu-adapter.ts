@@ -17,6 +17,7 @@ import {
   queryFTS as queryFTSImpl,
   type KuzuFtsRuntime,
 } from './fts.js';
+import { normalizeKuzuCopyPath } from './copy-path.js';
 import { loadGraphToKuzu as loadGraphToKuzuImpl, type KuzuProgressCallback } from './load-graph.js';
 
 let db: kuzu.Database | null = null;
@@ -50,8 +51,6 @@ const runWithSessionLock = async <T>(operation: () => Promise<T>): Promise<T> =>
     release?.();
   }
 };
-
-const normalizeCopyPath = (filePath: string): string => filePath.replace(/\\/g, '/');
 
 // Multi-language table names that were created with backticks in CODE_ELEMENT_BASE
 // and must always be referenced with backticks in queries.
@@ -375,7 +374,7 @@ export const restoreCachedEmbeddings = async (
       });
     });
 
-    const copyQuery = `COPY ${EMBEDDING_TABLE_NAME}(nodeId, embedding) FROM "${normalizeCopyPath(csvPath)}" (HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
+    const copyQuery = `COPY ${EMBEDDING_TABLE_NAME}(nodeId, embedding) FROM "${normalizeKuzuCopyPath(csvPath)}" (HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
     await conn.query(copyQuery);
   } finally {
     try { ws.destroy(); } catch {}
