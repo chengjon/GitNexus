@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { samePlatformPath } from '../lib/path-comparison.js';
 
 export interface RepoMeta {
   repoPath: string;
@@ -291,9 +292,7 @@ export const registerRepo = async (repoPath: string, meta: RepoMeta): Promise<vo
   const existing = entries.findIndex((e) => {
     const a = path.resolve(e.path);
     const b = resolved;
-    return process.platform === 'win32'
-      ? a.toLowerCase() === b.toLowerCase()
-      : a === b;
+    return samePlatformPath(a, b);
   });
 
   const entry: RegistryEntry = {

@@ -1,6 +1,7 @@
 import path from 'path';
 import { closeKuzu, initKuzu, isKuzuReady } from '../../core/kuzu-adapter.js';
 import { listRegisteredRepos } from '../../../storage/repo-manager.js';
+import { samePlatformPath } from '../../../lib/path-comparison.js';
 import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './types.js';
 
 export class BackendRuntime implements LocalBackendRuntimeLike {
@@ -14,9 +15,7 @@ export class BackendRuntime implements LocalBackendRuntimeLike {
   }
 
   private samePath(left: string, right: string): boolean {
-    return process.platform === 'win32'
-      ? left.toLowerCase() === right.toLowerCase()
-      : left === right;
+    return samePlatformPath(left, right);
   }
 
   private ambiguousRepoError(repoParam: string, candidates: RepoHandle[]): Error {
