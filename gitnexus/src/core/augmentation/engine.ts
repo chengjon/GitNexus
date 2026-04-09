@@ -16,6 +16,7 @@
 
 import path from 'path';
 import { listRegisteredRepos } from '../../storage/repo-manager.js';
+import { normalizePlatformPath } from '../../lib/path-comparison.js';
 
 /**
  * Find the best matching repo for a given working directory.
@@ -28,11 +29,7 @@ async function findRepoForCwd(cwd: string): Promise<{
 } | null> {
   try {
     const entries = await listRegisteredRepos({ validate: true });
-    const resolved = path.resolve(cwd);
-    
-    // Normalize to lowercase on Windows (drive letters can differ: D: vs d:)
-    const isWindows = process.platform === 'win32';
-    const normalizedCwd = isWindows ? resolved.toLowerCase() : resolved;
+    const normalizedCwd = normalizePlatformPath(cwd);
     const sep = path.sep;
     
     // Find the LONGEST matching repo path (most specific match wins)
@@ -40,8 +37,7 @@ async function findRepoForCwd(cwd: string): Promise<{
     let bestLen = 0;
     
     for (const entry of entries) {
-      const repoResolved = path.resolve(entry.path);
-      const normalizedRepo = isWindows ? repoResolved.toLowerCase() : repoResolved;
+      const normalizedRepo = normalizePlatformPath(entry.path);
       
       // Check if cwd is inside repo OR repo is inside cwd
       // Must match at a path separator boundary to avoid false positives

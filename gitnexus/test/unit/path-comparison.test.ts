@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { samePlatformPath } from '../../src/lib/path-comparison.js';
+import { normalizePlatformPath, samePlatformPath } from '../../src/lib/path-comparison.js';
+
+describe('normalizePlatformPath', () => {
+  it('normalizes Windows paths to lowercase resolved form', () => {
+    expect(normalizePlatformPath('D:\\Projects\\MyApp', 'win32')).toBe('d:\\projects\\myapp');
+  });
+
+  it('preserves POSIX case while resolving the path', () => {
+    expect(normalizePlatformPath('/home/user/Project', 'linux')).toBe('/home/user/Project');
+  });
+});
 
 describe('samePlatformPath', () => {
   it('compares Windows paths case-insensitively', () => {
