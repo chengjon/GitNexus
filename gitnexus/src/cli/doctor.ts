@@ -6,6 +6,7 @@ import { getHostPlans } from './setup.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { getOptionalLanguageSupportSummary, type LanguageSupportSummaryEntry } from '../core/tree-sitter/language-registry.js';
 import { nativeRuntimeManager } from '../runtime/native-runtime-manager.js';
+import { samePlatformPath } from '../lib/path-comparison.js';
 import fs from 'node:fs/promises';
 
 export interface DoctorOptions {
@@ -185,14 +186,6 @@ function resolveOverall(checks: DoctorCheck[]): DoctorResult['overall'] {
   if (checks.some((check) => check.status === 'fail')) return 'fail';
   if (checks.some((check) => check.status === 'warn')) return 'warn';
   return 'pass';
-}
-
-function samePath(a: string, b: string): boolean {
-  const left = a.trim();
-  const right = b.trim();
-  return process.platform === 'win32'
-    ? left.toLowerCase() === right.toLowerCase()
-    : left === right;
 }
 
 function formatCheck(check: DoctorCheck): string {
@@ -928,7 +921,7 @@ export async function runDoctor(
   }
 
   const registry = await deps.readRegistry();
-  const registryEntry = registry.find((entry) => samePath(entry.path, repoRoot));
+  const registryEntry = registry.find((entry) => samePlatformPath(entry.path, repoRoot));
   checks.push({
     name: 'registry-entry',
     status: registryEntry ? 'pass' : 'warn',
