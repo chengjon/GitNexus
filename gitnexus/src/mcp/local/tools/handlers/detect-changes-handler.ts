@@ -1,6 +1,7 @@
 import path from 'path';
 import { executeParameterized } from '../../../core/kuzu-adapter.js';
 import { getGitIdentity } from '../../../../storage/git.js';
+import { samePlatformPath } from '../../../../lib/path-comparison.js';
 import type { ToolContext } from '../tool-context.js';
 
 export interface DetectChangesToolParams {
@@ -48,7 +49,7 @@ function resolveGitDiffPath(
     warnings.push(
       `Git identity could not be resolved for indexed repo path '${repoPath}'. Falling back to registry repo path.`,
     );
-  } else if (!cwdIdentity && repoIdentity && processCwd !== repoPath) {
+  } else if (!cwdIdentity && repoIdentity && isAbsolutePathDifferent(processCwd, repoPath)) {
     fallbackReason = 'not_git_repo';
     // No warning for non-git cwd fallback.
   }
@@ -62,7 +63,7 @@ function resolveGitDiffPath(
 }
 
 function isAbsolutePathDifferent(left: string, right: string): boolean {
-  return path.resolve(left) !== path.resolve(right);
+  return !samePlatformPath(left, right);
 }
 
 /**
