@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { samePlatformPath } from '../lib/path-comparison.js';
 import { execFile } from 'child_process';
 import {
   deriveMcpProcessHealth,
@@ -129,7 +130,7 @@ const listRegisteredGitNexusMcpPidsHoldingPath = async (
     }
 
     const repoKuzuPath = path.resolve(path.join(record.storagePath, 'kuzu'));
-    if (repoKuzuPath !== normalizedTarget) {
+    if (!samePlatformPath(repoKuzuPath, normalizedTarget)) {
       continue;
     }
 
@@ -209,7 +210,7 @@ export const listGitNexusMcpPidsHoldingPath = async (
     for (const fdEntry of fdEntries) {
       try {
         const linkTarget = await fs.readlink(path.join(pidDir, 'fd', fdEntry));
-        if (path.resolve(linkTarget) === normalizedTarget) {
+        if (samePlatformPath(linkTarget, normalizedTarget)) {
           holderPidSet.add(entry);
           break;
         }
@@ -437,7 +438,7 @@ export const drainGitNexusMcpRepoWorkers = async (
     .filter((record) => (
       record.repoName === repo
       || record.repoId === repo
-      || (normalizedRepoPath !== null && record.repoPath && path.resolve(record.repoPath) === normalizedRepoPath)
+      || (normalizedRepoPath !== null && record.repoPath && samePlatformPath(record.repoPath, normalizedRepoPath))
     ))
     .map(record => record.pid);
 
