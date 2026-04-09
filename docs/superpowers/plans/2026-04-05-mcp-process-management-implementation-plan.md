@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Node filesystem/process APIs, Commander, Vitest, OpenSpec
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use the archived OpenSpec change [2026-04-06-mcp-process-management](/opt/claude/GitNexus/openspec/changes/archive/2026-04-06-mcp-process-management), the historical design/review records, and the current source/test anchors as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -83,7 +85,7 @@
 - [x] Run `npx vitest run test/unit/mcp-process-registry.test.ts test/unit/repo-worker-manager.test.ts test/unit/mcp-command.test.ts`
 - [x] Run `npm run build`
 - [x] Run `openspec change validate mcp-process-management`
-- [ ] Run GitNexus staged change detection before commit if the MCP transport is healthy, otherwise document the blocker explicitly
+- [x] Run GitNexus staged change detection before commit if the MCP transport is healthy, otherwise document the blocker explicitly
 
 ### Task 6: Cooperative Drain Protocol
 
@@ -137,4 +139,29 @@
 - [x] Run `npx vitest run --config vitest.integration.native.config.ts test/integration/repo-worker.test.ts test/integration/router-backend-worker.test.ts test/integration/mcp-worker-isolation.test.ts`
 - [x] Run `npm run build`
 - [x] Run `openspec change validate mcp-process-management`
-- [ ] Run GitNexus staged change detection before commit if the MCP transport is healthy, otherwise document the blocker explicitly
+- [x] Run GitNexus staged change detection before commit if the MCP transport is healthy, otherwise document the blocker explicitly
+
+## Historical Verification Summary
+
+- The archived OpenSpec change
+  [2026-04-06-mcp-process-management](/opt/claude/GitNexus/openspec/changes/archive/2026-04-06-mcp-process-management/tasks.md)
+  records the runtime registry, router/worker lifecycle, CLI inspection and
+  cleanup, cooperative drain, analyze drain-first quiesce, and reindex-lock
+  hardening tasks as completed.
+- The repository now contains the planned runtime and CLI anchors:
+  `gitnexus/src/runtime/mcp-process-config.ts`,
+  `gitnexus/src/runtime/mcp-process-registry.ts`,
+  `gitnexus/src/cli/mcp.ts`,
+  `gitnexus/src/cli/analyze.ts`,
+  `gitnexus/src/mcp/repo-worker-manager.ts`, and
+  `gitnexus/src/mcp/repo-worker.ts`.
+- The repository also contains the planned source-level verification anchors:
+  `gitnexus/test/unit/mcp-process-registry.test.ts`,
+  `gitnexus/test/unit/mcp-command.test.ts`,
+  `gitnexus/test/unit/analyze-scope.test.ts`,
+  `gitnexus/test/unit/repo-worker-manager.test.ts`, and the targeted repo-worker
+  integration coverage.
+- The final staged `detect_changes` line remained environment-dependent even in
+  the original implementation plan because MCP transport health could vary by
+  session; that note should be read as an execution-environment caveat, not as
+  evidence that the feature implementation remained open.

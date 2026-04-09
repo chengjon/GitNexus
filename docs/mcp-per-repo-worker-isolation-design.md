@@ -1,13 +1,31 @@
 # MCP Per-Repo Worker Isolation Design
 
+## Development Governance
+
+If you are implementing this design in the current GitNexus repository, top-level development governance lives in [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md).
+
+Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
+
 ## Status
 
-Proposed replacement for the blocked single-process SIGUSR1 design in
-[`docs/sigusr1-cooperative-release-design.md`](./sigusr1-cooperative-release-design.md).
+Implemented current MCP router/worker architecture; retained as a historical
+design record.
 
 See also:
 
 - [`docs/superpowers/plans/2026-04-04-mcp-per-repo-worker-isolation-implementation-plan.md`](./superpowers/plans/2026-04-04-mcp-per-repo-worker-isolation-implementation-plan.md)
+- [`openspec/changes/archive/2026-04-06-mcp-process-management/`](../openspec/changes/archive/2026-04-06-mcp-process-management/)
+
+## Implementation Sync (2026-04-08)
+
+- GitNexus no longer uses the single-process MCP architecture that this design
+  was proposed to replace; the router plus per-repo worker model is now the
+  current architecture.
+- The current repository contains the router/worker contract, pinned runtime,
+  worker manager, worker entrypoint, and targeted unit/integration coverage that
+  this design called for.
+- The later archived `mcp-process-management` OpenSpec change explicitly treats
+  the router plus per-repo worker architecture as an already-landed foundation.
 
 ## Problem
 

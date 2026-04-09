@@ -1,8 +1,20 @@
 # MCP Process Management Design
 
 Date: 2026-04-05  
-Status: Draft for review  
+Status: Implemented via archived OpenSpec change `2026-04-06-mcp-process-management`; retained as a historical design record  
 Scope: `gitnexus/src/cli/mcp.ts`, `gitnexus/src/cli/analyze.ts`, `gitnexus/src/cli/platform-process-scan.ts`, `gitnexus/src/mcp/repo-worker-manager.ts`, `gitnexus/src/mcp/repo-worker.ts`, `gitnexus/src/runtime/*`
+
+## Implementation Sync (2026-04-08)
+
+- The implementation for this design landed through the archived OpenSpec
+  change
+  [2026-04-06-mcp-process-management](/opt/claude/GitNexus/openspec/changes/archive/2026-04-06-mcp-process-management/).
+- The current repository contains the runtime registry, router/worker metadata,
+  CLI `mcp ps` / `mcp gc` / `mcp drain` commands, analyze drain-first quiesce,
+  and reindex-lock hardening anchors that this design targeted.
+- The archived OpenSpec task ledger records the implementation and verification
+  tasks as completed, including the later cooperative-drain and reindex-lock
+  hardening wave.
 
 ## 1. Goal
 

@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Node `child_process` IPC, Commander, Vitest, MCP server tooling, Kuzu, filesystem APIs, `child_process.execFileSync`
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use the current router/worker architecture docs, the later archived `mcp-process-management` OpenSpec change, and the current source/test anchors as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -56,7 +58,7 @@ Reason:
 - Test: `gitnexus/test/unit/server.test.ts`
 - Test: `gitnexus/test/unit/resources.test.ts`
 
-- [ ] **Step 1: Write the failing seam tests**
+- [x] **Step 1: Write the failing seam tests**
 
 Create `gitnexus/test/unit/router-backend.test.ts` with metadata-only tests that do not require Kuzu:
 
@@ -83,7 +85,7 @@ describe('RouterBackend', () => {
 });
 ```
 
-- [ ] **Step 2: Run the seam-focused tests to verify failure**
+- [x] **Step 2: Run the seam-focused tests to verify failure**
 
 Run:
 
@@ -95,7 +97,7 @@ npx vitest run test/unit/router-backend.test.ts test/unit/server.test.ts test/un
 Expected:
 - `router-backend.test.ts` fails because `router-backend.ts` does not exist yet
 
-- [ ] **Step 3: Introduce a structural backend contract**
+- [x] **Step 3: Introduce a structural backend contract**
 
 Create `gitnexus/src/mcp/backend-contract.ts` and move the server/resources dependency to an interface, not the `LocalBackend` class:
 
@@ -115,7 +117,7 @@ export interface McpBackendLike {
 
 Update `server.ts` and `resources.ts` to depend on `McpBackendLike`.
 
-- [ ] **Step 4: Create the initial `RouterBackend` facade**
+- [x] **Step 4: Create the initial `RouterBackend` facade**
 
 Implement a minimal `RouterBackend` that:
 
@@ -125,7 +127,7 @@ Implement a minimal `RouterBackend` that:
 
 Do not wire it into `cli/mcp.ts` yet.
 
-- [ ] **Step 5: Re-run seam tests and build**
+- [x] **Step 5: Re-run seam tests and build**
 
 Run:
 
@@ -139,7 +141,7 @@ Expected:
 - seam/unit tests pass
 - TypeScript build passes with `server.ts` / `resources.ts` no longer tied to the `LocalBackend` class type
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add gitnexus/src/mcp/backend-contract.ts gitnexus/src/mcp/router-backend.ts gitnexus/src/mcp/server.ts gitnexus/src/mcp/resources.ts gitnexus/test/unit/router-backend.test.ts gitnexus/test/unit/server.test.ts gitnexus/test/unit/resources.test.ts
@@ -154,7 +156,7 @@ git commit -m "refactor: add mcp backend contract and router seam"
 - Modify: `gitnexus/src/mcp/router-backend.ts`
 - Test: `gitnexus/test/unit/repo-worker-manager.test.ts`
 
-- [ ] **Step 1: Write the failing manager tests**
+- [x] **Step 1: Write the failing manager tests**
 
 Create `gitnexus/test/unit/repo-worker-manager.test.ts` with an injected fake `forkWorker`:
 
@@ -177,7 +179,7 @@ Also cover:
 - timeout rejection
 - in-flight request rejection on worker exit
 
-- [ ] **Step 2: Run the new manager tests to verify failure**
+- [x] **Step 2: Run the new manager tests to verify failure**
 
 Run:
 
@@ -189,7 +191,7 @@ npx vitest run test/unit/repo-worker-manager.test.ts
 Expected:
 - failure because the manager/protocol modules do not exist yet
 
-- [ ] **Step 3: Define the IPC message types**
+- [x] **Step 3: Define the IPC message types**
 
 Create `repo-worker-protocol.ts` with explicit message unions:
 
@@ -209,7 +211,7 @@ export type WorkerRequestMessage = {
 
 Use backend-method RPC, not raw query forwarding. This matches the current `resources.ts` / `LocalBackend` public shape and avoids inventing a second routing model.
 
-- [ ] **Step 4: Implement `RepoWorkerManager` with injectable spawning**
+- [x] **Step 4: Implement `RepoWorkerManager` with injectable spawning**
 
 The manager should:
 
@@ -229,7 +231,7 @@ Important:
 - keep `mcp` in argv so the existing holder scan continues to recognize worker processes
 - do not import the Kuzu adapter here
 
-- [ ] **Step 5: Re-run manager tests**
+- [x] **Step 5: Re-run manager tests**
 
 Run:
 
@@ -241,7 +243,7 @@ npx vitest run test/unit/repo-worker-manager.test.ts
 Expected:
 - manager tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add gitnexus/src/mcp/repo-worker-protocol.ts gitnexus/src/mcp/repo-worker-manager.ts gitnexus/src/mcp/router-backend.ts gitnexus/test/unit/repo-worker-manager.test.ts
@@ -257,7 +259,7 @@ git commit -m "feat: add mcp repo worker protocol and manager"
 - Modify: `gitnexus/src/cli/mcp.ts`
 - Test: `gitnexus/test/integration/repo-worker.test.ts`
 
-- [ ] **Step 1: Write the failing worker integration test**
+- [x] **Step 1: Write the failing worker integration test**
 
 Create `gitnexus/test/integration/repo-worker.test.ts` that:
 
@@ -275,7 +277,7 @@ child.send({ kind: 'init', repo });
 child.send({ kind: 'request', requestId: '1', method: 'callTool', args: ['context', { name: 'login' }] });
 ```
 
-- [ ] **Step 2: Run the worker integration test to verify failure**
+- [x] **Step 2: Run the worker integration test to verify failure**
 
 Run:
 
@@ -287,7 +289,7 @@ npx vitest run test/integration/repo-worker.test.ts
 Expected:
 - failure because `--repo-worker` mode and worker bootstrap do not exist yet
 
-- [ ] **Step 3: Implement `PinnedRepoRuntime`**
+- [x] **Step 3: Implement `PinnedRepoRuntime`**
 
 Create a runtime that satisfies `LocalBackendRuntimeLike` but is bound to one `RepoHandle`.
 
@@ -301,7 +303,7 @@ Rules:
 
 This lets the worker reuse the existing `LocalBackend` unchanged.
 
-- [ ] **Step 4: Implement `repo-worker.ts`**
+- [x] **Step 4: Implement `repo-worker.ts`**
 
 The worker should:
 
@@ -311,7 +313,7 @@ The worker should:
 - return `{ requestId, ok: true, result }` or `{ requestId, ok: false, error }`
 - clean up on `disconnect`, `SIGTERM`, and `SIGINT`
 
-- [ ] **Step 5: Add hidden `--repo-worker` mode to the CLI**
+- [x] **Step 5: Add hidden `--repo-worker` mode to the CLI**
 
 Modify `cli/index.ts` and `cli/mcp.ts` so:
 
@@ -320,7 +322,7 @@ Modify `cli/index.ts` and `cli/mcp.ts` so:
 
 Keep this option out of normal docs/help output.
 
-- [ ] **Step 6: Re-run worker integration test and build**
+- [x] **Step 6: Re-run worker integration test and build**
 
 Run:
 
@@ -334,7 +336,7 @@ Expected:
 - worker integration test passes against a real seeded repo
 - build passes
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add gitnexus/src/mcp/local/runtime/pinned-repo-runtime.ts gitnexus/src/mcp/repo-worker.ts gitnexus/src/cli/index.ts gitnexus/src/cli/mcp.ts gitnexus/test/integration/repo-worker.test.ts
@@ -349,7 +351,7 @@ git commit -m "feat: add hidden repo worker mode for mcp"
 - Test: `gitnexus/test/integration/router-backend-worker.test.ts`
 - Test: `gitnexus/test/unit/router-backend.test.ts`
 
-- [ ] **Step 1: Write the failing router-to-worker tool integration test**
+- [x] **Step 1: Write the failing router-to-worker tool integration test**
 
 Create `gitnexus/test/integration/router-backend-worker.test.ts` that:
 
@@ -363,7 +365,7 @@ Also add one multi-request assertion:
 
 - `query` then `context` on the same repo should reuse the same worker process
 
-- [ ] **Step 2: Run the router-to-worker tool test to verify failure**
+- [x] **Step 2: Run the router-to-worker tool test to verify failure**
 
 Run:
 
@@ -375,7 +377,7 @@ npx vitest run test/integration/router-backend-worker.test.ts test/unit/router-b
 Expected:
 - failure because `RouterBackend.callTool()` does not forward anything yet
 
-- [ ] **Step 3: Implement `RouterBackend.callTool()` via `RepoWorkerManager`**
+- [x] **Step 3: Implement `RouterBackend.callTool()` via `RepoWorkerManager`**
 
 Use the existing repo resolution flow:
 
@@ -389,14 +391,14 @@ async callTool(method: string, params: any): Promise<any> {
 
 Do not switch `cli/mcp.ts` to `RouterBackend` yet. Finish the forwarding and tests first.
 
-- [ ] **Step 4: Add worker reuse assertions**
+- [x] **Step 4: Add worker reuse assertions**
 
 Extend the unit tests so the manager exposes enough introspection for tests to prove:
 
 - repeated calls for the same `repo.id` reuse one worker
 - different repos create different workers
 
-- [ ] **Step 5: Re-run tool-forwarding tests**
+- [x] **Step 5: Re-run tool-forwarding tests**
 
 Run:
 
@@ -409,7 +411,7 @@ Expected:
 - router/worker tool tests pass
 - existing `LocalBackend` callTool integration still passes unchanged
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add gitnexus/src/mcp/router-backend.ts gitnexus/src/mcp/repo-worker-manager.ts gitnexus/test/integration/router-backend-worker.test.ts gitnexus/test/unit/router-backend.test.ts
@@ -425,7 +427,7 @@ git commit -m "feat: forward repo-scoped mcp tools through workers"
 - Modify: `gitnexus/test/unit/server.test.ts`
 - Modify: `gitnexus/test/integration/router-backend-worker.test.ts`
 
-- [ ] **Step 1: Write failing resource-forwarding tests**
+- [x] **Step 1: Write failing resource-forwarding tests**
 
 Add tests proving the router backend serves repo-scoped resource helpers without opening Kuzu in the router:
 
@@ -436,7 +438,7 @@ Add tests proving the router backend serves repo-scoped resource helpers without
 
 Use worker-backed integration coverage for result shapes and unit coverage for method routing.
 
-- [ ] **Step 2: Run resource tests to verify failure**
+- [x] **Step 2: Run resource tests to verify failure**
 
 Run:
 
@@ -448,7 +450,7 @@ npx vitest run test/unit/resources.test.ts test/unit/server.test.ts test/integra
 Expected:
 - repo-scoped resource helper tests fail because `RouterBackend` still throws `Not implemented`
 
-- [ ] **Step 3: Implement the forwarded resource helper methods**
+- [x] **Step 3: Implement the forwarded resource helper methods**
 
 In `RouterBackend`, forward only the Kuzu-dependent methods:
 
@@ -469,7 +471,7 @@ Reason:
 
 - `context` resource currently uses cached repo stats plus staleness checks, not graph queries
 
-- [ ] **Step 4: Switch `mcpCommand` to `RouterBackend`**
+- [x] **Step 4: Switch `mcpCommand` to `RouterBackend`**
 
 Once both tool and resource helper forwarding pass, update normal `gitnexus mcp` startup:
 
@@ -481,7 +483,7 @@ await startMCPServer(backend);
 
 Do not leave a mixed mode where the router still instantiates `LocalBackend`, because that would reopen Kuzu in the router and defeat the isolation design.
 
-- [ ] **Step 5: Re-run router-facing tests and build**
+- [x] **Step 5: Re-run router-facing tests and build**
 
 Run:
 
@@ -495,7 +497,7 @@ Expected:
 - server/resources tests pass against `RouterBackend`
 - build passes
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add gitnexus/src/mcp/router-backend.ts gitnexus/src/cli/mcp.ts gitnexus/test/unit/resources.test.ts gitnexus/test/unit/server.test.ts gitnexus/test/integration/router-backend-worker.test.ts
@@ -509,7 +511,7 @@ git commit -m "feat: route repo-scoped mcp resources through workers"
 - Modify: `gitnexus/src/mcp/repo-worker-manager.ts`
 - Modify: `gitnexus/test/integration/router-backend-worker.test.ts`
 
-- [ ] **Step 1: Write the failing isolation test**
+- [x] **Step 1: Write the failing isolation test**
 
 Create an integration test that provisions two repos, starts two workers through one `RouterBackend`, then proves:
 
@@ -525,7 +527,7 @@ const pidB = backend.__testOnlyGetWorkerPid(repoB.id);
 process.kill(pidB, 'SIGTERM');
 ```
 
-- [ ] **Step 2: Add a holder-scan regression assertion**
+- [x] **Step 2: Add a holder-scan regression assertion**
 
 In the same integration file, on Linux only, assert:
 
@@ -537,7 +539,7 @@ expect(holders).not.toContain(String(routerPid));
 
 This is the core proof that `analyze` can keep its existing holder-disappearance semantics.
 
-- [ ] **Step 3: Run the isolation regression test to verify failure**
+- [x] **Step 3: Run the isolation regression test to verify failure**
 
 Run:
 
@@ -549,7 +551,7 @@ npx vitest run test/integration/mcp-worker-isolation.test.ts
 Expected:
 - failure because worker pid introspection and/or respawn behavior is not exposed yet
 
-- [ ] **Step 4: Implement minimal lifecycle hooks needed for the test**
+- [x] **Step 4: Implement minimal lifecycle hooks needed for the test**
 
 Add only test-facing hooks that are safe to keep:
 
@@ -559,7 +561,7 @@ Add only test-facing hooks that are safe to keep:
 
 Do not add production-only idle reaping in this task.
 
-- [ ] **Step 5: Re-run the isolation regression test**
+- [x] **Step 5: Re-run the isolation regression test**
 
 Run:
 
@@ -572,7 +574,7 @@ Expected:
 - repo-isolation regression passes
 - router/worker integration remains green
 
-- [ ] **Step 6: Run the final focused verification sweep**
+- [x] **Step 6: Run the final focused verification sweep**
 
 Run:
 
@@ -586,7 +588,7 @@ Expected:
 - all targeted tests pass
 - TypeScript build passes
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add gitnexus/src/mcp/repo-worker-manager.ts gitnexus/test/integration/mcp-worker-isolation.test.ts gitnexus/test/integration/router-backend-worker.test.ts
@@ -600,3 +602,25 @@ git commit -m "test: cover mcp per-repo worker isolation"
 - Do not switch the default `mcp` command to `RouterBackend` until both tools and repo-scoped resources are forwarded.
 - Preserve the existing `gitnexus analyze` quiesce path. This project only works if holder disappearance remains the source of truth.
 - Reuse the existing worker path resolution pattern from `src/core/ingestion/pipeline.ts` when locating the worker entry in source-vs-dist environments.
+
+## Historical Verification Summary
+
+- The repository now contains the planned router/worker isolation anchors:
+  `gitnexus/src/mcp/backend-contract.ts`,
+  `gitnexus/src/mcp/router-backend.ts`,
+  `gitnexus/src/mcp/repo-worker-manager.ts`,
+  `gitnexus/src/mcp/repo-worker.ts`, and
+  `gitnexus/src/mcp/local/runtime/pinned-repo-runtime.ts`.
+- The repository also contains the planned verification anchors:
+  `gitnexus/test/unit/router-backend.test.ts`,
+  `gitnexus/test/unit/repo-worker-manager.test.ts`,
+  `gitnexus/test/integration/repo-worker.test.ts`,
+  `gitnexus/test/integration/router-backend-worker.test.ts`, and
+  `gitnexus/test/integration/mcp-worker-isolation.test.ts`.
+- Later archived governance explicitly treats the router plus per-repo worker
+  topology as current architecture, especially
+  [2026-04-06-mcp-process-management proposal](/opt/claude/GitNexus/openspec/changes/archive/2026-04-06-mcp-process-management/proposal.md)
+  and
+  [design](/opt/claude/GitNexus/openspec/changes/archive/2026-04-06-mcp-process-management/design.md),
+  which describe the per-repo worker model as already landed and build new
+  lifecycle controls on top of it.

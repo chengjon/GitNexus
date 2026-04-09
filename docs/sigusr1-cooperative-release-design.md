@@ -1,11 +1,27 @@
 # SIGUSR1 Cooperative Per-Repo Release Design
 
+## Development Governance
+
+If you are revisiting or implementing this design in the current GitNexus repository, top-level development governance lives in [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md).
+
+Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
+
 ## Status
 
-Blocked in the current single-process MCP architecture.
+Superseded by the current per-repo worker MCP architecture; retained as a
+historical blocked single-process alternative.
 
 This document records why the original SIGUSR1 design is attractive, why it is
 not safe to implement today, and what must be proven before revisiting it.
+
+## Historical Sync (2026-04-08)
+
+- GitNexus no longer uses the single-process MCP architecture described below as
+  the live design baseline.
+- The current architecture is the router plus per-repo worker model documented
+  in [mcp-per-repo-worker-isolation-design.md](/opt/claude/GitNexus/docs/mcp-per-repo-worker-isolation-design.md).
+- The analysis below should therefore be read as historical rationale for why
+  SIGUSR1 cooperative release was rejected in the old single-process model.
 
 ## Problem
 

@@ -3,12 +3,27 @@
 Reviewer: Claude Code
 Date: 2026-04-05
 Document: `2026-04-05-mcp-process-management-design.md`
+Status sync (2026-04-08): Implemented via archived OpenSpec change
+`2026-04-06-mcp-process-management`; retained as a historical review record.
+Read the concerns below as pre-implementation review context, not as current
+blockers on the already-landed slice.
 
 ---
 
 ## Overall Assessment
 
 The design is well-scoped, pragmatic, and correctly targets the real operational gaps. The "lightweight control plane" approach is the right call — it preserves the existing router/worker boundary without introducing a daemon dependency. The incremental rollout plan is sound.
+
+Implementation sync note (2026-04-08):
+
+- the later truth-synced design record and archived OpenSpec change now define
+  the global runtime registry tradeoff explicitly
+- session identity is now specified and implemented via
+  `session-${pid}-${randomBytes(8)}`-style IDs
+- runtime timing defaults and `mcp ps` / `mcp gc` / `mcp drain` behavior are
+  no longer just proposed; they are part of the merged implementation
+- lifecycle `state` and derived `health` are now separate concepts in the
+  landed registry / CLI surface
 
 Below are specific concerns and suggestions organized by severity.
 
@@ -178,6 +193,14 @@ The proposal uses `.gitnexus/runtime/mcp-processes/` under the repo's `.gitnexus
 | Minor | 5 |
 | Missing topics | 4 |
 
-The design is directionally correct and well-written. The critical concerns are about concrete operational details (I/O patterns, timing, ID generation) that should be resolved before implementation begins. None of them require rethinking the core approach — they refine the "how" rather than the "what."
+At review time, the design was directionally correct and well-written. The
+critical concerns were about concrete operational details (I/O patterns,
+timing, ID generation), not about the core architecture itself. Later design
+clarifications, the archived OpenSpec record, and the landed implementation
+turned several of these items into either accepted tradeoffs or implemented
+follow-through.
 
-**Recommendation:** Approve with revisions. Address C1-C3 and I1-I2 before implementation starts. The rest can be resolved during implementation of the relevant rollout steps.
+**Historical recommendation at review time:** Approve with revisions. Address
+C1-C3 and I1-I2 before implementation starts. The rest can be resolved during
+implementation of the relevant rollout steps. This recommendation is preserved
+for historical context and is not a current gate on the landed slice.
