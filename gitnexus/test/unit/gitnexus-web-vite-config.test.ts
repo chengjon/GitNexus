@@ -73,4 +73,51 @@ describe('gitnexus-web vite config parity', () => {
     expect(findBrowserShimAlias(inlineAliasEntries, 'fs')).toBeDefined();
     expect(findBrowserShimAlias(inlineAliasEntries, 'path')).toBeDefined();
   });
+
+  it('suppresses only the known web-tree-sitter eval warning in app and inline builds', async () => {
+    const [{ default: appConfig }, { default: inlineConfig }] = await Promise.all([
+      import('../../../gitnexus-web/vite.config.ts'),
+      import('../../../gitnexus-web/vite.inline.config.mjs'),
+    ]);
+
+    const appOnWarn = appConfig.build?.rollupOptions?.onwarn;
+    const inlineOnWarn = inlineConfig.build?.rollupOptions?.onwarn;
+
+    expect(appOnWarn).toBeTypeOf('function');
+    expect(inlineOnWarn).toBeTypeOf('function');
+
+    const evalWarning = {
+      code: 'EVAL',
+      id: '/opt/claude/GitNexus/gitnexus-web/node_modules/web-tree-sitter/tree-sitter.js',
+      message: 'Use of eval in "node_modules/web-tree-sitter/tree-sitter.js" is strongly discouraged',
+    };
+    const unrelatedWarning = {
+      code: 'SOURCEMAP_ERROR',
+      id: '/opt/claude/GitNexus/gitnexus-web/node_modules/some-package/index.js',
+      message: 'Something else',
+    };
+
+    const appForwarded: Array<typeof evalWarning> = [];
+    const inlineForwarded: Array<typeof evalWarning> = [];
+
+    appOnWarn!(evalWarning, (warning) => {
+      appForwarded.push(warning as typeof evalWarning);
+    });
+    inlineOnWarn!(evalWarning, (warning) => {
+      inlineForwarded.push(warning as typeof evalWarning);
+    });
+
+    expect(appForwarded).toEqual([]);
+    expect(inlineForwarded).toEqual([]);
+
+    appOnWarn!(unrelatedWarning, (warning) => {
+      appForwarded.push(warning as typeof evalWarning);
+    });
+    inlineOnWarn!(unrelatedWarning, (warning) => {
+      inlineForwarded.push(warning as typeof evalWarning);
+    });
+
+    expect(appForwarded).toEqual([unrelatedWarning]);
+    expect(inlineForwarded).toEqual([unrelatedWarning]);
+  });
 });

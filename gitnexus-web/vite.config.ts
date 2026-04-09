@@ -7,6 +7,7 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
 import { createAppManualChunks, createWorkerManualChunks } from './scripts/vite-chunking.mjs';
 import { createStaticCopyTargets } from './scripts/vite-static-copy.mjs';
+import { createScopedBuildOnWarn } from './scripts/vite-warnings.mjs';
 import {
   createMermaidEntryAlias,
   createTreeSitterBrowserAliasEntries,
@@ -55,6 +56,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      onwarn: createScopedBuildOnWarn(),
       output: {
         manualChunks: createAppManualChunks(),
       },
