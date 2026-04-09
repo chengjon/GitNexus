@@ -3,11 +3,25 @@
 Date: 2026-03-27  
 Source: `2026-03-27-wiki-generator-support-run-pipeline-design.md`
 
+## Status Sync (2026-04-08)
+
+- This review is retained as a historical design-review record.
+- The support-helper and run-pipeline extraction slice is already landed on
+  current `main`, with current source/test anchors at:
+  - `gitnexus/src/core/wiki/generator-support.ts`
+  - `gitnexus/src/core/wiki/run-pipeline.ts`
+  - `gitnexus/test/unit/wiki-generator-support.test.ts`
+  - `gitnexus/test/unit/wiki-run-pipeline.test.ts`
+- The truth-synced design record and roadmap already treat this slice as
+  landed, not as a pending worktree-only proposal.
+- The comments below should therefore be read as historical design-review
+  context, not as current pre-implementation blockers.
+
 ---
 
 ## 整体评价
 
-这份文档整体质量很高，结构清晰，推理充分。选择 **Option B**（提取 support helpers + `run()` shell together）是正确的权衡。但发现几个需要澄清或改进的点：
+这份文档整体质量很高，结构清晰，推理充分。选择 **Option B**（提取 support helpers + `run()` shell together）是正确的权衡。以下问题与建议保留为历史 review 语境下的设计反馈。
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
@@ -145,7 +159,9 @@ gitnexus/src/core/wiki/
 - 更清晰的 support helpers、orchestration shell 和 generation internals 之间的分离
 - 为后续关于剩余 utility/helper 所有权决策奠定更清洁的基础
 
-修复上述 7 个问题后即可进入实现阶段。
+在 review 当时，这些问题用于约束进入实现阶段前的设计澄清。对当前已落地主仓
+而言，这份文档应被视为 historical review record，而不是当前仍待清空的
+implementation gate。
 
 ---
 

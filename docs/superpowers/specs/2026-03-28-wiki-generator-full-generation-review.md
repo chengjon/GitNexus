@@ -4,9 +4,23 @@ Date: 2026-03-28
 Reviewer: Claude
 Target: `2026-03-28-wiki-generator-full-generation-design.md`
 
+## Status Sync (2026-04-08)
+
+- This review is retained as a historical design-review record.
+- The primary blocker captured here (`failedModules` dual-channel) has been
+  resolved in the landed implementation on current `main`:
+  - `gitnexus/src/core/wiki/full-generation.ts` now accumulates failures
+    internally
+  - `gitnexus/src/core/wiki/generator.ts` merges the returned failures back
+    into `this.failedModules` at the wrapper boundary
+- The `2026-03-28` technical-debt audit also records that this follow-up fix
+  had already landed in the reviewed worktree code.
+- The remaining comments below should be read as historical review context, not
+  as current blockers for an extraction that is already merged.
+
 ## Verdict
 
-Solid, well-scoped — a few issues to address before implementation.
+Historical review record; the primary blocker has been resolved in landed code.
 
 ---
 
@@ -26,7 +40,7 @@ Solid, well-scoped — a few issues to address before implementation.
 
 ### 1. `failedModules` dual-channel is redundant and confusing
 
-**Severity: Should fix before implementation**
+**Severity at review time: Should fix before implementation**
 
 The design proposes both:
 
@@ -39,6 +53,13 @@ This means the same data flows through two channels. Looking at the current code
 - **Alternative:** Keep mutable but don't return it. The caller reads its own array.
 
 Section 11's note acknowledges the current pattern but doesn't resolve the redundancy.
+
+**Resolution in landed implementation (2026-04-08):**
+
+- `RunFullGenerationOptions` no longer accepts `failedModules`
+- `runFullGeneration(...)` accumulates failures internally
+- `generator.ts` now does `this.failedModules.push(...result.failedModules)`
+  after the helper returns
 
 ### 2. `RunFullGenerationOptions` has 12 fields — document which feed `buildModuleTree`
 
@@ -88,4 +109,8 @@ Section 9.3 lists `test/unit/wiki-full-generation.test.ts` both as a new file to
 
 ## Summary
 
-The design is ready to implement after resolving issue #1 (`failedModules` dual-channel). Issues #2-4 are documentation clarifications that would help the implementer but don't affect correctness. The scope, behavior preservation, and risk mitigation are all well-considered.
+At review time, the design was ready to implement after resolving issue #1
+(`failedModules` dual-channel). In the current landed repository state, that
+issue has already been resolved in code. Issues #2-4 remain useful historical
+clarifications, but they are no longer active blockers for this extraction
+slice.
