@@ -1,8 +1,25 @@
 # Parse Worker Laravel Route Extraction Design
 
 Date: 2026-03-26  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/ingestion/workers/parse-worker.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The Laravel route extraction slice has landed and the repository now contains:
+  - `gitnexus/src/core/ingestion/routes/types.ts`
+  - `gitnexus/src/core/ingestion/routes/laravel-route-extraction.ts`
+  - `gitnexus/src/core/ingestion/routes/php-route-shared.ts`
+  - downstream `call-processor.ts` / `parsing-processor.ts` imports from
+    `routes/types.ts`
+- The current technical-debt roadmap records this slice as completed in the
+  `2026-03-28` progress update.
+- Bounded implementation note:
+  - the draft originally preferred importing shared helpers from
+    `parse-worker.ts`
+  - the landed implementation instead extracted those helpers into
+    `routes/php-route-shared.ts`, which preserved the route-focused scope while
+    keeping dependency direction cleaner
 
 ## 1. Goal
 
@@ -105,6 +122,7 @@ Add:
 gitnexus/src/core/ingestion/routes/
   types.ts
   laravel-route-extraction.ts
+  php-route-shared.ts
 ```
 
 Modify:
@@ -147,15 +165,19 @@ This file should depend only on the minimum helper set it needs.
 
 `extractStringContent` and `findDescendant` are currently shared by the Laravel route extractor and other PHP-specific logic in `parse-worker.ts`.
 
-For this slice, the preferred handling is:
+Historical draft preference:
 
 - keep these two helpers in `parse-worker.ts`
 - import them into `routes/laravel-route-extraction.ts`
 - avoid duplicating them during the first extraction
 
-This keeps the extraction narrow and avoids accidentally turning this route-focused slice into a broader PHP helper refactor.
+Landed implementation note:
 
-If this shared dependency becomes awkward later, it can be followed by a separate extraction into a dedicated PHP/shared helper module.
+- the final implementation extracted these helpers into
+  `routes/php-route-shared.ts`
+- this kept the slice narrow while also avoiding a backwards dependency from
+  `routes/laravel-route-extraction.ts` into `parse-worker.ts`
+- no broader PHP / Eloquent helper refactor was reopened as part of that move
 
 ### `workers/parse-worker.ts`
 

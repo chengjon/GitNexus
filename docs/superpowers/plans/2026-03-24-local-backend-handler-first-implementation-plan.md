@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, Kuzu, MCP server tooling, CLI commands, filesystem APIs, `child_process`, ripgrep
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. This slice predates the current OpenSpec workflow, so use [2026-03-24-local-backend-handler-first-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-24-local-backend-handler-first-design.md) and [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md) as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -54,7 +56,7 @@ Those files are part of the blast radius and must be validated, but they should 
 - Test: `gitnexus/test/unit/calltool-dispatch.test.ts`
 - Test: `gitnexus/test/unit/tool-registry.test.ts`
 
-- [ ] **Step 1: Write the failing seam tests**
+- [x] **Step 1: Write the failing seam tests**
 
 Add a new unit test file that proves the registry can:
 
@@ -79,7 +81,7 @@ describe('createToolRegistry', () => {
 });
 ```
 
-- [ ] **Step 2: Run seam-focused unit tests to verify failure**
+- [x] **Step 2: Run seam-focused unit tests to verify failure**
 
 Run:
 
@@ -92,7 +94,7 @@ Expected:
 - `tool-registry.test.ts` fails because the file/module does not exist yet
 - existing `calltool-dispatch` still passes
 
-- [ ] **Step 3: Add runtime type definitions**
+- [x] **Step 3: Add runtime type definitions**
 
 Create `runtime/types.ts` with the internal types currently embedded in `local-backend.ts`:
 
@@ -121,7 +123,7 @@ export interface RepoHandle {
 }
 ```
 
-- [ ] **Step 4: Implement `BackendRuntime` with behavior copied, not redesigned**
+- [x] **Step 4: Implement `BackendRuntime` with behavior copied, not redesigned**
 
 Move the following responsibilities out of `LocalBackend` and into `BackendRuntime`:
 
@@ -134,7 +136,7 @@ Move the following responsibilities out of `LocalBackend` and into `BackendRunti
 
 Do not redesign the algorithm. Preserve the current behavior and error strings.
 
-- [ ] **Step 5: Implement `ToolContext` and `ToolRegistry`**
+- [x] **Step 5: Implement `ToolContext` and `ToolRegistry`**
 
 Use a narrow context surface:
 
@@ -148,7 +150,7 @@ export interface ToolContext {
 
 Registry should expose a single `dispatch(method, ctx, params)` function and own alias resolution.
 
-- [ ] **Step 6: Rewire `LocalBackend` to use runtime + registry, but keep tool bodies inline for now**
+- [x] **Step 6: Rewire `LocalBackend` to use runtime + registry, but keep tool bodies inline for now**
 
 `LocalBackend.callTool()` should become:
 
@@ -162,7 +164,7 @@ async callTool(method: string, params: any): Promise<any> {
 
 For this step, registry handlers may still delegate back into private methods on `LocalBackend` if needed. The goal is to establish seams before moving behavior.
 
-- [ ] **Step 7: Run seam-focused tests and commit**
+- [x] **Step 7: Run seam-focused tests and commit**
 
 Run:
 
@@ -191,7 +193,7 @@ git commit -m "refactor: add local backend runtime and registry seams"
 - Modify: `gitnexus/test/integration/local-backend.test.ts`
 - Modify: `gitnexus/test/unit/calltool-dispatch.test.ts`
 
-- [ ] **Step 1: Move read-only shared constants and predicates**
+- [x] **Step 1: Move read-only shared constants and predicates**
 
 Extract:
 
@@ -203,7 +205,7 @@ Extract:
 
 into `query-safety.ts`.
 
-- [ ] **Step 2: Move cypher markdown formatting**
+- [x] **Step 2: Move cypher markdown formatting**
 
 Extract `formatCypherAsMarkdown` into `cypher-format.ts` with the same output contract:
 
@@ -211,11 +213,11 @@ Extract `formatCypherAsMarkdown` into `cypher-format.ts` with the same output co
 export function formatCypherAsMarkdown(result: any[]): { markdown: string; row_count: number }
 ```
 
-- [ ] **Step 3: Move community aggregation helper**
+- [x] **Step 3: Move community aggregation helper**
 
 Extract `aggregateClusters` into `cluster-aggregation.ts`.
 
-- [ ] **Step 4: Update imports and keep compatibility re-exports if tests rely on them**
+- [x] **Step 4: Update imports and keep compatibility re-exports if tests rely on them**
 
 If current tests import `isWriteQuery` or `CYPHER_WRITE_RE` from `local-backend.ts`, re-export them from `local-backend.ts` temporarily so test call sites and external imports do not break during the refactor.
 
@@ -231,7 +233,7 @@ export {
 } from './tools/shared/query-safety.js';
 ```
 
-- [ ] **Step 5: Run focused safety tests and commit**
+- [x] **Step 5: Run focused safety tests and commit**
 
 Run:
 
@@ -263,7 +265,7 @@ git commit -m "refactor: extract local backend query helpers"
 - Test: `gitnexus/test/unit/calltool-dispatch.test.ts`
 - Test: `gitnexus/test/integration/local-backend-calltool.test.ts`
 
-- [ ] **Step 1: Write one regression test proving dispatch still works after extraction**
+- [x] **Step 1: Write one regression test proving dispatch still works after extraction**
 
 Add assertions in `calltool-dispatch.test.ts` that exercise:
 
@@ -275,7 +277,7 @@ Add assertions in `calltool-dispatch.test.ts` that exercise:
 
 without relying on `LocalBackend` private methods.
 
-- [ ] **Step 2: Run focused dispatch tests to verify the new assertion fails or is incomplete**
+- [x] **Step 2: Run focused dispatch tests to verify the new assertion fails or is incomplete**
 
 Run:
 
@@ -287,7 +289,7 @@ npx vitest run test/unit/calltool-dispatch.test.ts test/integration/local-backen
 Expected:
 - a new or tightened assertion fails before handler extraction is complete
 
-- [ ] **Step 3: Implement `query-handler.ts`**
+- [x] **Step 3: Implement `query-handler.ts`**
 
 Move the full query logic, including:
 
@@ -305,7 +307,7 @@ export async function runQueryTool(ctx: ToolContext, params: QueryToolParams): P
 }
 ```
 
-- [ ] **Step 4: Implement `cypher-handler.ts`, `context-handler.ts`, and `overview-handler.ts`**
+- [x] **Step 4: Implement `cypher-handler.ts`, `context-handler.ts`, and `overview-handler.ts`**
 
 Preserve:
 
@@ -314,11 +316,11 @@ Preserve:
 - disambiguation shape for `context`
 - markdown output shape for `cypher`
 
-- [ ] **Step 5: Register handlers and remove duplicated read-only implementations from `LocalBackend`**
+- [x] **Step 5: Register handlers and remove duplicated read-only implementations from `LocalBackend`**
 
 `LocalBackend` should no longer own the internal implementation bodies for these tools after this step.
 
-- [ ] **Step 6: Run read-only regression suites and commit**
+- [x] **Step 6: Run read-only regression suites and commit**
 
 Run:
 
@@ -347,7 +349,7 @@ git commit -m "refactor: extract read-only local backend handlers"
 - Modify: `gitnexus/test/unit/calltool-dispatch.test.ts`
 - Modify: `gitnexus/test/integration/local-backend-calltool.test.ts`
 
-- [ ] **Step 1: Add regression coverage for `impact` and `detect_changes` through the registry path**
+- [x] **Step 1: Add regression coverage for `impact` and `detect_changes` through the registry path**
 
 If no direct `detect_changes` call coverage exists in `calltool-dispatch.test.ts`, add it now using mocked git output.
 
@@ -359,7 +361,7 @@ vi.mock('child_process', () => ({
 }));
 ```
 
-- [ ] **Step 2: Run focused tests and confirm the new branch is covered**
+- [x] **Step 2: Run focused tests and confirm the new branch is covered**
 
 Run:
 
@@ -371,7 +373,7 @@ npx vitest run test/unit/calltool-dispatch.test.ts test/integration/local-backen
 Expected:
 - the new `detect_changes` assertion fails until handler extraction is completed
 
-- [ ] **Step 3: Implement `impact-handler.ts`**
+- [x] **Step 3: Implement `impact-handler.ts`**
 
 Preserve:
 
@@ -382,7 +384,7 @@ Preserve:
 - risk level derivation
 - enriched affected process/module output
 
-- [ ] **Step 4: Implement `detect-changes-handler.ts`**
+- [x] **Step 4: Implement `detect-changes-handler.ts`**
 
 Preserve:
 
@@ -391,11 +393,11 @@ Preserve:
 - summary shape
 - git diff error messages
 
-- [ ] **Step 5: Wire handlers into the registry and remove the old implementations**
+- [x] **Step 5: Wire handlers into the registry and remove the old implementations**
 
 Delete or inline-forward any stale private methods in `LocalBackend` once registry-backed behavior is passing.
 
-- [ ] **Step 6: Run focused analysis tests and commit**
+- [x] **Step 6: Run focused analysis tests and commit**
 
 Run:
 
@@ -423,7 +425,7 @@ git commit -m "refactor: extract local backend analysis handlers"
 - Modify: `gitnexus/test/unit/calltool-dispatch.test.ts`
 - Modify: `gitnexus/test/integration/local-backend-calltool.test.ts`
 
-- [ ] **Step 1: Add a dedicated rename regression around dry-run and safe-path behavior**
+- [x] **Step 1: Add a dedicated rename regression around dry-run and safe-path behavior**
 
 If needed, extend `calltool-dispatch.test.ts` with assertions for:
 
@@ -431,7 +433,7 @@ If needed, extend `calltool-dispatch.test.ts` with assertions for:
 - path traversal still throwing the same error
 - graph edits still tagged as `graph`
 
-- [ ] **Step 2: Run rename-focused unit coverage**
+- [x] **Step 2: Run rename-focused unit coverage**
 
 Run:
 
@@ -443,7 +445,7 @@ npx vitest run test/unit/calltool-dispatch.test.ts
 Expected:
 - the new rename assertion fails until extraction is complete
 
-- [ ] **Step 3: Implement `rename-handler.ts` by copying behavior exactly**
+- [x] **Step 3: Implement `rename-handler.ts` by copying behavior exactly**
 
 Preserve:
 
@@ -454,7 +456,7 @@ Preserve:
 - ripgrep fallback
 - `dry_run` vs apply behavior
 
-- [ ] **Step 4: Remove migrated tool bodies from `LocalBackend`**
+- [x] **Step 4: Remove migrated tool bodies from `LocalBackend`**
 
 After `rename` moves, `LocalBackend` should be reduced to:
 
@@ -465,7 +467,7 @@ After `rename` moves, `LocalBackend` should be reduced to:
 - `disconnect`
 - any explicitly deferred resource helper methods that are out of scope for this phase
 
-- [ ] **Step 5: Run the full LocalBackend-focused suite**
+- [x] **Step 5: Run the full LocalBackend-focused suite**
 
 Run:
 
@@ -478,7 +480,7 @@ Expected:
 - all targeted suites pass
 - no imports still depend on removed private method implementations
 
-- [ ] **Step 6: Build and commit the completed refactor**
+- [x] **Step 6: Build and commit the completed refactor**
 
 Run:
 
@@ -503,7 +505,7 @@ git commit -m "refactor: split local backend tool handlers"
 - Modify: `docs/superpowers/specs/2026-03-24-local-backend-handler-first-design.md`
 - Modify: `docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md`
 
-- [ ] **Step 1: Run final verification commands**
+- [x] **Step 1: Run final verification commands**
 
 Run:
 
@@ -517,15 +519,15 @@ Expected:
 - targeted tests pass
 - build passes
 
-- [ ] **Step 2: Update the design doc if implementation deviated in bounded ways**
+- [x] **Step 2: Update the design doc if implementation deviated in bounded ways**
 
 Only adjust the spec for real implementation discoveries, not for incidental naming differences.
 
-- [ ] **Step 3: Update the roadmap status**
+- [x] **Step 3: Update the roadmap status**
 
 Mark the `LocalBackend` hotspot refactor as started or completed, depending on landing scope.
 
-- [ ] **Step 4: Run a final diff review**
+- [x] **Step 4: Run a final diff review**
 
 Review:
 
@@ -538,7 +540,17 @@ Expected:
 - changes are concentrated in `gitnexus/src/mcp/local/*`
 - callers such as CLI and API remain behavior-stable
 
-- [ ] **Step 5: Commit doc sync**
+- [x] **Step 5: Commit doc sync**
+
+## Historical Verification Summary
+
+- The historical design record now states the refactor landed on current `main`
+  via `2038325` and follow-up fixes.
+- The technical-debt roadmap records the handler-first split as completed,
+  merged, validated, and pushed to `main`.
+- The planned extracted runtime / tool / handler files listed above now all
+  exist in the repository, including `tool-registry.ts`,
+  `backend-runtime.ts`, and the dedicated handler modules.
 
 ```bash
 git add docs/superpowers/specs/2026-03-24-local-backend-handler-first-design.md docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md

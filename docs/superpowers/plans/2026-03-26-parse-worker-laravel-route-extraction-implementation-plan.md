@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, Tree-sitter AST traversal, worker-based ingestion pipeline
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. This slice predates the current OpenSpec workflow, so use [2026-03-26-parse-worker-laravel-route-extraction-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-26-parse-worker-laravel-route-extraction-design.md) and [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md) as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -37,7 +39,7 @@ This is a narrow extraction, not a parse-worker redesign.
 - Modify: `gitnexus/src/core/ingestion/parsing-processor.ts`
 - Modify: `gitnexus/src/core/ingestion/call-processor.ts`
 
-- [ ] **Step 1: Write the failing import-path test**
+- [x] **Step 1: Write the failing import-path test**
 
 Add a minimal unit assertion in a new or existing test that imports `ExtractedRoute` from the new path:
 
@@ -49,7 +51,7 @@ type _RouteShapeCheck = ExtractedRoute;
 
 Use a smoke-style test file if needed so the module path must resolve at compile/import time.
 
-- [ ] **Step 2: Run the failing test to verify the new type module does not exist yet**
+- [x] **Step 2: Run the failing test to verify the new type module does not exist yet**
 
 Run:
 
@@ -61,7 +63,7 @@ npx vitest run test/unit/laravel-route-extraction.test.ts
 Expected:
 - module import fails because `routes/types.ts` does not exist yet
 
-- [ ] **Step 3: Create `routes/types.ts` with `ExtractedRoute` only**
+- [x] **Step 3: Create `routes/types.ts` with `ExtractedRoute` only**
 
 Move the `ExtractedRoute` interface out of `parse-worker.ts` unchanged.
 
@@ -78,7 +80,7 @@ export interface ExtractedRoute {
 }
 ```
 
-- [ ] **Step 4: Update downstream imports**
+- [x] **Step 4: Update downstream imports**
 
 Change:
 
@@ -88,7 +90,7 @@ Change:
 
 to import `ExtractedRoute` from `./routes/types.js` (or the correct relative path), while leaving all runtime behavior unchanged.
 
-- [ ] **Step 5: Run focused verification and commit**
+- [x] **Step 5: Run focused verification and commit**
 
 Run:
 
@@ -114,7 +116,7 @@ git commit -m "refactor: extract laravel route types"
 **Files:**
 - Create: `gitnexus/test/unit/laravel-route-extraction.test.ts`
 
-- [ ] **Step 1: Write failing unit tests for the route extractor API**
+- [x] **Step 1: Write failing unit tests for the route extractor API**
 
 Add tests that target the extracted function you plan to create:
 
@@ -128,7 +130,7 @@ Add tests that target the extracted function you plan to create:
 
 The tests should exercise returned `ExtractedRoute[]` records, not internal AST helper behavior.
 
-- [ ] **Step 2: Run the new tests to verify they fail before implementation**
+- [x] **Step 2: Run the new tests to verify they fail before implementation**
 
 Run:
 
@@ -140,11 +142,11 @@ npx vitest run test/unit/laravel-route-extraction.test.ts
 Expected:
 - tests fail because `extractLaravelRoutes` is not exported from the new module yet
 
-- [ ] **Step 3: Keep the fixture style narrow**
+- [x] **Step 3: Keep the fixture style narrow**
 
 Use small PHP snippets as inline strings or lightweight helper fixtures. Do not create a large fixture corpus in this slice.
 
-- [ ] **Step 4: Re-run and confirm failures are meaningful**
+- [x] **Step 4: Re-run and confirm failures are meaningful**
 
 Expected:
 - failures point to missing extraction implementation, not bad test setup
@@ -162,7 +164,7 @@ git commit -m "test: define laravel route extraction contract"
 - Create: `gitnexus/src/core/ingestion/routes/laravel-route-extraction.ts`
 - Modify: `gitnexus/src/core/ingestion/workers/parse-worker.ts`
 
-- [ ] **Step 1: Create the new route extraction module**
+- [x] **Step 1: Create the new route extraction module**
 
 Move these route-specific pieces into `laravel-route-extraction.ts`:
 
@@ -180,7 +182,7 @@ Move these route-specific pieces into `laravel-route-extraction.ts`:
 - `parseArrayGroupArgs`
 - `extractLaravelRoutes`
 
-- [ ] **Step 2: Handle shared helper dependencies narrowly**
+- [x] **Step 2: Handle shared helper dependencies narrowly**
 
 Do not duplicate `extractStringContent` and `findDescendant`.
 
@@ -190,7 +192,7 @@ Preferred first move:
 - keep them shared with minimal churn
 - do not expand into PHP/Eloquent refactoring
 
-- [ ] **Step 3: Rewire `parse-worker.ts`**
+- [x] **Step 3: Rewire `parse-worker.ts`**
 
 Make `parse-worker.ts`:
 
@@ -198,7 +200,7 @@ Make `parse-worker.ts`:
 - call it where it currently inlines the route extraction logic
 - stop owning those Laravel-specific helper definitions
 
-- [ ] **Step 4: Run the focused route extraction tests**
+- [x] **Step 4: Run the focused route extraction tests**
 
 Run:
 
@@ -210,7 +212,7 @@ npx vitest run test/unit/laravel-route-extraction.test.ts
 Expected:
 - route extraction tests pass
 
-- [ ] **Step 5: Run downstream safety checks**
+- [x] **Step 5: Run downstream safety checks**
 
 Run:
 
@@ -238,7 +240,7 @@ git commit -m "refactor: extract laravel route parsing module"
   - `gitnexus/src/core/ingestion/call-processor.ts`
   - `gitnexus/src/core/ingestion/parsing-processor.ts`
 
-- [ ] **Step 1: Run downstream route-consumer tests**
+- [x] **Step 1: Run downstream route-consumer tests**
 
 Use the most relevant route / parse pipeline tests already in the suite. At minimum:
 
@@ -251,7 +253,7 @@ npm run build
 
 If a more directly relevant route/call-processing test exists, prefer that too.
 
-- [ ] **Step 2: Fix only true downstream breakage**
+- [x] **Step 2: Fix only true downstream breakage**
 
 Acceptable fixes:
 
@@ -261,7 +263,7 @@ Acceptable fixes:
 
 Do not redesign `call-processor.ts` route semantics in this slice.
 
-- [ ] **Step 3: Commit downstream compatibility fixes**
+- [x] **Step 3: Commit downstream compatibility fixes**
 
 ```bash
 git add gitnexus/src/core/ingestion/call-processor.ts gitnexus/src/core/ingestion/parsing-processor.ts
@@ -273,7 +275,7 @@ git commit -m "fix: preserve downstream route extraction compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-26-parse-worker-laravel-route-extraction-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification commands**
+- [x] **Step 1: Run final verification commands**
 
 Run:
 
@@ -289,7 +291,7 @@ Expected:
 - no downstream regression in the checked integration path
 - build passes
 
-- [ ] **Step 2: Review the final diff**
+- [x] **Step 2: Review the final diff**
 
 Run:
 
@@ -302,16 +304,28 @@ Expected:
 - changes are concentrated in the route extraction slice
 - no unrelated parse-worker responsibilities moved
 
-- [ ] **Step 3: Sync the spec only if needed**
+- [x] **Step 3: Sync the spec only if needed**
 
 If implementation required a bounded deviation from the approved design, update the spec.
 
-- [ ] **Step 4: Commit doc sync if needed**
+- [x] **Step 4: Commit doc sync if needed**
 
 ```bash
 git add docs/superpowers/specs/2026-03-26-parse-worker-laravel-route-extraction-design.md
 git commit -m "docs: sync parse worker route extraction design"
 ```
+
+## Historical Verification Summary
+
+- The technical-debt roadmap now records the Laravel route extraction slice as
+  completed and landed on `main`, including the downstream move to the route
+  type boundary in `call-processor.ts` and `parsing-processor.ts`.
+- The repository now contains the planned extracted files plus
+  `gitnexus/src/core/ingestion/routes/php-route-shared.ts`, which was the
+  bounded shared-helper follow-through used to avoid a backwards dependency
+  from the extracted route module into `parse-worker.ts`.
+- The focused regression target named in this plan now exists as
+  `gitnexus/test/unit/laravel-route-extraction.test.ts`.
 
 ## Execution Notes
 
