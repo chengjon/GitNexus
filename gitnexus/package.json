@@ -39,6 +39,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",
+    "check:repo-governance": "node scripts/ci/repository-governance-check.mjs --mode paths --repo-root ..",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:native": "vitest run --config vitest.integration.native.config.ts",
