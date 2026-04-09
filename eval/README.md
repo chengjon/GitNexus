@@ -23,6 +23,12 @@ Evaluate whether GitNexus code intelligence improves AI agent performance on rea
 - GLM 4.7, GLM 5
 - Any model supported by litellm (add a YAML config)
 
+## Development Governance
+
+If you are modifying the evaluation harness in this repository, top-level development governance lives in [`../DEVELOPMENT_RULES.md`](../DEVELOPMENT_RULES.md).
+
+Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
+
 ## Prerequisites
 
 - Python 3.11+
@@ -178,7 +184,12 @@ SWE-bench repos repeat (Django has 200+ instances at different commits). The har
 
 ### Grep augmentation (native_augment mode)
 
-When the agent runs `grep` or `rg`, the observation is post-processed: the agent class calls `gitnexus-augment` on the search pattern and appends `[GitNexus]` annotations showing callers, callees, and execution flows for matched symbols. This mirrors the Claude Code / Cursor hook integration.
+When the agent runs `grep` or `rg`, the observation is post-processed: the
+agent class calls `gitnexus-augment` on the search pattern and appends
+`[GitNexus]` annotations showing callers, callees, and execution flows for
+matched symbols. This mirrors the hook-style augmentation workflow used by
+Claude Code and similar host integrations, without assuming the repository's
+primary maintained CLI surface extends equally to every external host.
 
 ## Adding Models
 

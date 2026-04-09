@@ -1,3 +1,60 @@
+<!-- version: 1.0.0 -->
+<!-- local Claude Code header adapted from upstream template -->
+
+Last reviewed: 2026-04-06
+
+## Repository Development Rules
+
+This repository's top-level development governance lives in `DEVELOPMENT_RULES.md`.
+
+For any work involving migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, or backup files, `DEVELOPMENT_RULES.md` is mandatory and takes precedence over local convenience patterns.
+
+**Project:** GitNexus
+**Environment:** local development fork
+**Maintainer:** repository maintainers and current fork operators
+
+Follow `AGENTS.md` for the canonical repository-wide rules. This file only adds Claude Code-specific framing on top of the shared policy.
+
+## Scope
+
+Use the scope table in `AGENTS.md` as the authoritative read/write/execute boundary definition.
+
+## Model Configuration
+
+- Prefer an explicit model id per Claude Code or organization policy.
+- Do not assume an unversioned `latest` alias is acceptable for governed workflows.
+- The GitNexus CLI/indexer itself does not require an LLM.
+
+## Execution Sequence For Complex Tasks
+
+Before substantial multi-step work:
+
+1. State which rules from `AGENTS.md`, `DEVELOPMENT_RULES.md`, and the GitNexus block apply.
+2. State the current write scope and what is intentionally deferred.
+3. State the exact verification commands you will run before claiming completion.
+
+## Claude Code Notes
+
+- Treat hook-based enforcement as real only when you can point to actual configured hooks in the local environment.
+- Prefer explicit verification and scoped diffs over assumptions about hidden automation.
+- When the thread gets long, restate the active scope and the planned verification commands before major edits.
+
+## Reference Documentation
+
+- `AGENTS.md` for the canonical shared policy
+- `DEVELOPMENT_RULES.md` for repository-wide governance
+- `README.md` for supported host/setup guidance
+- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations
+- `docs/audits/` and `openspec/changes/` for active repo-hygiene and convergence records
+
+This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`, `GUARDRAILS.md`, `CONTRIBUTING.md`, or `TESTING.md`. Do not cite them as existing local references unless they are added in the same change.
+
+## Changelog
+
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-04-06 | 1.0.0 | Added a local structured Claude header adapted from upstream, but rewritten to point only at real local sources. |
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

@@ -1,3 +1,63 @@
+<!-- version: 1.0.0 -->
+<!-- local structured header adapted from upstream template -->
+
+Last reviewed: 2026-04-06
+
+## Repository Development Rules
+
+This repository's top-level development governance lives in `DEVELOPMENT_RULES.md`.
+
+For any work involving migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, or backup files, `DEVELOPMENT_RULES.md` is mandatory and takes precedence over local convenience patterns.
+
+**Project:** GitNexus
+**Environment:** local development fork
+**Maintainer:** repository maintainers and current fork operators
+
+## Scope
+
+| | |
+|--|--|
+| **Reads** | Repository paths needed for the task, including `gitnexus/`, `gitnexus-web/`, `eval/`, plugin packages, docs, and OpenSpec artifacts. |
+| **Writes** | Only files required for the requested change. Keep diffs minimal and preserve unrelated user modifications. |
+| **Executes** | `npm`, `npx`, `node`, `git`, `openspec`, and shell utilities used by the documented local workflows. |
+| **Off-limits** | Secrets, unrelated repositories, destructive history edits without explicit approval, and invented docs or configs that do not exist locally. |
+
+## Model Configuration
+
+- Prefer explicit named model selections where the host supports them.
+- Do not rely on vague `latest` or `auto` assumptions when reproducibility matters.
+- The GitNexus CLI/indexer itself does not require an LLM. Optional AI flows depend on user-managed provider or host configuration.
+
+## Execution Sequence For Complex Tasks
+
+Before substantial multi-step work:
+
+1. State which rules from this file, `DEVELOPMENT_RULES.md`, and the GitNexus block apply.
+2. State the current scope boundaries for reads, writes, and anything intentionally deferred.
+3. State which verification commands will prove the claimed result.
+
+On long threads, restate the active scope before major edits so local governance and current-task rules do not get diluted.
+
+## Context Budget
+
+- Keep the repository grounded in current local source-of-truth docs instead of generic playbooks.
+- This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`, `GUARDRAILS.md`, `CONTRIBUTING.md`, or `TESTING.md`. Do not cite them as existing references unless they are added in the same change.
+- If future work introduces `.cursor/` rule files or other host-specific overlays, document them explicitly before treating them as always-on instructions.
+
+## Reference Documentation
+
+- `DEVELOPMENT_RULES.md` for repository-wide governance and merge blockers
+- `README.md` for product surface and supported host/setup guidance
+- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations
+- `docs/audits/` and `openspec/changes/` for active repo-hygiene and convergence records
+- the `gitnexus:start` ... `gitnexus:end` block below for GitNexus-specific MCP, index, and impact-analysis rules
+
+## Changelog
+
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
