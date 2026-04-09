@@ -4,9 +4,21 @@
 **Auditor**: AI Review  
 **Scope**: Wiki-page-generation-subagents worktree, design documents, tech debt roadmap
 
+Status sync (2026-04-08): This document remains a useful historical
+worktree-era audit baseline, but several P1 status lines below no longer
+represent current mainline state. For current-state reading, use
+`docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md`,
+`docs/audits/2026-04-08-repo-technical-debt-audit-status-sync.md`, and the
+2026-04-08 wiki-generator implementation-plan/review truth-sync records before
+treating any `pending merge`, `in progress`, or `local slice committed`
+phrasing here as still current.
+
 ---
 
 ## 1. Active Worktree Status
+
+This section is intentionally preserved as a 2026-03-28 worktree snapshot. It
+should not be read as the current state of `main`.
 
 ### wiki-page-generation-subagents
 
@@ -62,6 +74,17 @@ Rationale:
 ---
 
 ## 3. Tech Debt Roadmap Progress
+
+Reader guidance (2026-04-08):
+
+- `generator.ts` here describes a worktree-era merge/integration state, not the
+  current mainline wiki-generator slice status
+- the wiki-generator implementation-plan false-open items and stale review
+  blockers referenced from this audit have since been truth-synced in dedicated
+  2026-04-08 governance records
+- `kuzu-adapter.ts` and `analyze.ts` lines below should be read as historical
+  local-main evidence from the audit date; defer to the current roadmap for the
+  latest repository-wide convergence status
 
 | Phase | Item | Status | Notes |
 |-------|------|--------|-------|
@@ -224,6 +247,13 @@ Test coverage by commit labeling: 27/47 commits (57%) are `test:` commits.
 ---
 
 ## 6. Summary (2026-03-28 Updated)
+
+Reader guidance (2026-04-08):
+
+- The `Remaining` bullets below are historical remaining items at the audit
+  timestamp, not authoritative current backlog.
+- For current-state backlog interpretation, defer to the remediation roadmap
+  and subsequent 2026-04-08 truth-sync artifacts.
 
 **Status**: Action items largely resolved
 - Wiki worktree: merge strategy decided, review/fix follow-ups committed, branch is clean
