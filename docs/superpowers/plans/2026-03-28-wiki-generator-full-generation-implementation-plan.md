@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, graph queries, module-tree builder, wiki page helpers, GitNexus MCP impact/detect-changes
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-28-wiki-generator-full-generation-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-28-wiki-generator-full-generation-design.md), [2026-03-28-technical-debt-audit.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-28-technical-debt-audit.md), and the current source/test anchors under `gitnexus/src/core/wiki/` and `gitnexus/test/unit/` as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -42,7 +44,6 @@ export interface RunFullGenerationOptions {
   wikiDir: string;
   llmConfig: LLMConfig;
   maxTokensPerModule: number;
-  failedModules: string[];
   onProgress: ProgressCallback;
   slugify: (name: string) => string;
   estimateModuleTokens: (filePaths: string[]) => Promise<number>;
@@ -97,7 +98,7 @@ Generation-count ownership stays in `runFullGeneration(...)`:
   - metadata still uses `extractModuleFiles(moduleTree)` from `generator-support.ts`
   - `saveModuleTree(...)`
   - `saveWikiMeta(...)`
-  - returned `failedModules` remains a snapshot copy
+  - returned `failedModules` remains a snapshot copy of the helper-owned failure list
 - core progress phases only:
   - `gather` at `5` and `10`
   - `modules` spanning `30..85`
@@ -111,7 +112,7 @@ Generation-count ownership stays in `runFullGeneration(...)`:
 **Files:**
 - Create: `gitnexus/test/unit/wiki-full-generation.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 Create a focused unit test file that dynamically imports `../../src/core/wiki/full-generation.js`.
 
@@ -131,7 +132,7 @@ Use pure mocks only:
 - no real filesystem writes
 - no real page generation
 
-- [ ] **Step 2: Run the new test file to verify failure**
+- [x] **Step 2: Run the new test file to verify failure**
 
 Run:
 
@@ -143,11 +144,11 @@ npx vitest run test/unit/wiki-full-generation.test.ts
 Expected:
 - failure because `src/core/wiki/full-generation.ts` does not exist yet
 
-- [ ] **Step 3: Keep fixtures narrow**
+- [x] **Step 3: Keep fixtures narrow**
 
 Use small fake file lists, tiny `ModuleTreeNode[]` structures, and `vi.fn()` helper dependencies.
 
-- [ ] **Step 4: Commit the RED full-generation contract tests**
+- [x] **Step 4: Commit the RED full-generation contract tests**
 
 Before committing, run:
 
@@ -169,7 +170,7 @@ git commit -m "test: define wiki full generation contract"
 **Files:**
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Add a self-contained per-test mock for `full-generation.js`**
+- [x] **Step 1: Add a self-contained per-test mock for `full-generation.js`**
 
 In a new single test, use:
 
@@ -186,7 +187,7 @@ vi.doMock('../../src/core/wiki/full-generation.js', () => ({
 const { WikiGenerator } = await import('../../src/core/wiki/generator.js');
 ```
 
-- [ ] **Step 2: Assert wrapper wiring**
+- [x] **Step 2: Assert wrapper wiring**
 
 Verify that `WikiGenerator.fullGeneration()`:
 
@@ -195,7 +196,7 @@ Verify that `WikiGenerator.fullGeneration()`:
 
 Keep this test wiring-only. Do not duplicate the branch behavior that belongs in `wiki-full-generation.test.ts`.
 
-- [ ] **Step 3: Run RED tests**
+- [x] **Step 3: Run RED tests**
 
 Run:
 
@@ -208,7 +209,7 @@ Expected:
 - `wiki-full-generation.test.ts` fails because `full-generation.ts` is missing
 - the new orchestration test fails because `fullGeneration()` is still inline
 
-- [ ] **Step 4: Commit the RED orchestration test**
+- [x] **Step 4: Commit the RED orchestration test**
 
 Before committing, run:
 
@@ -233,7 +234,7 @@ git commit -m "test: cover wiki full generation orchestration"
 - Modify: `gitnexus/test/unit/wiki-full-generation.test.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run impact analysis before editing**
+- [x] **Step 1: Run impact analysis before editing**
 
 Use GitNexus MCP:
 
@@ -249,7 +250,7 @@ At the time this plan was written:
 
 If `gitnexus_impact(...)` returns `HIGH` or `CRITICAL`, explicitly note that before proceeding with edits and keep the rewiring minimal.
 
-- [ ] **Step 2: Implement `full-generation.ts`**
+- [x] **Step 2: Implement `full-generation.ts`**
 
 Create `runFullGeneration(options, deps)` as a near-literal move of the current `fullGeneration()` body.
 
@@ -262,7 +263,7 @@ Direct imports should remain:
 
 Preserve generation-count ownership on the orchestrator.
 
-- [ ] **Step 3: Rewire `generator.ts` so `fullGeneration()` becomes a thin wrapper**
+- [x] **Step 3: Rewire `generator.ts` so `fullGeneration()` becomes a thin wrapper**
 
 Import:
 
@@ -276,7 +277,6 @@ Then change `fullGeneration(currentCommit)` into a thin wrapper that forwards:
 - wikiDir
 - llmConfig
 - maxTokensPerModule
-- failedModules
 - onProgress
 - slugify
 - estimateModuleTokens
@@ -287,9 +287,12 @@ Then change `fullGeneration(currentCommit)` into a thin wrapper that forwards:
 - runParallel
 - page helper wrappers
 
+Then merge the helper result back into `this.failedModules` only after
+`runFullGeneration(...)` returns.
+
 Keep method name and call boundary unchanged so `run()` and incremental fallback still call `this.fullGeneration(...)`.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -302,7 +305,7 @@ Expected:
 - full-generation tests pass
 - orchestration wiring test passes
 
-- [ ] **Step 5: Run broader wiki verification**
+- [x] **Step 5: Run broader wiki verification**
 
 Run:
 
@@ -316,7 +319,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 6: Run GitNexus scope check before commit**
+- [x] **Step 6: Run GitNexus scope check before commit**
 
 Use GitNexus MCP:
 
@@ -331,7 +334,7 @@ Expected:
   - `wiki-full-generation.test.ts`
   - `wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 7: Commit the extraction**
+- [x] **Step 7: Commit the extraction**
 
 Before committing, run:
 
@@ -356,7 +359,7 @@ git commit -m "refactor: extract wiki full generation flow"
   - `gitnexus/test/unit/wiki-full-generation.test.ts`
   - `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run compatibility verification**
+- [x] **Step 1: Run compatibility verification**
 
 Run:
 
@@ -370,7 +373,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 2: Fix only real compatibility issues**
+- [x] **Step 2: Fix only real compatibility issues**
 
 Allowed fixes:
 
@@ -381,7 +384,7 @@ Allowed fixes:
 
 Do not widen scope into utility/helper migration.
 
-- [ ] **Step 3: Commit compatibility-only fixes**
+- [x] **Step 3: Commit compatibility-only fixes**
 
 Before committing, run:
 
@@ -402,7 +405,7 @@ git commit -m "fix: preserve wiki full generation compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-28-wiki-generator-full-generation-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -418,7 +421,7 @@ Expected:
 - build passes
 - local CLI reports the repo cleanly
 
-- [ ] **Step 2: Refresh the local GitNexus index**
+- [x] **Step 2: Refresh the local GitNexus index**
 
 Before choosing `analyze` vs `analyze --embeddings`, inspect whether embeddings already exist. If `../.gitnexus/meta.json` reports `stats.embeddings > 0`, preserve them by using `--embeddings`.
 
@@ -440,7 +443,7 @@ Expected:
 - `Indexed commit` matches `Current commit`
 - repo health is fresh or only dirty for analyze-generated context noise
 
-- [ ] **Step 3: Review final diff concentration**
+- [x] **Step 3: Review final diff concentration**
 
 Run:
 
@@ -458,7 +461,7 @@ gitnexus_detect_changes({ scope: "compare", base_ref: "<FULL_GENERATION_SLICE_BA
 Expected:
 - changes stay concentrated in full-generation extraction and its tests
 
-- [ ] **Step 4: Commit final doc or verification-driven cleanup**
+- [x] **Step 4: Commit final doc or verification-driven cleanup**
 
 Before committing, run:
 
@@ -473,3 +476,23 @@ Expected:
 git add docs/superpowers/specs/2026-03-28-wiki-generator-full-generation-design.md gitnexus/src/core/wiki/generator.ts gitnexus/src/core/wiki/full-generation.ts gitnexus/test/unit/wiki-full-generation.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
 git commit -m "chore: finalize wiki full generation extraction"
 ```
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction target
+  `gitnexus/src/core/wiki/full-generation.ts` and the rewired
+  `gitnexus/src/core/wiki/generator.ts` wrapper/import path.
+- The repository also contains the planned focused verification anchors:
+  `gitnexus/test/unit/wiki-full-generation.test.ts` and
+  `gitnexus/test/unit/wiki-generator-orchestration.test.ts`.
+- The `2026-03-28` technical-debt audit records
+  `full-generation.ts` → `wiki-full-generation.test.ts` as verified, and also
+  records that the earlier `failedModules` review issue was already resolved in
+  landed code.
+- Current mainline wiki source layout also includes the neighboring extraction
+  anchors this plan expected to coexist with:
+  `gitnexus/src/core/wiki/generator-support.ts`,
+  `gitnexus/src/core/wiki/run-pipeline.ts`,
+  `gitnexus/src/core/wiki/incremental-update.ts`,
+  `gitnexus/src/core/wiki/module-tree/builder.ts`, and the page-generation
+  modules under `gitnexus/src/core/wiki/pages/`.

@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, LLM prompt orchestration, Kuzu-backed wiki graph queries
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-26-wiki-generator-module-tree-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-26-wiki-generator-module-tree-design.md), the current source/test anchors under `gitnexus/src/core/wiki/module-tree/` and `gitnexus/test/unit/`, and the current `generator.ts` import path as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -35,7 +37,7 @@ This is a local hotspot reduction slice, not a CLI behavior change.
 - Modify: `gitnexus/src/core/wiki/generator.ts`
 - Test: `gitnexus/test/unit/wiki-module-tree.test.ts`
 
-- [ ] **Step 1: Write the failing type-boundary test**
+- [x] **Step 1: Write the failing type-boundary test**
 
 Create a minimal test file that imports `ModuleTreeNode` from the new module path and asserts the boundary resolves at runtime.
 
@@ -55,7 +57,7 @@ describe('wiki module tree types', () => {
 });
 ```
 
-- [ ] **Step 2: Run the new test to verify failure**
+- [x] **Step 2: Run the new test to verify failure**
 
 Run:
 
@@ -67,7 +69,7 @@ npx vitest run test/unit/wiki-module-tree.test.ts
 Expected:
 - failure because `module-tree/types.ts` does not exist yet
 
-- [ ] **Step 3: Create `module-tree/types.ts`**
+- [x] **Step 3: Create `module-tree/types.ts`**
 
 Move `ModuleTreeNode` out of `generator.ts` unchanged.
 
@@ -80,11 +82,11 @@ export interface ModuleTreeNode {
 }
 ```
 
-- [ ] **Step 4: Update `generator.ts` imports**
+- [x] **Step 4: Update `generator.ts` imports**
 
 Remove the inline `ModuleTreeNode` declaration and import it from `./module-tree/types.js`.
 
-- [ ] **Step 5: Run verification and commit**
+- [x] **Step 5: Run verification and commit**
 
 Run:
 
@@ -110,7 +112,7 @@ git commit -m "refactor: extract wiki module tree types"
 **Files:**
 - Modify: `gitnexus/test/unit/wiki-module-tree.test.ts`
 
-- [ ] **Step 1: Add failing contract tests for tree-building behavior**
+- [x] **Step 1: Add failing contract tests for tree-building behavior**
 
 Extend `wiki-module-tree.test.ts` with focused tests for:
 
@@ -122,7 +124,7 @@ Extend `wiki-module-tree.test.ts` with focused tests for:
 
 Keep fixtures small and local to the test file.
 
-- [ ] **Step 2: Run the tests and verify they fail meaningfully**
+- [x] **Step 2: Run the tests and verify they fail meaningfully**
 
 Run:
 
@@ -134,7 +136,7 @@ npx vitest run test/unit/wiki-module-tree.test.ts
 Expected:
 - failures point to missing builder exports / missing extracted behavior, not broken fixtures
 
-- [ ] **Step 3: Avoid over-scoping tests**
+- [x] **Step 3: Avoid over-scoping tests**
 
 Do not test:
 
@@ -144,7 +146,7 @@ Do not test:
 
 This slice is about builder logic only.
 
-- [ ] **Step 4: Commit the contract tests**
+- [x] **Step 4: Commit the contract tests**
 
 ```bash
 git add gitnexus/test/unit/wiki-module-tree.test.ts
@@ -157,7 +159,7 @@ git commit -m "test: define wiki module tree builder contract"
 - Create: `gitnexus/src/core/wiki/module-tree/builder.ts`
 - Modify: `gitnexus/src/core/wiki/generator.ts`
 
-- [ ] **Step 1: Create `builder.ts` and move the module-tree helpers**
+- [x] **Step 1: Create `builder.ts` and move the module-tree helpers**
 
 Move these methods/behaviors into the builder module:
 
@@ -170,7 +172,7 @@ Move these methods/behaviors into the builder module:
 
 Do not move page-generation methods.
 
-- [ ] **Step 2: Make dependencies explicit**
+- [x] **Step 2: Make dependencies explicit**
 
 The builder must not capture the whole `WikiGenerator` instance.
 
@@ -185,7 +187,7 @@ Pass only the dependencies it needs, for example:
 
 If a helper only needs data, pass data; do not pass `this`.
 
-- [ ] **Step 3: Rewire `generator.ts` to call the extracted builder**
+- [x] **Step 3: Rewire `generator.ts` to call the extracted builder**
 
 Keep `WikiGenerator.run()`, `fullGeneration()`, and `incrementalUpdate()` behavior stable.
 
@@ -202,7 +204,7 @@ const moduleTree = await buildModuleTree({
 });
 ```
 
-- [ ] **Step 4: Run focused builder tests**
+- [x] **Step 4: Run focused builder tests**
 
 Run:
 
@@ -214,7 +216,7 @@ npx vitest run test/unit/wiki-module-tree.test.ts
 Expected:
 - builder contract tests pass
 
-- [ ] **Step 5: Run downstream compile verification**
+- [x] **Step 5: Run downstream compile verification**
 
 Run:
 
@@ -239,7 +241,7 @@ git commit -m "refactor: extract wiki module tree builder"
 - Modify only if compatibility fixes are truly needed:
   - `gitnexus/src/core/wiki/generator.ts`
 
-- [ ] **Step 1: Run targeted wiki verification**
+- [x] **Step 1: Run targeted wiki verification**
 
 At minimum:
 
@@ -251,7 +253,7 @@ npm run build
 
 If a direct wiki generator / wiki CLI test exists and is reliable in this repo, run it too.
 
-- [ ] **Step 2: Fix only real compatibility issues**
+- [x] **Step 2: Fix only real compatibility issues**
 
 Allowed fixes:
 
@@ -261,7 +263,7 @@ Allowed fixes:
 
 Do not redesign incremental update or page generation here.
 
-- [ ] **Step 3: Commit any compatibility-only fixes**
+- [x] **Step 3: Commit any compatibility-only fixes**
 
 ```bash
 git add gitnexus/src/core/wiki/generator.ts
@@ -273,7 +275,7 @@ git commit -m "fix: preserve wiki generator module tree compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-26-wiki-generator-module-tree-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -287,7 +289,7 @@ Expected:
 - focused builder tests pass
 - build passes
 
-- [ ] **Step 2: Review final diff concentration**
+- [x] **Step 2: Review final diff concentration**
 
 Run:
 
@@ -300,11 +302,11 @@ Expected:
 - changes are concentrated in the module-tree slice
 - page-generation logic is largely untouched
 
-- [ ] **Step 3: Sync the spec only if needed**
+- [x] **Step 3: Sync the spec only if needed**
 
 Update the design doc only if implementation required a bounded deviation from the approved design.
 
-- [ ] **Step 4: Commit spec sync if needed**
+- [x] **Step 4: Commit spec sync if needed**
 
 ```bash
 git add docs/superpowers/specs/2026-03-26-wiki-generator-module-tree-design.md
@@ -317,3 +319,17 @@ git commit -m "docs: sync wiki module tree design"
 - Do not extract `generateLeafPage`, `generateParentPage`, or `incrementalUpdate`.
 - Prefer explicit dependency passing over passing the entire generator instance.
 - Preserve the current tree shape and grouping semantics on the first extraction.
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction targets:
+  `gitnexus/src/core/wiki/module-tree/types.ts` and
+  `gitnexus/src/core/wiki/module-tree/builder.ts`.
+- The repository also contains the planned focused verification anchor:
+  `gitnexus/test/unit/wiki-module-tree.test.ts`.
+- The landed builder module includes the historical plan's target helpers:
+  `buildModuleTree`, `parseGroupingResponse`, `fallbackGrouping`,
+  `splitBySubdirectory`, `countModules`, and `flattenModuleTree`.
+- Current `generator.ts` imports `ModuleTreeNode`, `buildModuleTree`,
+  `countModules`, and `flattenModuleTree` from the extracted `module-tree/`
+  area, which is stronger merged-state evidence than the old unchecked plan.

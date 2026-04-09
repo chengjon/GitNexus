@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, LLM prompt orchestration, wiki graph queries
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-26-wiki-generator-page-generation-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-26-wiki-generator-page-generation-design.md), the current source/test anchors under `gitnexus/src/core/wiki/pages/` and `gitnexus/test/unit/`, and the current `generator.ts` import path as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -33,7 +35,7 @@ This is a page-generation extraction only.
 **Files:**
 - Create: `gitnexus/test/unit/wiki-page-generation.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 Create focused unit tests for:
 
@@ -54,7 +56,7 @@ These tests should stub:
 
 Do not depend on real model output.
 
-- [ ] **Step 2: Run the new tests to verify failure**
+- [x] **Step 2: Run the new tests to verify failure**
 
 Run:
 
@@ -66,11 +68,11 @@ npx vitest run test/unit/wiki-page-generation.test.ts
 Expected:
 - failure because page-generation modules do not exist yet
 
-- [ ] **Step 3: Keep fixture data narrow**
+- [x] **Step 3: Keep fixture data narrow**
 
 Use small inline fixture strings and fake `ModuleTreeNode` objects.
 
-- [ ] **Step 4: Commit the contract tests**
+- [x] **Step 4: Commit the contract tests**
 
 ```bash
 git add gitnexus/test/unit/wiki-page-generation.test.ts
@@ -84,7 +86,7 @@ git commit -m "test: define wiki page generation contract"
 - Modify: `gitnexus/src/core/wiki/generator.ts`
 - Modify: `gitnexus/test/unit/wiki-page-generation.test.ts`
 
-- [ ] **Step 1: Implement `leaf-page.ts`**
+- [x] **Step 1: Implement `leaf-page.ts`**
 
 Move `generateLeafPage` into a standalone exported function.
 
@@ -112,11 +114,11 @@ Preserve:
 - prompt template usage
 - file output naming/location
 
-- [ ] **Step 2: Rewire `generator.ts` to call the extracted leaf-page function**
+- [x] **Step 2: Rewire `generator.ts` to call the extracted leaf-page function**
 
 Keep orchestration unchanged. `WikiGenerator` should pass explicit dependencies, not `this`.
 
-- [ ] **Step 3: Run focused page-generation tests**
+- [x] **Step 3: Run focused page-generation tests**
 
 Run:
 
@@ -128,7 +130,7 @@ npx vitest run test/unit/wiki-page-generation.test.ts
 Expected:
 - leaf-page contract tests pass
 
-- [ ] **Step 4: Run build verification**
+- [x] **Step 4: Run build verification**
 
 Run:
 
@@ -140,7 +142,7 @@ npm run build
 Expected:
 - no import/type regressions
 
-- [ ] **Step 5: Commit leaf-page extraction**
+- [x] **Step 5: Commit leaf-page extraction**
 
 ```bash
 git add gitnexus/src/core/wiki/pages/leaf-page.ts gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-page-generation.test.ts
@@ -154,7 +156,7 @@ git commit -m "refactor: extract wiki leaf page generation"
 - Modify: `gitnexus/src/core/wiki/generator.ts`
 - Modify: `gitnexus/test/unit/wiki-page-generation.test.ts`
 
-- [ ] **Step 1: Implement `parent-page.ts`**
+- [x] **Step 1: Implement `parent-page.ts`**
 
 Move `generateParentPage` into a standalone exported function.
 
@@ -165,11 +167,11 @@ Preserve:
 - prompt template usage
 - output page naming/location
 
-- [ ] **Step 2: Rewire `generator.ts` to call the extracted parent-page function**
+- [x] **Step 2: Rewire `generator.ts` to call the extracted parent-page function**
 
 Keep current parent-page orchestration and failure handling intact.
 
-- [ ] **Step 3: Run focused page-generation tests**
+- [x] **Step 3: Run focused page-generation tests**
 
 Run:
 
@@ -181,7 +183,7 @@ npx vitest run test/unit/wiki-page-generation.test.ts
 Expected:
 - parent-page contract tests pass
 
-- [ ] **Step 4: Run build verification**
+- [x] **Step 4: Run build verification**
 
 Run:
 
@@ -193,7 +195,7 @@ npm run build
 Expected:
 - build passes
 
-- [ ] **Step 5: Commit parent-page extraction**
+- [x] **Step 5: Commit parent-page extraction**
 
 ```bash
 git add gitnexus/src/core/wiki/pages/parent-page.ts gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-page-generation.test.ts
@@ -206,7 +208,7 @@ git commit -m "refactor: extract wiki parent page generation"
 - Modify only if compatibility fixes are truly needed:
   - `gitnexus/src/core/wiki/generator.ts`
 
-- [ ] **Step 1: Run targeted verification**
+- [x] **Step 1: Run targeted verification**
 
 At minimum:
 
@@ -218,7 +220,7 @@ npm run build
 
 If a direct wiki generator / wiki CLI test exists and is reliable here, run it too.
 
-- [ ] **Step 2: Fix only real compatibility issues**
+- [x] **Step 2: Fix only real compatibility issues**
 
 Allowed fixes:
 
@@ -228,7 +230,7 @@ Allowed fixes:
 
 Do not extract `generateOverview` or `incrementalUpdate` in this slice.
 
-- [ ] **Step 3: Commit compatibility-only fixes**
+- [x] **Step 3: Commit compatibility-only fixes**
 
 ```bash
 git add gitnexus/src/core/wiki/generator.ts
@@ -240,7 +242,7 @@ git commit -m "fix: preserve wiki page generation compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-26-wiki-generator-page-generation-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -255,7 +257,7 @@ Expected:
 - module-tree tests still pass
 - build passes
 
-- [ ] **Step 2: Review final diff concentration**
+- [x] **Step 2: Review final diff concentration**
 
 Run:
 
@@ -268,11 +270,11 @@ Expected:
 - changes are concentrated in the page-generation slice
 - overview and incremental update are largely untouched
 
-- [ ] **Step 3: Sync the spec only if needed**
+- [x] **Step 3: Sync the spec only if needed**
 
 Update the design doc only if implementation required a bounded deviation from the approved design.
 
-- [ ] **Step 4: Commit spec sync if needed**
+- [x] **Step 4: Commit spec sync if needed**
 
 ```bash
 git add docs/superpowers/specs/2026-03-26-wiki-generator-page-generation-design.md
@@ -285,3 +287,17 @@ git commit -m "docs: sync wiki page generation design"
 - Do not extract `generateOverview` or `incrementalUpdate`.
 - Prefer explicit dependency passing over capturing the `WikiGenerator` instance.
 - Preserve current prompt templates and output path behavior on the first move.
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction targets:
+  `gitnexus/src/core/wiki/pages/leaf-page.ts` and
+  `gitnexus/src/core/wiki/pages/parent-page.ts`.
+- The repository also contains the planned focused verification anchor:
+  `gitnexus/test/unit/wiki-page-generation.test.ts`.
+- The current page-generation test file already exercises leaf-page prompt
+  assembly, token truncation, parent-page child-doc assembly, and stable output
+  path naming.
+- Current `generator.ts` imports `generateLeafPage` and `generateParentPage`
+  from the extracted `pages/` area, which is stronger merged-state evidence
+  than the old unchecked plan.

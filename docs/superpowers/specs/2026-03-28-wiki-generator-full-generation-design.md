@@ -1,8 +1,31 @@
 # Wiki Generator Full Generation Design
 
 Date: 2026-03-28  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/wiki/generator.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The full-generation extraction slice has landed and the repository now
+  contains:
+  - `gitnexus/src/core/wiki/full-generation.ts`
+  - `gitnexus/test/unit/wiki-full-generation.test.ts`
+- The current `generator.ts` imports `runFullGeneration` and keeps
+  `fullGeneration()` as a thin wrapper on the main wiki orchestration path.
+- The current focused contract file already covers no-source-files failure,
+  enriched file-list assembly, leaf/parent dispatch, existing-page short
+  circuiting, metadata save, internal failure accumulation, and the core
+  progress phase windows.
+- The `2026-03-28` technical-debt audit records
+  `full-generation.ts` → `wiki-full-generation.test.ts` as verified, and notes
+  that the earlier `failedModules` review issue had already been fixed in the
+  landed code.
+- Bounded implementation note:
+  - the historical draft framed this as a pending extraction after adjacent
+    wiki helper splits
+  - the current merged repository state shows the full-generation extraction
+    itself already landed, so the remaining debt is historical status drift
+    rather than missing full-generation orchestration code
 
 ## 1. Goal
 
@@ -135,7 +158,6 @@ export interface RunFullGenerationOptions {
   wikiDir: string;
   llmConfig: LLMConfig;
   maxTokensPerModule: number;
-  failedModules: string[];
   onProgress: ProgressCallback;
   slugify: (name: string) => string;
   estimateModuleTokens: (filePaths: string[]) => Promise<number>;
@@ -218,7 +240,7 @@ The extraction must preserve:
   - parent processing stays sequential
   - existing-page short-circuit still uses `fileExists(...)`
   - `runFullGeneration(...)` continues to own output path computation for that short-circuit (`${node.slug}.md` under `wikiDir`)
-  - failures still append to `failedModules`
+  - failures still append to an internal `failedModules` list
   - `pagesGenerated` increments only for newly generated leaf/parent pages, not for existing-page short-circuit paths
 
 - phase 3 overview:
@@ -231,7 +253,9 @@ The extraction must preserve:
   - still calls `saveWikiMeta(...)`
   - metadata still uses `extractModuleFiles(moduleTree)` from generator-support
   - final return shape stays `{ pagesGenerated, mode: 'full', failedModules: [...] }`
-  - `failedModules` continues to be the mutable array owned by the caller during execution, and the return value remains a snapshot copy (`[...failedModules]`) rather than the same reference
+  - `failedModules` is accumulated inside `runFullGeneration(...)`, and the
+    wrapper merges the returned failures back into the instance-owned array
+    after the helper returns
 
 ### 8.2 Progress behavior
 
@@ -281,7 +305,7 @@ Cover:
 - leaf/parent dispatch split
 - existing-page short-circuit behavior
 - overview + metadata save on success
-- `failedModules` accumulation on page-generation failures
+- internal `failedModules` accumulation on page-generation failures
 - progress phase sequence and expected percent windows for core phases only (`gather`, `modules`, `overview`, `finalize`, `done`, with module progress spanning `30..85`)
 
 Use pure mocks only: no real graph, no real filesystem writes, no real page generation.
@@ -346,7 +370,10 @@ This slice is successful when:
 - focused full-generation tests exist
 - existing wiki regressions still pass
 
-`failedModules` continues to start from the `WikiGenerator` instance-owned array, which is expected to be empty at the start of a normal full-generation run and to accumulate only failures encountered during that run.
+`failedModules` is now accumulated inside `runFullGeneration(...)`, then merged
+back into `WikiGenerator.failedModules` by the wrapper after the helper
+returns. This keeps the extracted helper narrower and avoids a dual-channel
+failure accumulator contract.
 
 ## 12. Implementation Guidance
 

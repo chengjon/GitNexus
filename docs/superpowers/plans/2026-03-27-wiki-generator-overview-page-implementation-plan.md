@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, LLM prompt orchestration, wiki graph queries
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-27-wiki-generator-overview-page-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-27-wiki-generator-overview-page-design.md), the current source/test anchors under `gitnexus/src/core/wiki/pages/` and `gitnexus/test/unit/`, and the current `generator.ts` import path as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -70,7 +72,7 @@ export async function generateOverviewPage(
 **Files:**
 - Modify: `gitnexus/test/unit/wiki-page-generation.test.ts`
 
-- [ ] **Step 1: Add the failing overview contract test**
+- [x] **Step 1: Add the failing overview contract test**
 
 Extend the existing page-generation contract file with a focused overview test that dynamically imports `../../src/core/wiki/pages/overview-page.js`.
 
@@ -92,7 +94,7 @@ Update existing mocks in the same file so they also support:
 
 Keep assertions targeted and string-based.
 
-- [ ] **Step 2: Run the contract file to verify failure**
+- [x] **Step 2: Run the contract file to verify failure**
 
 Run:
 
@@ -104,11 +106,11 @@ npx vitest run test/unit/wiki-page-generation.test.ts
 Expected:
 - failure because `src/core/wiki/pages/overview-page.ts` does not exist yet
 
-- [ ] **Step 3: Keep fixtures narrow**
+- [x] **Step 3: Keep fixtures narrow**
 
 Use tiny inline strings and a small fake `ModuleTreeNode[]` tree. Avoid snapshots and avoid real graph/model behavior.
 
-- [ ] **Step 4: Commit the failing contract coverage**
+- [x] **Step 4: Commit the failing contract coverage**
 
 ```bash
 git add gitnexus/test/unit/wiki-page-generation.test.ts
@@ -120,7 +122,7 @@ git commit -m "test: define wiki overview page contract"
 **Files:**
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Extend orchestration mocks for overview dispatch**
+- [x] **Step 1: Extend orchestration mocks for overview dispatch**
 
 Add a virtual mock for `../../src/core/wiki/pages/overview-page.js` so the test does not require the real file to exist yet.
 
@@ -146,7 +148,7 @@ Then add two tests that expect the mocked helper to be called:
 
 Keep these tests wiring-focused. Do not re-test detailed prompt assembly here.
 
-- [ ] **Step 2: Run the orchestration test file to verify failure**
+- [x] **Step 2: Run the orchestration test file to verify failure**
 
 Run:
 
@@ -158,7 +160,7 @@ npx vitest run test/unit/wiki-generator-orchestration.test.ts
 Expected:
 - failure because `generator.ts` still uses the inline `generateOverview` method instead of the mocked helper
 
-- [ ] **Step 3: Commit the failing orchestration coverage**
+- [x] **Step 3: Commit the failing orchestration coverage**
 
 ```bash
 git add gitnexus/test/unit/wiki-generator-orchestration.test.ts
@@ -173,7 +175,7 @@ git commit -m "test: cover wiki overview orchestration"
 - Modify: `gitnexus/test/unit/wiki-page-generation.test.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run impact analysis before editing symbols**
+- [x] **Step 1: Run impact analysis before editing symbols**
 
 Use GitNexus MCP:
 
@@ -197,7 +199,7 @@ gitnexus_impact({ target: "incrementalUpdate", direction: "upstream", repo: "Git
 
 Proceed based on the actual tool output. If any symbol comes back `HIGH` or `CRITICAL`, explicitly note that before editing and keep the rewiring narrow.
 
-- [ ] **Step 2: Implement `overview-page.ts`**
+- [x] **Step 2: Implement `overview-page.ts`**
 
 Create `generateOverviewPage(options)` with explicit dependencies:
 
@@ -221,7 +223,7 @@ Within the module, preserve current direct imports and behavior for:
 
 Keep the trim/fallback semantics exactly as documented above.
 
-- [ ] **Step 3: Rewire `generator.ts` to call the extracted helper**
+- [x] **Step 3: Rewire `generator.ts` to call the extracted helper**
 
 Replace the inline `generateOverview` method body with a call site in both:
 
@@ -248,7 +250,7 @@ Then remove the inline `generateOverview` method itself.
 
 Do not extract `readProjectInfo`, `extractModuleFiles`, or any incremental-update internals in this task.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -262,7 +264,7 @@ Expected:
 - overview orchestration tests pass
 - existing leaf/parent coverage stays green
 
-- [ ] **Step 5: Run build verification**
+- [x] **Step 5: Run build verification**
 
 Run:
 
@@ -274,7 +276,7 @@ npm run build
 Expected:
 - no import/type regressions
 
-- [ ] **Step 6: Run scope verification before commit**
+- [x] **Step 6: Run scope verification before commit**
 
 Use GitNexus MCP:
 
@@ -286,7 +288,7 @@ Expected:
 - only the four overview-slice files are present
 - no unrelated execution flows are newly affected beyond the known `fullGeneration` / `incrementalUpdate` overview call sites
 
-- [ ] **Step 7: Commit overview extraction**
+- [x] **Step 7: Commit overview extraction**
 
 ```bash
 git add gitnexus/src/core/wiki/pages/overview-page.ts gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-page-generation.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
@@ -301,7 +303,7 @@ git commit -m "refactor: extract wiki overview page generation"
   - `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
   - `gitnexus/test/unit/wiki-page-generation.test.ts`
 
-- [ ] **Step 1: Run targeted verification**
+- [x] **Step 1: Run targeted verification**
 
 Run:
 
@@ -315,7 +317,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 2: Fix only real compatibility issues**
+- [x] **Step 2: Fix only real compatibility issues**
 
 Allowed fixes:
 
@@ -326,7 +328,7 @@ Allowed fixes:
 
 Do not widen scope into `incrementalUpdate` redesign or helper migration.
 
-- [ ] **Step 3: Run staged scope check before commit**
+- [x] **Step 3: Run staged scope check before commit**
 
 Use GitNexus MCP:
 
@@ -336,7 +338,7 @@ gitnexus_detect_changes({ scope: "all", cwd: "/opt/claude/GitNexus/.worktrees/wi
 
 Confirm the diff still stays inside the overview extraction slice.
 
-- [ ] **Step 4: Commit compatibility-only fixes**
+- [x] **Step 4: Commit compatibility-only fixes**
 
 ```bash
 git add gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts gitnexus/test/unit/wiki-page-generation.test.ts
@@ -348,7 +350,7 @@ git commit -m "fix: preserve wiki overview generation compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-27-wiki-generator-overview-page-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -365,7 +367,7 @@ Expected:
 - build passes
 - local CLI still reports the repo as healthy
 
-- [ ] **Step 2: Refresh the local GitNexus index after code changes**
+- [x] **Step 2: Refresh the local GitNexus index after code changes**
 
 Run from the worktree build output:
 
@@ -380,7 +382,7 @@ Expected:
 - `Indexed commit` matches `Current commit`
 - `Health: fresh`
 
-- [ ] **Step 3: Review final diff concentration**
+- [x] **Step 3: Review final diff concentration**
 
 Run:
 
@@ -398,7 +400,7 @@ gitnexus_detect_changes({ scope: "compare", base_ref: "<OVERVIEW_SLICE_BASE>", c
 Expected:
 - changes remain concentrated in overview extraction and its tests
 
-- [ ] **Step 4: Sync the spec only if needed**
+- [x] **Step 4: Sync the spec only if needed**
 
 If implementation meaningfully differs from the design, update:
 
@@ -406,9 +408,24 @@ If implementation meaningfully differs from the design, update:
 
 Otherwise leave the spec untouched.
 
-- [ ] **Step 5: Commit any final doc or verification-driven cleanup**
+- [x] **Step 5: Commit any final doc or verification-driven cleanup**
 
 ```bash
 git add docs/superpowers/specs/2026-03-27-wiki-generator-overview-page-design.md gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts gitnexus/test/unit/wiki-page-generation.test.ts
 git commit -m "chore: finalize wiki overview page extraction"
 ```
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction target:
+  `gitnexus/src/core/wiki/pages/overview-page.ts`.
+- The repository also contains the focused verification anchor that now covers
+  overview behavior:
+  `gitnexus/test/unit/wiki-page-generation.test.ts`.
+- The current page-generation test file already verifies module-summary
+  trimming at `### Architecture`, 600-character fallback trimming,
+  `(Documentation pending)` fallback, empty-edge fallback text, and stable
+  `overview.md` output/title behavior.
+- Current `generator.ts` imports `generateOverviewPage` from the extracted
+  `pages/` area, which is stronger merged-state evidence than the old unchecked
+  plan.

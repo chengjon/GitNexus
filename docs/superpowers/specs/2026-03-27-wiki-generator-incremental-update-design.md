@@ -1,8 +1,25 @@
 # Wiki Generator Incremental Update Design
 
 Date: 2026-03-27  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/wiki/generator.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The incremental-update extraction slice has landed and the repository now
+  contains:
+  - `gitnexus/src/core/wiki/incremental-update.ts`
+  - `gitnexus/test/unit/wiki-incremental-update.test.ts`
+  - `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
+- The current `generator.ts` imports and delegates to
+  `runIncrementalUpdate(...)`, so this slice is no longer only a worktree plan.
+- The `2026-03-28` technical-debt audit already records
+  `incremental-update.ts` → `wiki-incremental-update.test.ts` as verified.
+- Bounded implementation note:
+  - the historical draft treated this as the next pending wiki extraction step
+  - the current merged repository state shows the extraction itself already
+    landed, so the remaining debt is historical status drift rather than
+    missing incremental-update code
 
 ## 1. Goal
 

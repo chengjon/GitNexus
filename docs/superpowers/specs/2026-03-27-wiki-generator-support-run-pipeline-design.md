@@ -1,8 +1,27 @@
 # Wiki Generator Support And Run Pipeline Design
 
 Date: 2026-03-27  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/wiki/generator.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The support-helper and run-pipeline extraction slice has landed and the
+  repository now contains:
+  - `gitnexus/src/core/wiki/generator-support.ts`
+  - `gitnexus/src/core/wiki/run-pipeline.ts`
+  - `gitnexus/test/unit/wiki-generator-support.test.ts`
+  - `gitnexus/test/unit/wiki-run-pipeline.test.ts`
+- The current `generator.ts` imports both extracted modules from the main wiki
+  orchestration path, so this slice is no longer only a worktree proposal.
+- The technical-debt audit dated `2026-03-28` already records the support,
+  run-pipeline, incremental-update, full-generation, and orchestration test
+  anchors as verified.
+- Bounded implementation note:
+  - the historical draft framed this as a still-open worktree extraction
+  - the current repository state shows the extraction itself landed, so any
+    remaining wiki-generator governance debt is historical status drift rather
+    than missing support/run-pipeline code
 
 ## 1. Goal
 

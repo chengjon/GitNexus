@@ -1,8 +1,26 @@
 # Wiki Generator Overview Page Design
 
 Date: 2026-03-27  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/wiki/generator.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The overview-page extraction slice has landed and the repository now
+  contains:
+  - `gitnexus/src/core/wiki/pages/overview-page.ts`
+  - `gitnexus/test/unit/wiki-page-generation.test.ts`
+- The current `generator.ts` imports the extracted overview-page module from
+  the main wiki orchestration path.
+- The current page-generation contract file already covers overview-page prompt
+  assembly, module-summary trimming, fallback behavior, and `overview.md`
+  output/title assertions.
+- Bounded implementation note:
+  - the historical draft framed this as a pending extraction after leaf/parent
+    pages
+  - the current merged repository state shows the overview-page extraction
+    itself already landed, so the remaining debt is historical status drift
+    rather than missing overview-generation code
 
 ## 1. Goal
 

@@ -1,8 +1,26 @@
 # Wiki Generator Page Generation Design
 
 Date: 2026-03-26  
-Status: Draft for review  
+Status: Landed on current `main`; retained as a historical design record  
 Scope: `gitnexus/src/core/wiki/generator.ts`
+
+## Implementation Sync (2026-04-08)
+
+- The page-generation extraction slice has landed and the repository now
+  contains:
+  - `gitnexus/src/core/wiki/pages/leaf-page.ts`
+  - `gitnexus/src/core/wiki/pages/parent-page.ts`
+  - `gitnexus/test/unit/wiki-page-generation.test.ts`
+- The current `generator.ts` imports the extracted page-generation modules from
+  the main wiki orchestration path.
+- The focused page-generation test file now covers leaf-page and parent-page
+  prompt/data assembly and output path behavior, alongside adjacent overview
+  contracts.
+- Bounded implementation note:
+  - the historical draft framed this as a pending extraction after module-tree
+  - the current merged repository state shows the leaf/parent page-generation
+    extraction itself already landed, so the remaining debt is historical
+    status drift rather than missing page-generation modules
 
 ## 1. Goal
 

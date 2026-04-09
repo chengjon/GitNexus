@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, git + wiki pipeline orchestration, GitNexus MCP impact/detect-changes
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-27-wiki-generator-support-run-pipeline-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-27-wiki-generator-support-run-pipeline-design.md), [2026-03-28-technical-debt-audit.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-28-technical-debt-audit.md), and the current source/test anchors under `gitnexus/src/core/wiki/` and `gitnexus/test/unit/` as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -135,7 +137,7 @@ Preserve these branch semantics:
 **Files:**
 - Create: `gitnexus/test/unit/wiki-generator-support.test.ts`
 
-- [ ] **Step 1: Write the failing helper test file**
+- [x] **Step 1: Write the failing helper test file**
 
 Create focused tests for:
 
@@ -150,7 +152,7 @@ Create focused tests for:
 
 Mock filesystem reads only. Do not use snapshots.
 
-- [ ] **Step 2: Run the new test file to verify failure**
+- [x] **Step 2: Run the new test file to verify failure**
 
 Run:
 
@@ -162,11 +164,11 @@ npx vitest run test/unit/wiki-generator-support.test.ts
 Expected:
 - failure because `src/core/wiki/generator-support.ts` does not exist yet
 
-- [ ] **Step 3: Keep fixtures narrow**
+- [x] **Step 3: Keep fixtures narrow**
 
 Use tiny inline config/README strings and small `ModuleTreeNode[]` fixtures.
 
-- [ ] **Step 4: Commit the failing helper contract tests**
+- [x] **Step 4: Commit the failing helper contract tests**
 
 Before committing, run the required GitNexus scope check:
 
@@ -189,7 +191,7 @@ git commit -m "test: define wiki generator support contract"
 - Create: `gitnexus/test/unit/wiki-run-pipeline.test.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Write the failing run-pipeline unit test file**
+- [x] **Step 1: Write the failing run-pipeline unit test file**
 
 Create a dedicated test file that dynamically imports `../../src/core/wiki/run-pipeline.js`.
 
@@ -213,7 +215,7 @@ All shell side effects must be pure mocks:
 - `fullGeneration`
 - `runIncrementalUpdate`
 
-- [ ] **Step 2: Extend the existing orchestration test with a run-level wiring RED case**
+- [x] **Step 2: Extend the existing orchestration test with a run-level wiring RED case**
 
 In `gitnexus/test/unit/wiki-generator-orchestration.test.ts`, add one self-contained per-test mock for:
 
@@ -237,7 +239,7 @@ Then dynamically import `generator.js` inside that test and assert:
 
 Do not weaken or replace the existing orchestration tests in that file.
 
-- [ ] **Step 3: Run RED tests**
+- [x] **Step 3: Run RED tests**
 
 Run:
 
@@ -250,7 +252,7 @@ Expected:
 - `wiki-run-pipeline.test.ts` fails because `run-pipeline.ts` does not exist yet
 - the new orchestration wiring test fails because `run()` is still inline
 
-- [ ] **Step 4: Commit the RED tests**
+- [x] **Step 4: Commit the RED tests**
 
 Before committing, run the required GitNexus scope check:
 
@@ -274,7 +276,7 @@ git commit -m "test: cover wiki support and run pipeline"
 - Modify: `gitnexus/src/core/wiki/generator.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-support.test.ts`
 
-- [ ] **Step 1: Run impact analysis before editing symbols**
+- [x] **Step 1: Run impact analysis before editing symbols**
 
 Use GitNexus MCP:
 
@@ -287,7 +289,7 @@ Record the actual output in notes. At the time this plan was written, both helpe
 
 If either `gitnexus_impact(...)` result is `HIGH` or `CRITICAL`, stop and explicitly note that before proceeding with edits. Do not continue silently past a high-risk blast radius.
 
-- [ ] **Step 2: Implement `generator-support.ts`**
+- [x] **Step 2: Implement `generator-support.ts`**
 
 Move `readProjectInfo` and `extractModuleFiles` into the new module as top-level exports.
 
@@ -298,13 +300,13 @@ Preserve:
 - output formatting
 - parent/leaf flattening behavior
 
-- [ ] **Step 3: Rewire `generator.ts` to import the new support helpers**
+- [x] **Step 3: Rewire `generator.ts` to import the new support helpers**
 
 Replace internal helper usage with imports from `./generator-support.js`.
 
 Do not move any other helper ownership in this task.
 
-- [ ] **Step 4: Run focused helper tests**
+- [x] **Step 4: Run focused helper tests**
 
 Run:
 
@@ -317,7 +319,7 @@ Expected:
 - support helper tests pass
 - existing overview/incremental tests still pass
 
-- [ ] **Step 5: Run build verification**
+- [x] **Step 5: Run build verification**
 
 Run:
 
@@ -329,7 +331,7 @@ npm run build
 Expected:
 - build passes
 
-- [ ] **Step 6: Commit support extraction**
+- [x] **Step 6: Commit support extraction**
 
 Before committing, run the required GitNexus scope check:
 
@@ -353,7 +355,7 @@ git commit -m "refactor: extract wiki generator support helpers"
 - Modify: `gitnexus/test/unit/wiki-run-pipeline.test.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run impact analysis before editing `run()`**
+- [x] **Step 1: Run impact analysis before editing `run()`**
 
 Use GitNexus MCP:
 
@@ -365,7 +367,7 @@ Record the actual output in notes. At the time this plan was written, `run` had 
 
 If `gitnexus_impact(...)` returns `HIGH` or `CRITICAL`, stop and explicitly note that before proceeding with edits. Do not continue silently past a high-risk blast radius.
 
-- [ ] **Step 2: Implement `run-pipeline.ts`**
+- [x] **Step 2: Implement `run-pipeline.ts`**
 
 Create `runWikiGeneration(options)` as a near-literal move of the current `run()` shell.
 
@@ -388,7 +390,7 @@ Keep the pipeline pure via injected dependencies:
 
 Do not move `ensureHTMLViewer`, `loadWikiMeta`, or `getCurrentCommit` ownership.
 
-- [ ] **Step 3: Rewire `generator.ts` so `run()` becomes a thin wrapper**
+- [x] **Step 3: Rewire `generator.ts` so `run()` becomes a thin wrapper**
 
 Import:
 
@@ -412,7 +414,7 @@ forceMode: !!this.options.force
 
 Do not pass `this.options.force` through as `boolean | undefined`.
 
-- [ ] **Step 4: Run focused shell tests**
+- [x] **Step 4: Run focused shell tests**
 
 Run:
 
@@ -425,7 +427,7 @@ Expected:
 - run-pipeline tests pass
 - orchestration wiring test passes
 
-- [ ] **Step 5: Run broader wiki verification**
+- [x] **Step 5: Run broader wiki verification**
 
 Run:
 
@@ -439,7 +441,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 6: Run GitNexus scope check before commit**
+- [x] **Step 6: Run GitNexus scope check before commit**
 
 Use GitNexus MCP:
 
@@ -456,7 +458,7 @@ Expected:
   - `wiki-run-pipeline.test.ts`
   - `wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 7: Commit shell extraction**
+- [x] **Step 7: Commit shell extraction**
 
 Before committing, run the required GitNexus scope check:
 
@@ -488,7 +490,7 @@ git commit -m "refactor: extract wiki support and run pipeline"
   - affected test files
 - Modify: `docs/superpowers/specs/2026-03-27-wiki-generator-support-run-pipeline-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -504,7 +506,7 @@ Expected:
 - build passes
 - local CLI reports the repo cleanly
 
-- [ ] **Step 2: Refresh the local GitNexus index**
+- [x] **Step 2: Refresh the local GitNexus index**
 
 Before choosing `analyze` vs `analyze --embeddings`, inspect whether embeddings already exist. If `../.gitnexus/meta.json` reports `stats.embeddings > 0`, preserve them by using `--embeddings`.
 
@@ -526,7 +528,7 @@ Expected:
 - `Indexed commit` matches `Current commit`
 - repo health is fresh or only dirty for analyze-generated context noise
 
-- [ ] **Step 3: Review final diff concentration**
+- [x] **Step 3: Review final diff concentration**
 
 Run:
 
@@ -544,7 +546,7 @@ gitnexus_detect_changes({ scope: "compare", base_ref: "<SUPPORT_RUN_SLICE_BASE>"
 Expected:
 - changes stay concentrated in support/run-shell extraction and its tests
 
-- [ ] **Step 4: Commit final doc or verification-driven cleanup**
+- [x] **Step 4: Commit final doc or verification-driven cleanup**
 
 Before committing, run the required GitNexus scope check:
 
@@ -559,3 +561,26 @@ Expected:
 git add docs/superpowers/specs/2026-03-27-wiki-generator-support-run-pipeline-design.md gitnexus/src/core/wiki/generator.ts gitnexus/src/core/wiki/generator-support.ts gitnexus/src/core/wiki/run-pipeline.ts gitnexus/test/unit/wiki-generator-support.test.ts gitnexus/test/unit/wiki-run-pipeline.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
 git commit -m "chore: finalize wiki support and run pipeline extraction"
 ```
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction targets:
+  `gitnexus/src/core/wiki/generator-support.ts`,
+  `gitnexus/src/core/wiki/run-pipeline.ts`, and the rewired
+  `gitnexus/src/core/wiki/generator.ts` entry path.
+- The repository also contains the planned focused verification anchors:
+  `gitnexus/test/unit/wiki-generator-support.test.ts`,
+  `gitnexus/test/unit/wiki-run-pipeline.test.ts`, and
+  `gitnexus/test/unit/wiki-generator-orchestration.test.ts`.
+- The `2026-03-28` technical-debt audit records the wiki support,
+  run-pipeline, incremental-update, full-generation, module-tree, and
+  orchestration test anchors as verified, which is stronger merged-state
+  evidence than the old worktree-only execution notes in this plan.
+- Current mainline wiki source layout also includes the adjacent extraction
+  anchors that this plan depended on:
+  `gitnexus/src/core/wiki/incremental-update.ts`,
+  `gitnexus/src/core/wiki/full-generation.ts`,
+  `gitnexus/src/core/wiki/module-tree/builder.ts`,
+  `gitnexus/src/core/wiki/pages/leaf-page.ts`,
+  `gitnexus/src/core/wiki/pages/parent-page.ts`, and
+  `gitnexus/src/core/wiki/pages/overview-page.ts`.

@@ -8,6 +8,8 @@
 
 **Tech Stack:** TypeScript, Vitest, filesystem I/O, git diff helpers, wiki page generators, GitNexus MCP impact/detect-changes
 
+**Execution status sync (2026-04-08):** This historical implementation plan is complete. Use [2026-03-27-wiki-generator-incremental-update-design.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-27-wiki-generator-incremental-update-design.md), [2026-03-28-technical-debt-audit.md](/opt/claude/GitNexus/docs/superpowers/specs/2026-03-28-technical-debt-audit.md), and the current source/test anchors under `gitnexus/src/core/wiki/` and `gitnexus/test/unit/` as the merged-state truth sources.
+
 ---
 
 ## Planned File Structure
@@ -100,7 +102,7 @@ export async function runIncrementalUpdate(
 **Files:**
 - Create: `gitnexus/test/unit/wiki-incremental-update.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+- [x] **Step 1: Write the failing test file**
 
 Create a dedicated unit test file that dynamically imports `../../src/core/wiki/incremental-update.js`.
 
@@ -115,7 +117,7 @@ Cover these branches with narrow inline fixtures and mocked dependencies:
 
 Do not use real git commands, real filesystem writes, or real page helper behavior.
 
-- [ ] **Step 2: Run the new test file to verify failure**
+- [x] **Step 2: Run the new test file to verify failure**
 
 Run:
 
@@ -127,11 +129,11 @@ npx vitest run test/unit/wiki-incremental-update.test.ts
 Expected:
 - failure because `src/core/wiki/incremental-update.ts` does not exist yet
 
-- [ ] **Step 3: Keep fixtures narrow**
+- [x] **Step 3: Keep fixtures narrow**
 
 Use small fake `WikiMeta`, small `ModuleTreeNode` arrays, and `vi.fn()` dependencies only.
 
-- [ ] **Step 4: Commit the contract tests**
+- [x] **Step 4: Commit the contract tests**
 
 ```bash
 git add gitnexus/test/unit/wiki-incremental-update.test.ts
@@ -143,7 +145,7 @@ git commit -m "test: define wiki incremental update contract"
 **Files:**
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Add a per-test mock for the new helper**
+- [x] **Step 1: Add a per-test mock for the new helper**
 
 Do **not** add a file-scope `vi.mock('../../src/core/wiki/incremental-update.js', ...)`, because that would replace the incremental-update implementation for every test in the file and break the existing real-behavior orchestration assertions.
 
@@ -167,7 +169,7 @@ vi.doMock('../../src/core/wiki/incremental-update.js', () => ({
 const { WikiGenerator } = await import('../../src/core/wiki/generator.js');
 ```
 
-- [ ] **Step 2: Add a run-level wiring test**
+- [x] **Step 2: Add a run-level wiring test**
 
 Add a wiring-level test proving:
 
@@ -181,7 +183,7 @@ Assert helper payload shape, not only call count.
 
 This new test should be self-contained and must not weaken the existing orchestration tests that still exercise real incremental behavior.
 
-- [ ] **Step 3: Run the orchestration file to verify failure**
+- [x] **Step 3: Run the orchestration file to verify failure**
 
 Run:
 
@@ -193,7 +195,7 @@ npx vitest run test/unit/wiki-generator-orchestration.test.ts
 Expected:
 - failure because `run()` still calls the inline `incrementalUpdate` method instead of the mocked helper
 
-- [ ] **Step 4: Commit the orchestration RED test**
+- [x] **Step 4: Commit the orchestration RED test**
 
 ```bash
 git add gitnexus/test/unit/wiki-generator-orchestration.test.ts
@@ -208,7 +210,7 @@ git commit -m "test: cover wiki incremental update orchestration"
 - Modify: `gitnexus/test/unit/wiki-incremental-update.test.ts`
 - Modify: `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run impact analysis before editing symbols**
+- [x] **Step 1: Run impact analysis before editing symbols**
 
 Use GitNexus MCP:
 
@@ -219,7 +221,7 @@ gitnexus_impact({ target: "run", direction: "upstream", repo: "GitNexus", includ
 
 Record the actual output in notes. At the time this plan was written, `incrementalUpdate` was `LOW` risk with direct caller `run`.
 
-- [ ] **Step 2: Implement `incremental-update.ts`**
+- [x] **Step 2: Implement `incremental-update.ts`**
 
 Create `runIncrementalUpdate(options, deps)` as a standalone exported function.
 
@@ -233,7 +235,7 @@ Preserve all current branch behavior, including:
 - overview gating on `pagesGenerated > 0`
 - final metadata save and return shape
 
-- [ ] **Step 3: Rewire `generator.ts`**
+- [x] **Step 3: Rewire `generator.ts`**
 
 Import:
 
@@ -289,7 +291,7 @@ generateOverviewPage: async (moduleTree) => {
 
 Do not move helper ownership in this task.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -302,7 +304,7 @@ Expected:
 - incremental-update tests pass
 - orchestration test passes
 
-- [ ] **Step 5: Run broader wiki verification**
+- [x] **Step 5: Run broader wiki verification**
 
 Run:
 
@@ -316,7 +318,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 6: Run GitNexus scope check before commit**
+- [x] **Step 6: Run GitNexus scope check before commit**
 
 Use GitNexus MCP:
 
@@ -331,7 +333,7 @@ Expected:
   - `wiki-incremental-update.test.ts`
   - `wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 7: Commit the extraction**
+- [x] **Step 7: Commit the extraction**
 
 ```bash
 git add gitnexus/src/core/wiki/incremental-update.ts gitnexus/src/core/wiki/generator.ts gitnexus/test/unit/wiki-incremental-update.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
@@ -347,7 +349,7 @@ git commit -m "refactor: extract wiki incremental update flow"
   - `gitnexus/test/unit/wiki-incremental-update.test.ts`
   - `gitnexus/test/unit/wiki-generator-orchestration.test.ts`
 
-- [ ] **Step 1: Run compatibility verification**
+- [x] **Step 1: Run compatibility verification**
 
 Run:
 
@@ -361,7 +363,7 @@ Expected:
 - all targeted wiki tests pass
 - build passes
 
-- [ ] **Step 2: Fix only real compatibility issues**
+- [x] **Step 2: Fix only real compatibility issues**
 
 Allowed fixes:
 
@@ -372,7 +374,7 @@ Allowed fixes:
 
 Do not widen scope into helper migration.
 
-- [ ] **Step 3: Commit compatibility-only fixes**
+- [x] **Step 3: Commit compatibility-only fixes**
 
 ```bash
 git add gitnexus/src/core/wiki/generator.ts gitnexus/src/core/wiki/incremental-update.ts gitnexus/test/unit/wiki-incremental-update.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
@@ -384,7 +386,7 @@ git commit -m "fix: preserve wiki incremental update compatibility"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-27-wiki-generator-incremental-update-design.md` only if implementation meaningfully differs
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -400,7 +402,7 @@ Expected:
 - build passes
 - local CLI reports the repo and current commit cleanly
 
-- [ ] **Step 2: Refresh the local GitNexus index**
+- [x] **Step 2: Refresh the local GitNexus index**
 
 Run:
 
@@ -415,7 +417,7 @@ Expected:
 - `Indexed commit` matches `Current commit`
 - repo health is fresh or only dirty for intentional generated-context updates
 
-- [ ] **Step 3: Review final diff concentration**
+- [x] **Step 3: Review final diff concentration**
 
 Run:
 
@@ -433,7 +435,7 @@ gitnexus_detect_changes({ scope: "compare", base_ref: "<INCREMENTAL_SLICE_BASE>"
 Expected:
 - changes remain concentrated in the incremental-update slice and its tests
 
-- [ ] **Step 4: Sync the spec only if needed**
+- [x] **Step 4: Sync the spec only if needed**
 
 If implementation meaningfully differs from the design, update:
 
@@ -441,9 +443,28 @@ If implementation meaningfully differs from the design, update:
 
 Otherwise leave the spec untouched.
 
-- [ ] **Step 5: Commit final doc or verification-driven cleanup**
+- [x] **Step 5: Commit final doc or verification-driven cleanup**
 
 ```bash
 git add docs/superpowers/specs/2026-03-27-wiki-generator-incremental-update-design.md gitnexus/src/core/wiki/generator.ts gitnexus/src/core/wiki/incremental-update.ts gitnexus/test/unit/wiki-incremental-update.test.ts gitnexus/test/unit/wiki-generator-orchestration.test.ts
 git commit -m "chore: finalize wiki incremental update extraction"
 ```
+
+## Historical Verification Summary
+
+- The repository now contains the planned extraction target
+  `gitnexus/src/core/wiki/incremental-update.ts` and the rewired
+  `gitnexus/src/core/wiki/generator.ts` dispatch path.
+- The repository also contains the planned focused verification anchors:
+  `gitnexus/test/unit/wiki-incremental-update.test.ts` and
+  `gitnexus/test/unit/wiki-generator-orchestration.test.ts`.
+- The `2026-03-28` technical-debt audit records
+  `incremental-update.ts` → `wiki-incremental-update.test.ts` as verified, and
+  also records adjacent wiki extraction tests as passing.
+- Current mainline wiki source layout also includes the neighboring extraction
+  anchors that this plan expected to coexist with:
+  `gitnexus/src/core/wiki/generator-support.ts`,
+  `gitnexus/src/core/wiki/run-pipeline.ts`,
+  `gitnexus/src/core/wiki/full-generation.ts`,
+  `gitnexus/src/core/wiki/module-tree/builder.ts`, and the page-generation
+  modules under `gitnexus/src/core/wiki/pages/`.
