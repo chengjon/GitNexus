@@ -1,7 +1,7 @@
 # LocalBackend Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-03-24-local-backend-handler-first-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-03-24-local-backend-handler-first-implementation-plan.md`
 目标：把 pre-OpenSpec 时期的 `LocalBackend` handler-first implementation plan 从 false-open 状态同步回当前已落地事实。
 
 ---

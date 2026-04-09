@@ -1,7 +1,7 @@
 # Wiki Generator Incremental Update Design
 
-Date: 2026-03-27  
-Status: Landed on current `main`; retained as a historical design record  
+Date: 2026-03-27
+Status: Landed on current `main`; retained as a historical design record
 Scope: `gitnexus/src/core/wiki/generator.ts`
 
 ## Implementation Sync (2026-04-08)

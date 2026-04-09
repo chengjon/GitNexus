@@ -1,7 +1,7 @@
 # Detect Changes Claude Code CWD Live Probe
 
-日期：2026-04-07  
-范围：Claude Code CLI 在 MCP tool 调用时是否自动注入 `cwd`  
+日期：2026-04-07
+范围：Claude Code CLI 在 MCP tool 调用时是否自动注入 `cwd`
 目标：用 live probe 关闭 `detect_changes` 外部宿主矩阵中最重要的一条剩余不确定性。
 
 ---

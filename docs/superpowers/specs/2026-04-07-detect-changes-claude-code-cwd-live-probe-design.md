@@ -1,7 +1,7 @@
 # Detect Changes Claude Code CWD Live Probe Design
 
-日期：2026-04-07  
-类型：docs-only probe record  
+日期：2026-04-07
+类型：docs-only probe record
 范围：Claude Code host behavior
 
 ---

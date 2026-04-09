@@ -1,7 +1,7 @@
 # Language Support Policy Convergence Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: `gitnexus/src/core/tree-sitter/language-registry.ts`, `gitnexus/src/ci/language-support-report.ts`, `gitnexus/scripts/ci/language-support-report.mjs`, `.github/workflows/ci.yml`, targeted tests, audit/OpenSpec/roadmap docs
 
 ## Goal

@@ -1,7 +1,7 @@
 # LocalBackend Handler-First Refactor Design
 
-Date: 2026-03-24  
-Status: Landed on current `main` via `2038325` and follow-up fixes; retained as a historical design record  
+Date: 2026-03-24
+Status: Landed on current `main` via `2038325` and follow-up fixes; retained as a historical design record
 Scope: `gitnexus/src/mcp/local/local-backend.ts`
 
 ## Implementation Sync (2026-04-06)

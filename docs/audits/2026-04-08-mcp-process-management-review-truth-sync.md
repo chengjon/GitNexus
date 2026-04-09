@@ -1,7 +1,7 @@
 # MCP Process Management Review Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/specs/2026-04-05-mcp-process-management-review.md`  
+日期：2026-04-08
+范围：`docs/superpowers/specs/2026-04-05-mcp-process-management-review.md`
 目标：把 historical review 文档中仍像当前实现 gate 的叙事同步回已归档、已落地的 MCP process-management 事实
 
 ---

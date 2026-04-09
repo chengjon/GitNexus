@@ -1,7 +1,7 @@
 # Wiki Generator Module Tree Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-03-26-wiki-generator-module-tree-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-03-26-wiki-generator-module-tree-implementation-plan.md`
 目标：把历史 `wiki-generator-module-tree` implementation plan 的 false-open 状态同步回当前已落地事实。
 
 ---

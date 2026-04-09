@@ -8,6 +8,9 @@ If you are modifying this repository while following this quick start, top-level
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+Audit entrypoint:
+[`audits/README.md`](audits/README.md)
+
 ## Host Scope
 
 For this local GitNexus fork, the primary maintained CLI surface is

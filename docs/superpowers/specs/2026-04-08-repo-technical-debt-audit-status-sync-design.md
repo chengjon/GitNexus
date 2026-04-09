@@ -1,7 +1,7 @@
 # Repo Technical Debt Audit Status Sync Design
 
-日期：2026-04-08  
-类型：doc-only governance sync  
+日期：2026-04-08
+类型：doc-only governance sync
 范围：repository technical-debt baseline audit 的后续状态注记
 
 ---
@@ -46,4 +46,3 @@
 - repo-hygiene 原始 capability 行为
 
 唯一目标是让历史基线审计与后续治理事实之间建立清晰的时间边界。
-

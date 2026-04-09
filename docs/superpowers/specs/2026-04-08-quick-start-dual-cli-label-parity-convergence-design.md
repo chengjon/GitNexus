@@ -1,7 +1,7 @@
 # Quick Start Dual CLI Label Parity Convergence Design
 
-日期：2026-04-08  
-类型：doc-only host-label convergence  
+日期：2026-04-08
+类型：doc-only host-label convergence
 范围：`docs/gitnexus-quick-start-guide.md`
 
 ---

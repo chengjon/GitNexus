@@ -1,7 +1,7 @@
 # Parse Worker Laravel Route Extraction Design
 
-Date: 2026-03-26  
-Status: Landed on current `main`; retained as a historical design record  
+Date: 2026-03-26
+Status: Landed on current `main`; retained as a historical design record
 Scope: `gitnexus/src/core/ingestion/workers/parse-worker.ts`
 
 ## Implementation Sync (2026-04-08)

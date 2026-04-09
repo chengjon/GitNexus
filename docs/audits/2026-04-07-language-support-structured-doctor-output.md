@@ -1,7 +1,7 @@
 # Language Support Structured Doctor Output
 
-日期：2026-04-07  
-范围：`gitnexus/src/cli/doctor.ts`、`gitnexus/src/ci/language-support-report.ts`  
+日期：2026-04-07
+范围：`gitnexus/src/cli/doctor.ts`、`gitnexus/src/ci/language-support-report.ts`
 目标：让 `doctor --json` 对 `language-support` 提供结构化数据，避免 CI reporter 继续依赖脆弱的字符串解析
 
 ---

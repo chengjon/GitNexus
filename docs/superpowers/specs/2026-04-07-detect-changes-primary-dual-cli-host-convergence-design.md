@@ -1,7 +1,7 @@
 # Detect Changes Primary Dual CLI Host Convergence Design
 
-日期：2026-04-07  
-类型：doc-only governance convergence  
+日期：2026-04-07
+类型：doc-only governance convergence
 范围：`detect_changes` 外部宿主支持表述
 
 ---
@@ -46,4 +46,3 @@ Codex 与 Claude Code 的当前事实已经足够支撑本项目要求的双 CLI
 - 任何 Claude Code / Codex / Cursor 运行时行为
 
 唯一目标是消除主支持面与外部 follow-up 之间的 false-open 叙事。
-

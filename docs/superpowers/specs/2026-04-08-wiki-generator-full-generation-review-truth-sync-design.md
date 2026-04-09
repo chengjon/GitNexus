@@ -1,7 +1,7 @@
 # Wiki Generator Full Generation Review Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only review truth-sync  
+日期：2026-04-08
+类型：doc-only review truth-sync
 范围：historical `wiki-generator-full-generation` review artifact
 
 ---

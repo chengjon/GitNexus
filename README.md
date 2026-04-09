@@ -44,6 +44,12 @@ Repository-wide development rules live in [`DEVELOPMENT_RULES.md`](DEVELOPMENT_R
 
 If your change touches migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, or backup files, treat that document as mandatory review policy rather than optional guidance.
 
+Repository audit entrypoint:
+[`docs/audits/README.md`](docs/audits/README.md)
+
+Documentation entrypoint:
+[`docs/README.md`](docs/README.md)
+
 ---
 
 ## Recent Major Updates
@@ -161,6 +167,9 @@ For AI CLIs or local agents on this machine, prefer the linked local command ins
 
 Canonical single-file reference:
 [`docs/ai-cli-local-quick-start.md`](docs/ai-cli-local-quick-start.md)
+
+Audit index:
+[`docs/audits/README.md`](docs/audits/README.md)
 
 ```bash
 # 0. Optional: verify that the local fork is active

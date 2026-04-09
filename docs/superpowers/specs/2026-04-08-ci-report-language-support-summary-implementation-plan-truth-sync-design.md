@@ -1,7 +1,7 @@
 # CI Report Language Support Summary Implementation Plan Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only truth-sync  
+日期：2026-04-08
+类型：doc-only truth-sync
 范围：`ci-report-language-support-summary` historical implementation plan
 
 ---

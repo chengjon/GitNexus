@@ -1,7 +1,7 @@
 # Repo Technical Debt Audit Broader Status Sync Design
 
-日期：2026-04-08  
-类型：doc-only broader status sync  
+日期：2026-04-08
+类型：doc-only broader status sync
 范围：historical `2026-04-06-repo-technical-debt-and-residual-audit.md`
 
 ---

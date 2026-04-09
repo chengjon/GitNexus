@@ -1,7 +1,7 @@
 # Detect Changes Worktree Review Truth Sync Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: worktree review doc truth-sync, cited test verification, audit/OpenSpec/roadmap docs
 
 ## Goal

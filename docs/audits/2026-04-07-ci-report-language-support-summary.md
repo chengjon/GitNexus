@@ -1,7 +1,7 @@
 # CI Report Language Support Summary
 
-日期：2026-04-07  
-范围：GitHub Actions `language-support` CI job 与 PR sticky report  
+日期：2026-04-07
+范围：GitHub Actions `language-support` CI job 与 PR sticky report
 目标：让 PR 汇总评论不仅显示 `language-support` 门禁状态，也显示该门禁已经生成的语言支持摘要
 
 ---

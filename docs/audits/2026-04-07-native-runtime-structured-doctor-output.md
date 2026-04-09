@@ -1,7 +1,7 @@
 # Native Runtime Structured Doctor Output
 
-日期：2026-04-07  
-范围：`gitnexus/src/cli/doctor.ts`、`gitnexus/src/runtime/native-runtime-manager.ts`  
+日期：2026-04-07
+范围：`gitnexus/src/cli/doctor.ts`、`gitnexus/src/runtime/native-runtime-manager.ts`
 目标：让 `doctor --json` 对 `native-runtime` 输出结构化 `data`，不再只靠 detail 字符串暴露 snapshot
 
 ---

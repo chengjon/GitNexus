@@ -1,7 +1,7 @@
 # Detect Changes Worktree Resolution Design
 
-Date: 2026-03-25  
-Status: Implemented; truth-synced to current behavior on 2026-04-07  
+Date: 2026-03-25
+Status: Implemented; truth-synced to current behavior on 2026-04-07
 Scope: `gitnexus/src/mcp/local/tools/handlers/detect-changes-handler.ts`
 
 ## 1. Goal

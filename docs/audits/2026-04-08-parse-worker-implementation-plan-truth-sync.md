@@ -1,7 +1,7 @@
 # Parse Worker Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-03-26-parse-worker-laravel-route-extraction-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-03-26-parse-worker-laravel-route-extraction-implementation-plan.md`
 目标：把 pre-OpenSpec 时期的 `parse-worker` Laravel route extraction implementation plan 从 false-open 状态同步回当前已落地事实。
 
 ---

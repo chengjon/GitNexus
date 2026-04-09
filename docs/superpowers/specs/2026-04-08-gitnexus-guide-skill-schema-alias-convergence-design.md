@@ -1,7 +1,7 @@
 # GitNexus Guide Skill Schema Alias Convergence Design
 
-日期：2026-04-08  
-类型：doc-only guide skill convergence  
+日期：2026-04-08
+类型：doc-only guide skill convergence
 范围：`gitnexus-guide` skill 文档
 
 ---

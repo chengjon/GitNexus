@@ -1,7 +1,7 @@
 # MCP Process Management Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-04-05-mcp-process-management-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-04-05-mcp-process-management-implementation-plan.md`
 目标：把历史 `mcp-process-management` implementation plan 的 false-open 状态同步回当前已落地事实。
 
 ---

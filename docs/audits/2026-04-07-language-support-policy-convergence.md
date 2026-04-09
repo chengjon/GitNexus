@@ -1,7 +1,7 @@
 # Language Support Policy Convergence
 
-日期：2026-04-07  
-范围：`gitnexus/src/core/tree-sitter/language-registry.ts`、`gitnexus/src/ci/language-support-report.ts`、`.github/workflows/ci.yml`  
+日期：2026-04-07
+范围：`gitnexus/src/core/tree-sitter/language-registry.ts`、`gitnexus/src/ci/language-support-report.ts`、`.github/workflows/ci.yml`
 目标：消除 `language-support` runtime 与 CI reporter 间的重复事实源，避免 builtin/optional 语言名单再次分叉
 
 ---

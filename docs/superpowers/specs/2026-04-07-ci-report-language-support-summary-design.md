@@ -1,7 +1,7 @@
 # CI Report Language Support Summary Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: `.github/workflows/ci.yml`, `.github/workflows/ci-report.yml`, `gitnexus/test/unit/repository-governance-integration.test.ts`, `docs/audits/`, `openspec/changes/`, `docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md`
 
 ## Goal

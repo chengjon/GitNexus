@@ -1,7 +1,7 @@
 # Skills Modification Suggestions Prompt Host Framing Convergence Design
 
-日期：2026-04-08  
-类型：doc-only prompt-host framing convergence  
+日期：2026-04-08
+类型：doc-only prompt-host framing convergence
 范围：`docs/gitnexus-skills-modification-suggestions.md`
 
 ---

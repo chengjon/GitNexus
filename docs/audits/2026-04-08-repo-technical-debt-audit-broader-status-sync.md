@@ -1,7 +1,7 @@
 # Repo Technical Debt Audit Broader Status Sync
 
-日期：2026-04-08  
-范围：`docs/audits/2026-04-06-repo-technical-debt-and-residual-audit.md` 的 broader stale-doc / repair-order 后续状态同步  
+日期：2026-04-08
+范围：`docs/audits/2026-04-06-repo-technical-debt-and-residual-audit.md` 的 broader stale-doc / repair-order 后续状态同步
 目标：保留 2026-04-06 仓库级基线审计的历史价值，同时避免它继续把已部分收敛的 stale-doc repair order 表述成当前原封不动的 backlog
 
 ---

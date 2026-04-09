@@ -1,7 +1,7 @@
 # README MCP Prompt Host Boundary Convergence Design
 
-日期：2026-04-08  
-类型：doc-only prompt-host boundary convergence  
+日期：2026-04-08
+类型：doc-only prompt-host boundary convergence
 范围：`README.md`
 
 ---

@@ -1,8 +1,8 @@
 # MCP Mmap Root Cause And Runtime Drain Audit
 
-日期：2026-04-08  
-范围：`gitnexus/src/mcp/repo-worker.ts`、`gitnexus/src/mcp/repo-worker-manager.ts`、`gitnexus/src/runtime/mcp-process-registry.ts`、`gitnexus/src/cli/platform-process-scan.ts` 及对应测试  
-目标：把 `Buffer manager exception: Mmap for size 8796093022208 failed.` 的根因、修复路径、实测验证与剩余宿主边界沉淀为仓库内可复查审计记录。  
+日期：2026-04-08
+范围：`gitnexus/src/mcp/repo-worker.ts`、`gitnexus/src/mcp/repo-worker-manager.ts`、`gitnexus/src/runtime/mcp-process-registry.ts`、`gitnexus/src/cli/platform-process-scan.ts` 及对应测试
+目标：把 `Buffer manager exception: Mmap for size 8796093022208 failed.` 的根因、修复路径、实测验证与剩余宿主边界沉淀为仓库内可复查审计记录。
 治理入口：[DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
 
 ---

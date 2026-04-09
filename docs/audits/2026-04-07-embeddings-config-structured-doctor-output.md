@@ -1,7 +1,7 @@
 # Embeddings Config Structured Doctor Output
 
-日期：2026-04-07  
-范围：`gitnexus/src/cli/doctor.ts`  
+日期：2026-04-07
+范围：`gitnexus/src/cli/doctor.ts`
 目标：让 `doctor --json` 对 `embeddings-config` 提供结构化 `data`，减少后续对 `detail` 字符串的机器解析依赖
 
 ---

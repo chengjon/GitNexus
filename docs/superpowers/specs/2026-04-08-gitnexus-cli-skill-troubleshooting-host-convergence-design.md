@@ -1,7 +1,7 @@
 # GitNexus CLI Skill Troubleshooting Host Convergence Design
 
-日期：2026-04-08  
-类型：doc-only troubleshooting host convergence  
+日期：2026-04-08
+类型：doc-only troubleshooting host convergence
 范围：`gitnexus-cli` skill 文档
 
 ---

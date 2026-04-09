@@ -1,7 +1,7 @@
 # Secondary Entrypoint Host Framing Convergence Design
 
-日期：2026-04-08  
-类型：doc-only host-framing convergence  
+日期：2026-04-08
+类型：doc-only host-framing convergence
 范围：secondary entrypoint docs
 
 ---

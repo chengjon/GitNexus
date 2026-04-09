@@ -1,7 +1,7 @@
 # GitNexus Skills Review Status Sync Design
 
-日期：2026-04-08  
-类型：doc-only historical review status sync  
+日期：2026-04-08
+类型：doc-only historical review status sync
 范围：`docs/gitnexus-skills-review.md`
 
 ---

@@ -1,7 +1,7 @@
 # GitNexus CLI Skill Dual CLI Freshness Convergence Design
 
-日期：2026-04-08  
-类型：doc-only dual-cli freshness convergence  
+日期：2026-04-08
+类型：doc-only dual-cli freshness convergence
 范围：`gitnexus-cli` skill 文档
 
 ---

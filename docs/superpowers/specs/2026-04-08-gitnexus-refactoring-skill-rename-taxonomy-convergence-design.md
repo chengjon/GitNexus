@@ -1,7 +1,7 @@
 # GitNexus Refactoring Skill Rename Taxonomy Convergence Design
 
-日期：2026-04-08  
-类型：doc-only refactoring skill convergence  
+日期：2026-04-08
+类型：doc-only refactoring skill convergence
 范围：`gitnexus-refactoring` skill 文档
 
 ---

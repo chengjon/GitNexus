@@ -1,7 +1,7 @@
 # Embeddings Config Structured Doctor Output Implementation Plan Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only truth-sync  
+日期：2026-04-08
+类型：doc-only truth-sync
 范围：`embeddings-config-structured-doctor-output` historical implementation plan
 
 ---

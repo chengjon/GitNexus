@@ -1,7 +1,7 @@
 # Detect Changes Host Compatibility Matrix Baseline
 
-日期：2026-04-07  
-范围：`detect_changes` 在外部宿主 / MCP 客户端中的 `cwd` 透传研究基线  
+日期：2026-04-07
+范围：`detect_changes` 在外部宿主 / MCP 客户端中的 `cwd` 透传研究基线
 目标：把“外部宿主兼容性矩阵待补”收敛为一份可复用的官方文档 + 仓内实测基线，明确哪些结论已经成立，哪些仍需 live probe。
 
 ---

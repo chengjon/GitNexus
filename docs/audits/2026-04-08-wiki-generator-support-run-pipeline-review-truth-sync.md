@@ -1,7 +1,7 @@
 # Wiki Generator Support-Run-Pipeline Review Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/specs/2026-03-27-wiki-generator-support-run-pipeline-design-review.md`  
+日期：2026-04-08
+范围：`docs/superpowers/specs/2026-03-27-wiki-generator-support-run-pipeline-design-review.md`
 目标：把 historical review 文档里仍按“进入实现阶段前”表达的叙事同步回当前已落地事实
 
 ---

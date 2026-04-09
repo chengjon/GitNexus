@@ -1,7 +1,7 @@
 # LocalBackend Implementation Plan Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only truth-sync  
+日期：2026-04-08
+类型：doc-only truth-sync
 范围：pre-OpenSpec `LocalBackend` handler-first implementation plan
 
 ---
@@ -47,4 +47,3 @@
 - 任何 `LocalBackend` / handler / runtime 行为
 
 唯一目标是消除这份 pre-OpenSpec 历史计划的 false-open 状态。
-

@@ -1,7 +1,7 @@
 # Mini Repo AI Context Fixture Convergence Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: mini-repo fixture docs, focused `ai-context` regression test, audit/OpenSpec/roadmap docs
 
 ## Goal

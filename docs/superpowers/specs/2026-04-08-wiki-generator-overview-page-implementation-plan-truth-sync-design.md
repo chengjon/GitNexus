@@ -1,7 +1,7 @@
 # Wiki Generator Overview Page Implementation Plan Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only truth-sync  
+日期：2026-04-08
+类型：doc-only truth-sync
 范围：historical `wiki-generator-overview-page` implementation plan
 
 ---

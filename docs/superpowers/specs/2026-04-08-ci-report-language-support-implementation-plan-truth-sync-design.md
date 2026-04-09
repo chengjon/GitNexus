@@ -1,7 +1,7 @@
 # CI Report Language Support Implementation Plan Truth Sync Design
 
-日期：2026-04-08  
-类型：doc-only truth-sync  
+日期：2026-04-08
+类型：doc-only truth-sync
 范围：`ci-report-language-support-convergence` historical implementation plan
 
 ---
@@ -45,4 +45,3 @@
 - CI report behavior
 
 唯一目标是消除 historical implementation plan 的 false-open 状态。
-

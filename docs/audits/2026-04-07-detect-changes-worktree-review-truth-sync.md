@@ -1,7 +1,7 @@
 # Detect Changes Worktree Review Truth Sync
 
-日期：2026-04-07  
-范围：`docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-review.md`  
+日期：2026-04-07
+范围：`docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-review.md`
 目标：把 worktree review 文档里已经被现有测试证伪的“未完成项”同步回当前事实
 
 ---

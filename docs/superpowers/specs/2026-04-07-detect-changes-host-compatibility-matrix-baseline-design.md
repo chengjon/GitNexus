@@ -1,7 +1,7 @@
 # Detect Changes Host Compatibility Matrix Baseline Design
 
-日期：2026-04-07  
-类型：docs-only research baseline  
+日期：2026-04-07
+类型：docs-only research baseline
 范围：外部宿主兼容性矩阵
 
 ---

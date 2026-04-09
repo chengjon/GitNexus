@@ -1,7 +1,7 @@
 # Wiki Generator Full Generation Review Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/specs/2026-03-28-wiki-generator-full-generation-review.md`  
+日期：2026-04-08
+范围：`docs/superpowers/specs/2026-03-28-wiki-generator-full-generation-review.md`
 目标：把 historical review 文档里已经被 landed code 修复的 blocker 叙事同步回当前事实
 
 ---

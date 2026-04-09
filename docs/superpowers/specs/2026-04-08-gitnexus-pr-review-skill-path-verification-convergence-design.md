@@ -1,7 +1,7 @@
 # GitNexus PR Review Skill Path Verification Convergence Design
 
-日期：2026-04-08  
-类型：doc-only skill source/package convergence  
+日期：2026-04-08
+类型：doc-only skill source/package convergence
 范围：`gitnexus-pr-review` skill 文档
 
 ---

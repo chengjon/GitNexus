@@ -1,7 +1,7 @@
 # Repo Hygiene Implementation Plan Truth Sync Design
 
-日期：2026-04-07  
-类型：doc-only truth-sync  
+日期：2026-04-07
+类型：doc-only truth-sync
 范围：`2026-04-06-repo-hygiene-doc-convergence-implementation-plan.md`
 
 ---

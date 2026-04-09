@@ -1,7 +1,7 @@
 # GitNexus Impact Analysis Detect Changes Metadata Convergence Design
 
-日期：2026-04-08  
-类型：doc-only impact-analysis skill convergence  
+日期：2026-04-08
+类型：doc-only impact-analysis skill convergence
 范围：`gitnexus-impact-analysis` skill 文档
 
 ---

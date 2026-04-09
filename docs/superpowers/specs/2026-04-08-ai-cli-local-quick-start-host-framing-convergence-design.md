@@ -1,7 +1,7 @@
 # AI CLI Local Quick Start Host Framing Convergence Design
 
-日期：2026-04-08  
-类型：doc-only host-scope convergence  
+日期：2026-04-08
+类型：doc-only host-scope convergence
 范围：`docs/ai-cli-local-quick-start.md`
 
 ---

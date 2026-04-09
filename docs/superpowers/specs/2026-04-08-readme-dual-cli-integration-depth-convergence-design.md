@@ -1,7 +1,7 @@
 # README Dual CLI Integration Depth Convergence Design
 
-日期：2026-04-08  
-类型：doc-only wording convergence  
+日期：2026-04-08
+类型：doc-only wording convergence
 范围：`README.md`、`gitnexus/README.md`
 
 ---

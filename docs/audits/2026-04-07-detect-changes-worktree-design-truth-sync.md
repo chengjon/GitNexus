@@ -1,6 +1,6 @@
 # Detect Changes Worktree Design Truth Sync
 
-日期：2026-04-07  
+日期：2026-04-07
 范围：
 
 - `docs/superpowers/specs/2026-03-25-detect-changes-worktree-resolution-design.md`
@@ -27,8 +27,8 @@
 
 当前 design 文档还停留在旧设计阶段，和仓内事实有三处关键偏差：
 
-1. 仍把 `process.cwd()` 写成唯一输入，没有写出已经落地的 `params.cwd || process.cwd()` 解析顺序  
-2. 只写了 `--git-common-dir` / `--show-toplevel`，没有把 `--git-dir` 与两者的语义边界讲清楚  
+1. 仍把 `process.cwd()` 写成唯一输入，没有写出已经落地的 `params.cwd || process.cwd()` 解析顺序
+2. 只写了 `--git-common-dir` / `--show-toplevel`，没有把 `--git-dir` 与两者的语义边界讲清楚
 3. 没有把当前 metadata / warning / `fallback_reason` 合同和已有测试覆盖同步进去
 
 这会让设计文档继续落后于当前实现与 review 结论。

@@ -1,7 +1,7 @@
 # CI Report Language Support Summary Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-04-07-ci-report-language-support-summary-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-04-07-ci-report-language-support-summary-implementation-plan.md`
 目标：把已完成的 `ci-report language-support summary` implementation plan 从 false-open 状态同步回其 OpenSpec task ledger 与当前仓内事实。
 
 ---

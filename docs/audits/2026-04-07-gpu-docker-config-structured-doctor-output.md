@@ -1,7 +1,7 @@
 # GPU Docker Config Structured Doctor Output
 
-日期：2026-04-07  
-范围：`gitnexus/src/cli/doctor.ts`  
+日期：2026-04-07
+范围：`gitnexus/src/cli/doctor.ts`
 目标：让 `doctor --json` 对 `gpu-docker-config` 输出结构化 `data`
 
 ---

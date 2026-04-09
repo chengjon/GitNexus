@@ -1,7 +1,7 @@
 # CI Report Language Support Convergence
 
-日期：2026-04-07  
-范围：GitHub Actions PR sticky report  
+日期：2026-04-07
+范围：GitHub Actions PR sticky report
 目标：让 PR 汇总评论真实反映已存在的 `language-support` CI 门禁
 
 ---

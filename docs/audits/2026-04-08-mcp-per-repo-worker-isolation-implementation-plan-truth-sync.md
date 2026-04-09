@@ -1,7 +1,7 @@
 # MCP Per-Repo Worker Isolation Implementation Plan Truth Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/plans/2026-04-04-mcp-per-repo-worker-isolation-implementation-plan.md`  
+日期：2026-04-08
+范围：`docs/superpowers/plans/2026-04-04-mcp-per-repo-worker-isolation-implementation-plan.md`
 目标：把 historical `mcp-per-repo-worker-isolation` implementation plan 从 false-open 状态同步回当前已落地事实。
 
 ---

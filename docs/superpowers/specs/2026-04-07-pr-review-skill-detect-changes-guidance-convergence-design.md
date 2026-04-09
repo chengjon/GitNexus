@@ -1,7 +1,7 @@
 # PR Review Skill Detect Changes Guidance Convergence Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: PR review skill docs, focused skill-doc regression test, audit/OpenSpec/roadmap docs
 
 ## Goal

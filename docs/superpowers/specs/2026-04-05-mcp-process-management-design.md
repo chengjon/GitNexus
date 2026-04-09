@@ -1,7 +1,7 @@
 # MCP Process Management Design
 
-Date: 2026-04-05  
-Status: Implemented via archived OpenSpec change `2026-04-06-mcp-process-management`; retained as a historical design record  
+Date: 2026-04-05
+Status: Implemented via archived OpenSpec change `2026-04-06-mcp-process-management`; retained as a historical design record
 Scope: `gitnexus/src/cli/mcp.ts`, `gitnexus/src/cli/analyze.ts`, `gitnexus/src/cli/platform-process-scan.ts`, `gitnexus/src/mcp/repo-worker-manager.ts`, `gitnexus/src/mcp/repo-worker.ts`, `gitnexus/src/runtime/*`
 
 ## Implementation Sync (2026-04-08)

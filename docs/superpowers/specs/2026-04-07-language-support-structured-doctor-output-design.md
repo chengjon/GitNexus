@@ -1,7 +1,7 @@
 # Language Support Structured Doctor Output Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: `gitnexus/src/cli/doctor.ts`, `gitnexus/src/ci/language-support-report.ts`, targeted tests, audit/OpenSpec/roadmap docs
 
 ## Goal

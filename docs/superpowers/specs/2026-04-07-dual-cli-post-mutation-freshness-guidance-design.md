@@ -1,7 +1,7 @@
 # Dual CLI Post-Mutation Freshness Guidance Design
 
-Date: 2026-04-07  
-Status: Approved in conversation  
+Date: 2026-04-07
+Status: Approved in conversation
 Scope: generated AI context text, quick-start docs, focused tests, audit/OpenSpec/roadmap docs
 
 ## Goal

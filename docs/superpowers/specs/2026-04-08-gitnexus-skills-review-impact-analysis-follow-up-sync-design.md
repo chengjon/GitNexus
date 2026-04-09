@@ -1,7 +1,7 @@
 # GitNexus Skills Review Impact Analysis Follow-Up Sync Design
 
-日期：2026-04-08  
-类型：doc-only follow-up snapshot sync  
+日期：2026-04-08
+类型：doc-only follow-up snapshot sync
 范围：historical `docs/gitnexus-skills-review.md`
 
 ---

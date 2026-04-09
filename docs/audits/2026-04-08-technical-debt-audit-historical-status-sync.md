@@ -1,7 +1,7 @@
 # Technical Debt Audit Historical Status Sync
 
-日期：2026-04-08  
-范围：`docs/superpowers/specs/2026-03-28-technical-debt-audit.md`  
+日期：2026-04-08
+范围：`docs/superpowers/specs/2026-03-28-technical-debt-audit.md`
 目标：保留 2026-03-28 技术债审计的 worktree-era 历史价值，同时避免它继续被误读成当前主仓状态
 
 ---

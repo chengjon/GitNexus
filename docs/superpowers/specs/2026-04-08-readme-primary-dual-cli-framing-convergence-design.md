@@ -1,7 +1,7 @@
 # README Primary Dual CLI Framing Convergence Design
 
-日期：2026-04-08  
-类型：doc-only README convergence  
+日期：2026-04-08
+类型：doc-only README convergence
 范围：shared README host-support framing
 
 ---

@@ -1,7 +1,7 @@
 # Mini Repo AI Context Fixture Convergence
 
-日期：2026-04-07  
-范围：`gitnexus/test/fixtures/mini-repo/AGENTS.md`、`gitnexus/test/fixtures/mini-repo/CLAUDE.md`、`gitnexus/test/unit/ai-context.test.ts`  
+日期：2026-04-07
+范围：`gitnexus/test/fixtures/mini-repo/AGENTS.md`、`gitnexus/test/fixtures/mini-repo/CLAUDE.md`、`gitnexus/test/unit/ai-context.test.ts`
 目标：让 `mini-repo` 的样例 AI context 文档与当前生成器输出保持一致
 
 ---
