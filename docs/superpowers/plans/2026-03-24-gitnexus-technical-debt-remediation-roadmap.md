@@ -328,6 +328,12 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
     - 但 `worker-transformers-*` 同时膨胀到 `904.51 KB`
     - 这在工程效果上再次复现了已证伪的 provider shim 失败模式
     - 因此该路线也已回退，并记录为新的已证伪方向
+  - 同日还复测了 `onnxruntime-web` static runtime assetization 路线：
+    - 目标是把 ORT runtime 直接搬到 `/vendor/onnxruntime/ort.min.mjs`，从 Rollup worker bundle 中整体移出
+    - 构建虽然成功，且 warning 面没有恶化
+    - 但 `worker-transformers-*` 仍从 `451.39 KB` 膨胀到 `904.86 KB`
+    - 说明 runtime 重量只是从 `worker-onnx` 回流到了 `worker-transformers`
+    - 因此该路线也已回退，并记录为新的已证伪方向
 
 ### Phase P2：语言支持确定性工程
 
