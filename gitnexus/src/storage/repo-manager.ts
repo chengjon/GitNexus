@@ -321,7 +321,7 @@ export const unregisterRepo = async (repoPath: string): Promise<void> => {
   const resolved = path.resolve(repoPath);
   const entries = await readRegistry();
   const filtered = entries.filter(
-    (e) => path.resolve(e.path) !== resolved
+    (e) => !samePlatformPath(e.path, resolved)
   );
   await writeRegistry(filtered);
 };
