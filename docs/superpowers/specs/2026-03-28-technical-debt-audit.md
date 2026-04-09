@@ -95,7 +95,7 @@ Reader guidance (2026-04-08):
 | **P1** | parse-worker.ts | ✅ Done | Laravel route extraction already lives under `src/core/ingestion/routes/` with downstream imports updated |
 | **P1** | kuzu-adapter.ts | ✅ Local slice committed | FTS helpers have been extracted to `src/core/kuzu/fts.ts`; local commit `ecd70ee` verifies the first narrowing step |
 | **P1** | analyze.ts | ✅ Local slice committed | Analyze orchestration has been split into finalization/embeddings/summary/kuzu/session helpers; local commit `df9ae67` verifies the first narrowing step |
-| **P2** | Kotlin/Swift language support | 🔄 In progress | `doctor --json` already reports `language-support`; deterministic support work remains |
+| **P2** | Kotlin/Swift language support | ✅ Baseline complete | Deterministic `language-support` semantics, CI/doctor convergence, Swift patch retirement, and operator-facing support-tier/availability docs are now aligned; future Kotlin/Swift work should be tracked as new support-surface slices, not as unresolved baseline debt |
 | **P3** | Platform abstraction convergence | 🔄 In progress | Platform-specific logic has moved forward, but convergence work remains open |
 
 ### P0-A Detail

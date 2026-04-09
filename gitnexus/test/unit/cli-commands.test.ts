@@ -61,6 +61,11 @@ describe('CLI commands', () => {
       const pkg = await readPackageJson();
       expect(pkg.scripts.build).toBeDefined();
     });
+
+    it('does not keep the retired tree-sitter-swift patch in package scripts', async () => {
+      const pkg = await readPackageJson();
+      expect(pkg.scripts.postinstall).toBeUndefined();
+    });
   });
 
   describe('package.json bin entry', () => {

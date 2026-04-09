@@ -88,6 +88,25 @@ gitnexus doctor --host codex --repo .
 gitnexus doctor --host claude-code --repo .
 ```
 
+## Language Support Availability
+
+GitNexus has two language-support tiers:
+
+- Built-in grammars:
+  TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP
+- Optional native grammars:
+  Kotlin, Swift
+
+Kotlin and Swift are environment-dependent optional grammars. Do not describe
+them as universally available without checking the current host.
+
+Use `gitnexus doctor` or `gitnexus doctor --json` and inspect the
+`language-support` check:
+
+- `status` reports whether the grammar is currently available
+- `supportLevel` reports whether support is built-in or optional
+- `reasonCode` explains why an optional grammar is unavailable on this host
+
 ## detect_changes Guidance
 
 Use `repo` explicitly in multi-repo sessions:

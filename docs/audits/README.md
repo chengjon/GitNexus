@@ -8,6 +8,8 @@ Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.
 
 - [2026-04-09-docs-governance-cleanup-summary.md](/opt/claude/GitNexus/docs/audits/2026-04-09-docs-governance-cleanup-summary.md)
   Top-level closeout for the 2026-04-08/09 docs/governance cleanup line.
+- [2026-04-09-language-support-operator-availability-matrix-convergence.md](/opt/claude/GitNexus/docs/audits/2026-04-09-language-support-operator-availability-matrix-convergence.md)
+  Operator-facing support-tier and availability wording convergence for Kotlin / Swift vs built-in grammars.
 - [2026-04-09-docs-truth-sync-slice-classification.md](/opt/claude/GitNexus/docs/audits/2026-04-09-docs-truth-sync-slice-classification.md)
   Detailed slice-by-slice classification, cleanup execution record, and reuse rules.
 - [2026-04-09-read-only-git-index-and-alternate-object-store.md](/opt/claude/GitNexus/docs/audits/2026-04-09-read-only-git-index-and-alternate-object-store.md)

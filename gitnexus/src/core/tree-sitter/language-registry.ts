@@ -15,6 +15,8 @@ export interface LanguageSupportSummaryEntry {
   language: SupportedLanguages;
   tier: 'builtin' | 'optional';
   status: 'available' | 'unavailable';
+  supportLevel: 'fully-supported' | 'supported-with-optional-native-grammar' | 'best-effort' | 'disabled-or-unavailable';
+  reasonCode: 'bundled-grammar' | 'optional-native-grammar-loaded' | 'module-not-found' | 'native-build-unavailable' | 'bindings-not-found' | 'loader-returned-empty';
   source: string;
   detail: string;
 }
@@ -66,6 +68,29 @@ const isOptionalLanguageUnavailableError = (error: unknown): boolean => {
     || message.includes('Could not locate the bindings file');
 };
 
+const getOptionalLanguageUnavailableReasonCode = (
+  error: unknown,
+): LanguageSupportSummaryEntry['reasonCode'] => {
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: string }).code;
+    if (code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND') {
+      return 'module-not-found';
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error ?? '');
+
+  if (message.includes('No native build was found')) {
+    return 'native-build-unavailable';
+  }
+
+  if (message.includes('Could not locate the bindings file')) {
+    return 'bindings-not-found';
+  }
+
+  return 'module-not-found';
+};
+
 const loadOptionalLanguage = (
   moduleName: string,
   loadOptionalLanguageModule: OptionalLanguageLoader,
@@ -89,6 +114,8 @@ export const getOptionalLanguageSupportSummary = (
       language,
       tier: 'builtin' as const,
       status: 'available' as const,
+      supportLevel: 'fully-supported' as const,
+      reasonCode: 'bundled-grammar' as const,
       source,
       detail: 'bundled',
     })),
@@ -99,6 +126,8 @@ export const getOptionalLanguageSupportSummary = (
           language,
           tier: 'optional' as const,
           status: loaded ? 'available' as const : 'unavailable' as const,
+          supportLevel: loaded ? 'supported-with-optional-native-grammar' as const : 'disabled-or-unavailable' as const,
+          reasonCode: loaded ? 'optional-native-grammar-loaded' as const : 'loader-returned-empty' as const,
           source: moduleName,
           detail: loaded ? 'loaded' : 'unavailable',
         };
@@ -108,6 +137,8 @@ export const getOptionalLanguageSupportSummary = (
             language,
             tier: 'optional' as const,
             status: 'unavailable' as const,
+            supportLevel: 'disabled-or-unavailable' as const,
+            reasonCode: getOptionalLanguageUnavailableReasonCode(error),
             source: moduleName,
             detail: error instanceof Error ? error.message : String(error),
           };

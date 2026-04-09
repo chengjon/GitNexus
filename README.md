@@ -574,7 +574,15 @@ GitNexus builds a complete knowledge graph of your codebase through a multi-phas
 
 ### Supported Languages
 
-TypeScript, JavaScript, Python, Java, Kotlin, C, C++, C#, Go, Rust, PHP, Swift
+- Built-in grammars:
+  TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP
+- Optional native grammars:
+  Kotlin, Swift
+
+Kotlin and Swift are environment-dependent optional grammars rather than
+default guaranteed support on every host. Use `gitnexus doctor` or
+`gitnexus doctor --json` to inspect the current machine's
+`language-support` status, including `supportLevel` and `reasonCode`.
 
 ---
 

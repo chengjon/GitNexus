@@ -258,7 +258,15 @@ npx gitnexus analyze
 
 ## 支持的语言
 
-TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Kotlin, Swift
+- 内建 grammar：
+  TypeScript、JavaScript、Python、Java、C、C++、C#、Go、Rust、PHP
+- optional native grammar：
+  Kotlin、Swift
+
+Kotlin 与 Swift 属于环境相关的 optional grammar，不表示每台机器默认都稳定可用。
+如需确认当前主机的真实支持状态，请运行 `gitnexus doctor` 或
+`gitnexus doctor --json`，查看 `language-support` 中的
+`supportLevel` 与 `reasonCode`。
 
 ---
 

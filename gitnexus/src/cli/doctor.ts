@@ -868,7 +868,12 @@ export async function runDoctor(
       name: 'language-support',
       status: unavailable.length > 0 ? 'warn' : 'pass',
       detail: languageSupport
-        .map((entry) => `${entry.language}:${entry.tier}=${entry.status}${entry.detail ? ` (${entry.detail})` : ''}`)
+        .map((entry) => {
+          const semantics = [entry.supportLevel, entry.reasonCode].filter(Boolean).join('; ');
+          const semanticSuffix = semantics ? ` [${semantics}]` : '';
+          const detailSuffix = entry.detail ? ` (${entry.detail})` : '';
+          return `${entry.language}:${entry.tier}=${entry.status}${semanticSuffix}${detailSuffix}`;
+        })
         .join(', '),
       data: languageSupport,
     });

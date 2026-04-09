@@ -46,8 +46,7 @@
     "test:all": "npm test && npm run test:integration && npm run test:integration:native",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepare": "npm run build",
-    "postinstall": "node scripts/patch-tree-sitter-swift.cjs"
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

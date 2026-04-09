@@ -19,9 +19,9 @@ describe('language support CI report', () => {
           status: 'warn',
           detail: 'typescript:builtin=available (bundled), kotlin:optional=unavailable (missing native build), swift:optional=available (loaded)',
           data: [
-            { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
-            { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
-            { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+            { language: 'typescript', tier: 'builtin', status: 'available', supportLevel: 'fully-supported', reasonCode: 'bundled-grammar', source: 'bundled', detail: 'bundled' },
+            { language: 'kotlin', tier: 'optional', status: 'unavailable', supportLevel: 'disabled-or-unavailable', reasonCode: 'native-build-unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+            { language: 'swift', tier: 'optional', status: 'available', supportLevel: 'supported-with-optional-native-grammar', reasonCode: 'optional-native-grammar-loaded', source: 'tree-sitter-swift', detail: 'loaded' },
           ],
         },
       ],
@@ -32,9 +32,9 @@ describe('language support CI report', () => {
       status: 'warn',
       detail: 'typescript:builtin=available (bundled), kotlin:optional=unavailable (missing native build), swift:optional=available (loaded)',
       data: [
-        { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
-        { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
-        { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+        { language: 'typescript', tier: 'builtin', status: 'available', supportLevel: 'fully-supported', reasonCode: 'bundled-grammar', source: 'bundled', detail: 'bundled' },
+        { language: 'kotlin', tier: 'optional', status: 'unavailable', supportLevel: 'disabled-or-unavailable', reasonCode: 'native-build-unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+        { language: 'swift', tier: 'optional', status: 'available', supportLevel: 'supported-with-optional-native-grammar', reasonCode: 'optional-native-grammar-loaded', source: 'tree-sitter-swift', detail: 'loaded' },
       ],
     });
   });
@@ -45,15 +45,19 @@ describe('language support CI report', () => {
       status: 'warn',
       detail: 'legacy fallback detail',
       data: [
-        { language: 'typescript', tier: 'builtin', status: 'available', source: 'bundled', detail: 'bundled' },
-        { language: 'kotlin', tier: 'optional', status: 'unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
-        { language: 'swift', tier: 'optional', status: 'available', source: 'tree-sitter-swift', detail: 'loaded' },
+        { language: 'typescript', tier: 'builtin', status: 'available', supportLevel: 'fully-supported', reasonCode: 'bundled-grammar', source: 'bundled', detail: 'bundled' },
+        { language: 'kotlin', tier: 'optional', status: 'unavailable', supportLevel: 'disabled-or-unavailable', reasonCode: 'native-build-unavailable', source: 'tree-sitter-kotlin', detail: 'missing native build' },
+        { language: 'swift', tier: 'optional', status: 'available', supportLevel: 'supported-with-optional-native-grammar', reasonCode: 'optional-native-grammar-loaded', source: 'tree-sitter-swift', detail: 'loaded' },
       ],
     });
 
     expect(summary).toContain('- builtin: `typescript` = `available`');
-    expect(summary).toContain('- optional: `kotlin` = `unavailable`');
-    expect(summary).toContain('- optional: `swift` = `available`');
+    expect(summary).toContain('`fully-supported`');
+    expect(summary).toContain('`bundled-grammar`');
+    expect(summary).toContain('`disabled-or-unavailable`');
+    expect(summary).toContain('`native-build-unavailable`');
+    expect(summary).toContain('`supported-with-optional-native-grammar`');
+    expect(summary).toContain('`optional-native-grammar-loaded`');
   });
 
   it('formats a GitHub summary with builtin and optional language groups', () => {
@@ -67,6 +71,25 @@ describe('language support CI report', () => {
     expect(summary).toContain('- builtin: `typescript` = `available`');
     expect(summary).toContain('- optional: `kotlin` = `unavailable`');
     expect(summary).toContain('- optional: `swift` = `available`');
+  });
+
+  it('parses semantic support levels from detail-only fallback payloads', () => {
+    const summary = formatLanguageSupportSummary({
+      name: 'language-support',
+      status: 'warn',
+      detail: [
+        'typescript:builtin=available [fully-supported; bundled-grammar] (bundled)',
+        'kotlin:optional=unavailable [disabled-or-unavailable; native-build-unavailable] (missing native build)',
+        'swift:optional=available [supported-with-optional-native-grammar; optional-native-grammar-loaded] (loaded)',
+      ].join(', '),
+    });
+
+    expect(summary).toContain('`fully-supported`');
+    expect(summary).toContain('`bundled-grammar`');
+    expect(summary).toContain('`disabled-or-unavailable`');
+    expect(summary).toContain('`native-build-unavailable`');
+    expect(summary).toContain('`supported-with-optional-native-grammar`');
+    expect(summary).toContain('`optional-native-grammar-loaded`');
   });
 
   it('throws when doctor JSON does not include language-support', () => {

@@ -6,6 +6,26 @@
 
 ---
 
+## 0. 2026-04-09 Status Sync
+
+这份审计的基线结论仍然有效：
+
+- `doctor --json` 不应再只依赖脆弱 `detail` 字符串作为 machine-readable transport
+- `language-support.data` 仍是当前结构化主契约
+
+但截至 `2026-04-09`，后续状态已继续前进：
+
+- `language-support.data` 现在额外带有稳定 `supportLevel` 与 `reasonCode`
+- `language-support.detail` 现在也同步渲染语义标签，便于人类读取时不丢失口径
+- 默认安装路径中的 Swift `postinstall` patch 已退役，不再把 best-effort 安装补丁表达成稳定支持面
+
+当前读者应同时参考：
+
+- [2026-04-09-language-support-deterministic-semantics-convergence.md](/opt/claude/GitNexus/docs/audits/2026-04-09-language-support-deterministic-semantics-convergence.md)
+- [2026-04-09-swift-patch-postinstall-retirement.md](/opt/claude/GitNexus/docs/audits/2026-04-09-swift-patch-postinstall-retirement.md)
+
+---
+
 ## 1. 背景
 
 上一轮 `language-support-policy-convergence` 已经解决了：

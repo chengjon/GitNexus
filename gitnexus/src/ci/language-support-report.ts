@@ -25,6 +25,8 @@ interface ParsedLanguageSupportRow {
   language: string;
   tier: string;
   status: string;
+  supportLevel?: string;
+  reasonCode?: string;
   detail: string;
 }
 
@@ -35,6 +37,8 @@ function isLanguageSupportSummaryEntryArray(value: unknown): value is LanguageSu
     && typeof (entry as { language?: unknown }).language === 'string'
     && typeof (entry as { tier?: unknown }).tier === 'string'
     && typeof (entry as { status?: unknown }).status === 'string'
+    && (!('supportLevel' in (entry as object)) || typeof (entry as { supportLevel?: unknown }).supportLevel === 'string')
+    && (!('reasonCode' in (entry as object)) || typeof (entry as { reasonCode?: unknown }).reasonCode === 'string')
     && typeof (entry as { source?: unknown }).source === 'string'
     && typeof (entry as { detail?: unknown }).detail === 'string'
   ));
@@ -57,14 +61,16 @@ function parseLanguageSupportDetail(detail: string): ParsedLanguageSupportRow[] 
   return detail
     .split(', ')
     .filter(Boolean)
-    .map((entry) => {
-      const match = entry.match(/^([^:]+):([^=]+)=([^(]+)(?: \(([\s\S]*)\))?$/);
+    .map<ParsedLanguageSupportRow | null>((entry) => {
+      const match = entry.match(/^([^:]+):([^=]+)=([^\[(]+?)(?: \[([^;\]]+)(?:; ([^\]]+))?\])?(?: \(([\s\S]*)\))?$/);
       if (!match) return null;
-      const [, language, tier, status, extra] = match;
+      const [, language, tier, status, supportLevel, reasonCode, extra] = match;
       return {
         language,
         tier,
         status: status.trim(),
+        supportLevel: supportLevel?.trim(),
+        reasonCode: reasonCode?.trim(),
         detail: extra ?? '',
       };
     })
@@ -77,6 +83,8 @@ function getLanguageSupportRows(languageSupportCheck: LanguageSupportCheck): Par
       language: entry.language,
       tier: entry.tier,
       status: entry.status,
+      supportLevel: entry.supportLevel,
+      reasonCode: entry.reasonCode,
       detail: entry.detail,
     }));
   }
@@ -94,7 +102,10 @@ export function formatLanguageSupportSummary(languageSupportCheck: LanguageSuppo
   ];
 
   for (const row of rows) {
-    const suffix = row.detail ? ` (${row.detail})` : '';
+    const semanticBits = [row.supportLevel, row.reasonCode].filter(Boolean);
+    const semanticSuffix = semanticBits.length > 0 ? ` (\`${semanticBits.join('`, `')}\`` : '';
+    const detailSuffix = row.detail ? `${semanticBits.length > 0 ? '; ' : ' ('}${row.detail}` : '';
+    const suffix = semanticBits.length > 0 || row.detail ? `${semanticSuffix}${detailSuffix})` : '';
     lines.push(`- ${row.tier}: \`${row.language}\` = \`${row.status}\`${suffix}`);
   }
 
@@ -113,12 +124,24 @@ export function validateLanguageSupportPolicy(languageSupportCheck: LanguageSupp
     if (row.status !== 'available') {
       throw new Error(`builtin language support must be available: ${language}`);
     }
+    if (languageSupportCheck.data && row.supportLevel !== 'fully-supported') {
+      throw new Error(`builtin language support level must be fully-supported: ${language}`);
+    }
+    if (languageSupportCheck.data && row.reasonCode !== 'bundled-grammar') {
+      throw new Error(`builtin language reason code must be bundled-grammar: ${language}`);
+    }
   }
 
   for (const language of policy.optional) {
     const row = rows.find((entry) => entry.language === language && entry.tier === 'optional');
     if (!row) {
       throw new Error(`optional language declaration missing: ${language}`);
+    }
+    if (languageSupportCheck.data && !row.supportLevel) {
+      throw new Error(`optional language support level missing: ${language}`);
+    }
+    if (languageSupportCheck.data && !row.reasonCode) {
+      throw new Error(`optional language reason code missing: ${language}`);
     }
   }
 }
