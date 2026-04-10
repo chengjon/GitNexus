@@ -58,7 +58,7 @@
   `gitnexus/src/core/ingestion/resolvers/utils.ts`
   中基于 `buildSuffixIndex(...)` 的 indexed suffix lookup 路径
 - Measured:
-  `scope: call graph + inline source comments, time: 2026-04-10`
+  `scope: call graph + focused regression coverage, time: 2026-04-10`
   - 源码仍显式把该分支标注为 backward-compatibility fallback
   - GitNexus `impact(target="suffixResolve", direction="upstream")` 当前返回 `HIGH`
   - 直接 callers 至少包括：
@@ -66,6 +66,9 @@
     - `gitnexus/src/core/ingestion/resolvers/php.ts:resolvePhpImport`
     - `gitnexus/src/core/ingestion/resolvers/csharp.ts:resolveCSharpImport`
   - 间接上游已穿到 `import-processor.ts` 主流程
+  - 当前本地已补 focused unit tests：
+    - `gitnexus/test/unit/resolver-utils.test.ts` 锁定 no-index fallback 的直接行为
+    - `gitnexus/test/unit/resolver-callers-compatibility.test.ts` 锁定 3 个直接 callers 的无 index 兼容路径
 - Direct Cutover Risk:
   现在删除 fallback，等价于在多语言 import resolution 主路径上赌“所有调用方都已稳定提供 suffix index”。
   这不属于低风险清理。
@@ -86,13 +89,15 @@
   `gitnexus-web/src/hooks/useSigma.ts`
   内正常的 selection / refresh flow，本应不依赖 synthetic camera animation
 - Measured:
-  `scope: hook source + local repo search, time: 2026-04-10`
+  `scope: hook source + focused boundary coverage, time: 2026-04-10`
   - 源码在 `setSelectedNode()` 处仍有明确注释：
     `workaround for Sigma edge caching`
   - `GraphCanvas.tsx` 仍经由 `useSigma()` 消费该逻辑
-  - 当前本地搜索未发现 focused regression test 专门锁定“去掉 camera nudge 后 edge refresh 仍正确”
+  - 当前本地已补 `gitnexus/test/unit/gitnexus-web-use-sigma-workaround.test.ts`，
+    锁定 `setSelectedNode()` 仍保留 camera nudge，且 `focusNode()` 仍绕开该 workaround
 - Direct Cutover Risk:
-  在没有替代机制和 focused UI regression coverage 的前提下直接删除，可能重新引入 edge stale render。
+  虽然已有 workaround boundary test，但仍没有证明“去掉 camera nudge 后 edge refresh 仍正确”的替代机制或行为回归证据。
+  现在直接删除，仍可能重新引入 edge stale render。
 - Exit Condition:
   满足以下至少一项后再退休：
   - 上游 Sigma 行为已确认修复，且本仓完成版本验证
