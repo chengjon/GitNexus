@@ -98,7 +98,7 @@
   `gitnexus-web/src/hooks/useSigma.ts`
   内正常的 selection / refresh flow，本应不依赖 synthetic camera animation
 - Measured:
-  `scope: hook source + GraphCanvas selection sync + focused boundary coverage, time: 2026-04-10`
+  `scope: hook source + GraphCanvas selection sync + focused coverage, time: 2026-04-10`
   - 源码在 `setSelectedNode()` 处仍有明确注释：
     `workaround for Sigma edge caching`
   - `focusNode()` 当前仍显式绕开这段 workaround，源码注释保留了
@@ -106,17 +106,19 @@
   - `GraphCanvas.tsx` 当前在 app selected node -> sigma selected node 同步时仍会调用
     `setSigmaSelectedNode(appSelectedNode.id)`，因此常规 selection sync 仍会走这段 workaround
   - 当前本地已补 `gitnexus/test/unit/gitnexus-web-use-sigma-workaround.test.ts`，
-    锁定 `setSelectedNode()` 仍保留 camera nudge，且 `focusNode()` 仍绕开该 workaround
-  - 但当前测试仍属于 source-boundary coverage，不是 behavior regression coverage
+    锁定源码边界仍保留 workaround / 绕开路径
+  - 当前本地已补 `gitnexus-web/test/unit/useSigma.behavior.test.tsx`，
+    用 mocked runtime 行为测试锁定 `setSelectedNode()` 的 camera nudge + refresh，以及 `focusNode()` 的 direct focus 行为
+  - 但当前仍缺少真实 Sigma render / edge refresh integration-grade regression coverage
 - Direct Cutover Risk:
-  当前缺口不是“workaround 是否存在”，而是
-  “删除 camera nudge 后 selection/highlight/edge refresh 是否仍然正确”。
-  在没有 deterministic 替代路径或行为级回归证据之前，直接删除仍可能重新引入 edge stale render。
+  当前缺口不再是“完全没有行为测试”，而是
+  “还没有真实 Sigma render / edge refresh 的回归证据，或 deterministic 替代路径”。
+  在这之前直接删除，仍可能重新引入 edge stale render。
 - Exit Condition:
   满足以下条件后再退休：
   - 上游 Sigma 行为已确认修复，或本地改成不依赖 camera animation 的 deterministic refresh 路径
-  - 对 selection/highlight/edge refresh 补上行为级 regression coverage
-  - 删除 workaround 时同步退役当前源码边界测试
+  - 对 selection/highlight/edge refresh 补上更接近真实渲染路径的 regression coverage
+  - 删除 workaround 时同步退役当前源码边界测试，并调整 mocked runtime 行为测试
 - Cleanup Tracking:
   应归入 dedicated `gitnexus-web` UI/runtime retirement slice，而不是 opportunistic cleanup。
   具体退役边界见
@@ -133,7 +135,7 @@
   下一步最合理的动作不是继续 opportunistic 删除，而是：
   - 对 package-surface shim 按显式 retirement gate 处理
   - 对 resolver helper fallback 按 helper-contract 收缩治理
-  - 对前端 workaround 补 behavior regression evidence 或 deterministic 替代路径
+  - 对前端 workaround 补 integration-grade behavior evidence 或 deterministic 替代路径
 
 在这些退出条件满足前，继续保留这些 shim/workaround 是可接受的；
 把它们当作“已经自然消失的旧代码”则不可接受。

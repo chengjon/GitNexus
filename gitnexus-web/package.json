@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && node scripts/build-vite.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
@@ -25,12 +27,10 @@
     "d3": "^7.9.0",
     "graphology": "^0.26.0",
     "graphology-indices": "^0.17.0",
-    "graphology-utils": "^2.3.0",
-    "mnemonist": "^0.39.0",
-    "pandemonium": "^2.4.0",
     "graphology-layout-force": "^0.2.4",
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-layout-noverlap": "^0.4.2",
+    "graphology-utils": "^2.3.0",
     "isomorphic-git": "^1.36.1",
     "jszip": "^3.10.1",
     "kuzu-wasm": "0.11.3",
@@ -39,6 +39,8 @@
     "lucide-react": "^0.562.0",
     "mermaid": "^11.12.2",
     "minisearch": "^7.2.0",
+    "mnemonist": "^0.39.0",
+    "pandemonium": "^2.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
@@ -62,9 +64,11 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vercel/node": "^5.5.16",
     "@vitejs/plugin-react": "^5.1.0",
+    "jsdom": "^29.0.2",
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "^5.4.5",
     "vite": "^5.2.0",
-    "vite-plugin-static-copy": "^3.1.4"
+    "vite-plugin-static-copy": "^3.1.4",
+    "vitest": "^4.1.4"
   }
 }
