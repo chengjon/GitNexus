@@ -58,25 +58,27 @@
   `gitnexus/src/core/ingestion/resolvers/utils.ts`
   中基于 `buildSuffixIndex(...)` 的 indexed suffix lookup 路径
 - Measured:
-  `scope: call graph + focused regression coverage, time: 2026-04-10`
+  `scope: call graph + caller audit + focused regression coverage, time: 2026-04-10`
   - 源码仍显式把该分支标注为 backward-compatibility fallback
   - GitNexus `impact(target="suffixResolve", direction="upstream")` 当前返回 `HIGH`
   - 直接 callers 至少包括：
     - `gitnexus/src/core/ingestion/resolvers/standard.ts:resolveImportPath`
     - `gitnexus/src/core/ingestion/resolvers/php.ts:resolvePhpImport`
     - `gitnexus/src/core/ingestion/resolvers/csharp.ts:resolveCSharpImport`
-  - 间接上游已穿到 `import-processor.ts` 主流程
+  - 仓内生产主链里，这 3 个 callers 当前都经由 `import-processor.ts:resolveLanguageImport` 显式收到并传入 `index`
+  - 间接上游仍穿到 `import-processor.ts` 主流程，因此 symbol-level blast radius 依旧是 `HIGH`
   - 当前本地已补 focused unit tests：
     - `gitnexus/test/unit/resolver-utils.test.ts` 锁定 no-index fallback 的直接行为
     - `gitnexus/test/unit/resolver-callers-compatibility.test.ts` 锁定 3 个直接 callers 的无 index 兼容路径
 - Direct Cutover Risk:
-  现在删除 fallback，等价于在多语言 import resolution 主路径上赌“所有调用方都已稳定提供 suffix index”。
-  这不属于低风险清理。
+  现在删除 fallback，不再是在赌“当前仓内主流程是否传 index”，而是在赌
+  “这些 resolver helper 的无 index 直接调用契约已经可以整体退休”。
+  这依然属于高风险兼容性变更，不是低风险清理。
 - Exit Condition:
   只有在以下条件都满足后才可退休：
-  - 所有 callers 都显式传入 suffix index
-  - 对 no-index 调用的行为有回归测试证明已不再需要兼容
-  - 相关多语言 resolver 集成测试确认未回归
+  - 仓内与受支持外部调用点都明确改成 indexed path，或明确声明 no-index helper 调用不再受支持
+  - 对 no-index 调用的行为有回归测试证明已不再需要兼容，并同步移除当前 compatibility tests
+  - 相关多语言 resolver 集成测试确认 indexed-only 路径未回归
 - Cleanup Tracking:
   应放入 dedicated import-resolution high-risk slice，不应作为 opportunistic cleanup。
 
