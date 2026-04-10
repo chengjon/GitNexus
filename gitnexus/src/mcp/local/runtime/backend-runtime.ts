@@ -1,7 +1,7 @@
 import path from 'path';
 import { closeKuzu, initKuzu, isKuzuReady } from '../../core/kuzu-adapter.js';
 import { listRegisteredRepos } from '../../../storage/repo-manager.js';
-import { samePlatformPath } from '../../../lib/path-comparison.js';
+import { normalizePlatformPath, samePlatformPath } from '../../../lib/path-comparison.js';
 import type { CodebaseContext, LocalBackendRuntimeLike, RepoHandle } from './types.js';
 
 export class BackendRuntime implements LocalBackendRuntimeLike {
@@ -10,8 +10,7 @@ export class BackendRuntime implements LocalBackendRuntimeLike {
   private initializedRepos: Set<string> = new Set();
 
   private normalizePathForKey(repoPath: string): string {
-    const resolved = path.resolve(repoPath);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    return normalizePlatformPath(repoPath);
   }
 
   private samePath(left: string, right: string): boolean {
