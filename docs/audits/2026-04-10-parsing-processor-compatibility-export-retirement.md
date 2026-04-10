@@ -117,7 +117,35 @@
 
 ---
 
-## 5. 不应如何删除
+## 5. 建议的 Migration / Release Note 文案
+
+如果未来真的执行这条 compatibility export 的退休，建议在同一切片里给出最小但明确的对外说明，例如：
+
+```text
+Breaking / migration note:
+
+The historical deep-import compatibility export
+`gitnexus/dist/core/ingestion/parsing-processor.js` -> `isNodeExported`
+has been retired.
+
+Canonical path:
+`gitnexus/dist/core/ingestion/export-detection.js`
+
+If you were importing `isNodeExported` from `parsing-processor.js`,
+migrate to `export-detection.js`.
+
+Note: deep imports under internal `dist/*` or `src/*` paths are not part of
+GitNexus's stable public API unless explicitly documented.
+```
+
+如果发布时不想使用 breaking 标题，也至少应保留这四个信息：
+
+- 被退休的旧入口是什么
+- canonical path 是什么
+- 使用者该改到哪里
+- deep import 默认不属于稳定公共 API
+
+## 6. 不应如何删除
 
 不应采用以下方式处理：
 
@@ -129,16 +157,16 @@
 
 ---
 
-## 6. 结论
+## 7. 结论
 
 当前更准确的状态是：
 
 - `isNodeExported` 的 canonical path 已经明确：`export-detection.ts`
 - `parsing-processor.ts` 里的导出只是历史兼容层，不属于当前主功能树
-- 但由于它有已发布版本历史，且本仓没有显式 package-surface 收缩说明，
-  现在仍应把它当作“需要显式退役”的 compatibility export，而不是内部杂物
+- 但由于它有已发布版本历史，即便 package surface 决策现在已外显化，
+  也仍应把它当作“需要显式退役”的 compatibility export，而不是内部杂物
 
 因此，下一步正确动作不是继续争论“它能不能删”，而是：
 
-- 在一个单独的 shim-retirement slice 中，先补 package-surface 决策和迁移说明
+- 在未来真正 cutover 的 shim-retirement slice 中，沿用这里的 migration / release note 文案
 - 然后再删除 re-export 与对应 compatibility test
