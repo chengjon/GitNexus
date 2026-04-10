@@ -1,0 +1,113 @@
+# Compatibility Shim Watchlist
+
+日期：2026-04-10
+类型：兼容层 / workaround watchlist
+范围：`/opt/claude/GitNexus`
+规则基线：`DEVELOPMENT_RULES.md`
+
+## 目的
+
+把当前仓内仍然存在、但暂时没有足够证据安全删除的 compatibility shim / workaround
+显式登记为 watchlist，避免它们继续以“低优先级注释”形式长期漂浮，最终变成默认架构。
+
+本记录不主张立即删除这些路径；它只回答三件事：
+
+- 当前的 canonical path 是什么
+- 为什么现在不能直接 cutover / 删除
+- 满足什么退出条件后才可以退休
+
+## Measured State
+
+### 1. `parsing-processor.ts` backward-compat re-export
+
+- Compatibility Layer / Shim:
+  `gitnexus/src/core/ingestion/parsing-processor.ts`
+  中对 `isNodeExported` 的 backward-compatibility re-export
+- Canonical Path:
+  `gitnexus/src/core/ingestion/export-detection.ts`
+- Measured:
+  `scope: internal source/test imports, time: 2026-04-10`
+  - `gitnexus/src/core/ingestion/workers/parse-worker.ts` 已直接从 canonical path 导入
+  - `gitnexus/test/integration/parsing.test.ts` 已在 `ef2fb72` 切到 canonical path
+  - 当前仓内检索未发现新的内部测试或源码继续通过 `parsing-processor.js`
+    导入 `isNodeExported`
+  - `gitnexus/package.json` 当前没有显式 `exports` map，无法仅凭仓内搜索排除外部 deep-import 使用者
+- Direct Cutover Risk:
+  不能证明外部 consumers 从未把 `parsing-processor.js` 当作兼容入口使用。
+  现在直接删 re-export，风险从“内部清理”升级成“潜在 package surface 破坏”。
+- Exit Condition:
+  满足以下至少一项后再退休：
+  - package surface 明确声明该 deep import 不受支持
+  - release note / migration note 明确完成该入口退役
+  - 有足够证据证明受支持 consumers 已迁到 `export-detection.ts`
+- Cleanup Tracking:
+  后续应作为单独 shim-retirement slice 处理，而不是混在 parsing / ingestion
+  功能改动里顺手删除。
+
+### 2. `suffixResolve()` no-index linear scan fallback
+
+- Compatibility Layer / Shim:
+  `gitnexus/src/core/ingestion/resolvers/utils.ts`
+  中 `suffixResolve()` 的 `Fallback: linear scan (for backward compatibility)` 分支
+- Canonical Path:
+  `gitnexus/src/core/ingestion/resolvers/utils.ts`
+  中基于 `buildSuffixIndex(...)` 的 indexed suffix lookup 路径
+- Measured:
+  `scope: call graph + inline source comments, time: 2026-04-10`
+  - 源码仍显式把该分支标注为 backward-compatibility fallback
+  - GitNexus `impact(target="suffixResolve", direction="upstream")` 当前返回 `HIGH`
+  - 直接 callers 至少包括：
+    - `gitnexus/src/core/ingestion/resolvers/standard.ts:resolveImportPath`
+    - `gitnexus/src/core/ingestion/resolvers/php.ts:resolvePhpImport`
+    - `gitnexus/src/core/ingestion/resolvers/csharp.ts:resolveCSharpImport`
+  - 间接上游已穿到 `import-processor.ts` 主流程
+- Direct Cutover Risk:
+  现在删除 fallback，等价于在多语言 import resolution 主路径上赌“所有调用方都已稳定提供 suffix index”。
+  这不属于低风险清理。
+- Exit Condition:
+  只有在以下条件都满足后才可退休：
+  - 所有 callers 都显式传入 suffix index
+  - 对 no-index 调用的行为有回归测试证明已不再需要兼容
+  - 相关多语言 resolver 集成测试确认未回归
+- Cleanup Tracking:
+  应放入 dedicated import-resolution high-risk slice，不应作为 opportunistic cleanup。
+
+### 3. `useSigma.ts` camera nudge workaround
+
+- Compatibility Layer / Workaround:
+  `gitnexus-web/src/hooks/useSigma.ts`
+  中 `setSelectedNode()` 的 camera nudge，用于强制 edge refresh
+- Canonical Path:
+  `gitnexus-web/src/hooks/useSigma.ts`
+  内正常的 selection / refresh flow，本应不依赖 synthetic camera animation
+- Measured:
+  `scope: hook source + local repo search, time: 2026-04-10`
+  - 源码在 `setSelectedNode()` 处仍有明确注释：
+    `workaround for Sigma edge caching`
+  - `GraphCanvas.tsx` 仍经由 `useSigma()` 消费该逻辑
+  - 当前本地搜索未发现 focused regression test 专门锁定“去掉 camera nudge 后 edge refresh 仍正确”
+- Direct Cutover Risk:
+  在没有替代机制和 focused UI regression coverage 的前提下直接删除，可能重新引入 edge stale render。
+- Exit Condition:
+  满足以下至少一项后再退休：
+  - 上游 Sigma 行为已确认修复，且本仓完成版本验证
+  - 本地改成不依赖 camera animation 的 deterministic refresh 路径
+  - 对 selection/highlight/edge refresh 补上 focused regression coverage
+- Cleanup Tracking:
+  应归入 `gitnexus-web` UI/runtime follow-up，而不是当前 backend/runtime P3 小切片。
+
+## Current Interpretation
+
+- Measured:
+  `scope: current shim inventory, time: 2026-04-10`
+  当前剩余 shim/workaround 已经从“到处散落且未命名”收敛为
+  “少量已知残留，且每条都能说清 canonical path 与 cutover risk”。
+- Inferred:
+  `scope: next safe action, time: 2026-04-10`
+  下一步最合理的动作不是继续 opportunistic 删除，而是：
+  - 对 package-surface shim 做显式 retirement 决策
+  - 对 import-resolution fallback 做高风险专项治理
+  - 对前端 workaround 先补 focused regression evidence
+
+在这些退出条件满足前，继续保留这些 shim/workaround 是可接受的；
+把它们当作“已经自然消失的旧代码”则不可接受。
