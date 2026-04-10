@@ -44,8 +44,10 @@
   现在直接删 re-export，仍然会从“文档声明”跨到“真实兼容性收缩”，
   因而依旧不是普通内部清理。
 - Exit Condition:
-  当前已完成第一项 package-surface 明确化；剩余退出条件至少还要满足以下之一：
-  - release note / migration note 明确完成该入口退役
+  当前已完成第一项 package-surface 明确化，且已补 migration-note draft：
+  `docs/audits/2026-04-10-parsing-processor-compatibility-export-migration-note-draft.md`
+  剩余退出条件至少还要满足以下之一：
+  - 真正 cutover 时发布该 release note / migration note
   - 有足够证据证明受支持 consumers 已迁到 `export-detection.ts`
 - Cleanup Tracking:
   后续应作为单独 shim-retirement slice 处理，而不是混在 parsing / ingestion

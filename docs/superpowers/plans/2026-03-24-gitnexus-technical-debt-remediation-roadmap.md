@@ -381,8 +381,9 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 - 剩余 compatibility shim / workaround 已单独登记到
   `docs/audits/2026-04-10-compatibility-shim-watchlist.md`，后续应按退出条件治理，
   而不是继续作为 opportunistic cleanup 顺手删除
-- 其中 `parsing-processor.ts` 的历史 compatibility export 已补单独退役边界说明：
+- 其中 `parsing-processor.ts` 的历史 compatibility export 已补单独退役边界说明，且已把 future cutover 所需的 migration-note draft 单独落地：
   `docs/audits/2026-04-10-parsing-processor-compatibility-export-retirement.md`
+  `docs/audits/2026-04-10-parsing-processor-compatibility-export-migration-note-draft.md`
 - `suffixResolve()` 的 no-index fallback 也已补单独退役边界说明，且当前 blast radius
   已从旧文档里的 `HIGH` 收敛成 helper-contract 风险；当前还额外补了 import-processing
   direct indexed-path tests，明确 `processImports()` / `processImportsFromExtracted()` 主路径都在传递 suffix index：

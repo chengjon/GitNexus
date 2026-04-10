@@ -6,7 +6,7 @@
 
 治理入口：[DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
 相关基线：[2026-04-10-compatibility-shim-watchlist.md](/opt/claude/GitNexus/docs/audits/2026-04-10-compatibility-shim-watchlist.md)
-状态同步（2026-04-10）：`gitnexus/README.md` 已新增 package surface 说明，明确文档化 CLI / MCP surface 才是默认受支持入口；本 note 剩余的 retirement gate 主要是 migration / release note 与同切片测试退役。
+状态同步（2026-04-10）：`gitnexus/README.md` 已新增 package surface 说明，明确文档化 CLI / MCP surface 才是默认受支持入口；当前还已补独立 migration-note draft：`docs/audits/2026-04-10-parsing-processor-compatibility-export-migration-note-draft.md`。本 note 剩余的 retirement gate 已从“先写文案”收敛成“在真实 cutover 切片中发布该文案并同步退役 compatibility test”。
 
 ---
 
@@ -101,8 +101,9 @@
    - 如果未来要进一步收紧，可再引入 `exports` map，把受支持 surface 缩到公开入口
 
 2. 迁移说明外显化
-   - release note / migration note 明确写出：
-     `isNodeExported` 的 canonical path 是 `export-detection.ts`
+   - 已有草稿：
+     `docs/audits/2026-04-10-parsing-processor-compatibility-export-migration-note-draft.md`
+   - 真正 cutover 时，需要把该草稿随同切片转成正式 release note / migration note
    - 如果仍支持历史版本升级，需要写清从哪个版本开始不再保留兼容导出
 
 3. 兼容测试与实现同切片退役
@@ -168,5 +169,6 @@ GitNexus's stable public API unless explicitly documented.
 
 因此，下一步正确动作不是继续争论“它能不能删”，而是：
 
-- 在未来真正 cutover 的 shim-retirement slice 中，沿用这里的 migration / release note 文案
+- 在未来真正 cutover 的 shim-retirement slice 中，沿用并发布
+  `docs/audits/2026-04-10-parsing-processor-compatibility-export-migration-note-draft.md`
 - 然后再删除 re-export 与对应 compatibility test
