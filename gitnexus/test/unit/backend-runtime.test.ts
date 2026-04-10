@@ -1,3 +1,4 @@
+import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { listRegisteredReposMock, normalizePlatformPathMock, samePlatformPathMock } = vi.hoisted(() => ({
@@ -22,6 +23,24 @@ vi.mock('../../src/mcp/core/kuzu-adapter.js', () => ({
 }));
 
 import { BackendRuntime } from '../../src/mcp/local/runtime/backend-runtime.js';
+
+const createCaseCollisionRepos = () => {
+  const lower = {
+    name: 'gitnexus',
+    path: '/tmp/gitnexus-lower',
+    storagePath: '/tmp/.gitnexus/gitnexus-lower',
+    indexedAt: '2026-04-10T00:00:00.000Z',
+    lastCommit: 'abc1234',
+  };
+  const upper = {
+    name: 'GitNexus',
+    path: '/tmp/GitNexus-upper',
+    storagePath: '/tmp/.gitnexus/GitNexus-upper',
+    indexedAt: '2026-04-10T00:00:00.000Z',
+    lastCommit: 'def5678',
+  };
+  return { lower, upper };
+};
 
 describe('BackendRuntime', () => {
   beforeEach(() => {
@@ -59,20 +78,7 @@ describe('BackendRuntime', () => {
   });
 
   it('keeps duplicate-name repo ids deterministic across refresh order changes', async () => {
-    const lower = {
-      name: 'gitnexus',
-      path: '/tmp/gitnexus-lower',
-      storagePath: '/tmp/.gitnexus/gitnexus-lower',
-      indexedAt: '2026-04-10T00:00:00.000Z',
-      lastCommit: 'abc1234',
-    };
-    const upper = {
-      name: 'GitNexus',
-      path: '/tmp/GitNexus-upper',
-      storagePath: '/tmp/.gitnexus/GitNexus-upper',
-      indexedAt: '2026-04-10T00:00:00.000Z',
-      lastCommit: 'def5678',
-    };
+    const { lower, upper } = createCaseCollisionRepos();
 
     listRegisteredReposMock.mockResolvedValueOnce([lower, upper]);
     const runtimeA = new BackendRuntime();
@@ -85,5 +91,41 @@ describe('BackendRuntime', () => {
     const idsB = new Map(runtimeB.getRepos().map((repo) => [repo.repoPath, repo.id]));
 
     expect(idsA).toEqual(idsB);
+  });
+
+  it('prefers exact case-sensitive repo names before case-insensitive matches', async () => {
+    const { lower, upper } = createCaseCollisionRepos();
+
+    listRegisteredReposMock.mockResolvedValue([lower, upper]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    const repo = await runtime.resolveRepo('GitNexus');
+
+    expect(repo.repoPath).toBe('/tmp/GitNexus-upper');
+    expect(repo.name).toBe('GitNexus');
+  });
+
+  it('prefers exact repo paths before name or id fallbacks', async () => {
+    const { lower, upper } = createCaseCollisionRepos();
+
+    listRegisteredReposMock.mockResolvedValue([lower, upper]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    const repo = await runtime.resolveRepo(path.resolve('/tmp/gitnexus-lower'));
+
+    expect(repo.repoPath).toBe('/tmp/gitnexus-lower');
+    expect(repo.name).toBe('gitnexus');
+  });
+
+  it('throws on ambiguous case-insensitive repo matches with suggested params', async () => {
+    const { lower, upper } = createCaseCollisionRepos();
+
+    listRegisteredReposMock.mockResolvedValue([lower, upper]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    await expect(runtime.resolveRepo('GITNEXUS')).rejects.toThrow(/Use one of:/i);
   });
 });

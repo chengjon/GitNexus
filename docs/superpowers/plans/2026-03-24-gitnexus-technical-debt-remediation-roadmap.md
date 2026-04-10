@@ -393,8 +393,10 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   仍然是 `HIGH` impact 路径
 - 它直接参与 `init` / `resolveRepo` 主流程，不再适合继续按
   “低 blast radius 的小切片”硬切
+- 当前已补单独高风险边界说明：
+  `docs/audits/2026-04-10-backend-runtime-normalize-path-risk-boundary.md`
 - 后续若要继续推进 P3 主路径收敛，应作为单独高风险治理任务处理，
-  先做调用链复核、测试矩阵和失败模式边界，再考虑把它切到共享 helper
+  先按该边界说明复核调用链、测试矩阵和失败模式，再考虑把它切到共享 helper
 
 ---
 
