@@ -383,6 +383,9 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   而不是继续作为 opportunistic cleanup 顺手删除
 - 其中 `parsing-processor.ts` 的历史 compatibility export 已补单独退役边界说明：
   `docs/audits/2026-04-10-parsing-processor-compatibility-export-retirement.md`
+- `suffixResolve()` 的 no-index fallback 也已补单独退役边界说明，且当前 blast radius
+  已从旧文档里的 `HIGH` 收敛成 helper-contract 风险：
+  `docs/audits/2026-04-10-suffix-resolve-no-index-fallback-retirement.md`
 - `gitnexus/src/mcp/local/runtime/backend-runtime.ts:normalizePathForKey`
   仍然是 `HIGH` impact 路径
 - 它直接参与 `init` / `resolveRepo` 主流程，不再适合继续按
