@@ -72,6 +72,10 @@
     - exact case-sensitive name 优先于 case-insensitive match
     - exact repo path 优先于 name / id fallbacks
     - case-insensitive 歧义会抛出带 suggested params 的错误
+  - 额外锁定主路径错误/恢复语义：
+    - 无 repo 时 `resolveRepo()` 会在 refresh retry 后抛 `No indexed repositories`
+    - 多 repo 且未给参数时会抛 `Multiple repositories indexed`
+    - repo miss 时会先 refresh registry，再返回新出现的 repo
 - [calltool-dispatch.test.ts](/opt/claude/GitNexus/gitnexus/test/unit/calltool-dispatch.test.ts)
   - 经 `LocalBackend` 公共入口再锁一层相同 repo resolution contract
   - 额外锁定 repo miss 时会触发 refresh 重读 registry

@@ -128,4 +128,43 @@ describe('BackendRuntime', () => {
 
     await expect(runtime.resolveRepo('GITNEXUS')).rejects.toThrow(/Use one of:/i);
   });
+
+  it('throws when no indexed repos exist after refresh retry', async () => {
+    listRegisteredReposMock.mockResolvedValue([]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    await expect(runtime.resolveRepo('missing')).rejects.toThrow('No indexed repositories');
+    expect(listRegisteredReposMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws when multiple repos exist and no repo parameter is provided', async () => {
+    const { lower, upper } = createCaseCollisionRepos();
+
+    listRegisteredReposMock.mockResolvedValue([lower, upper]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    await expect(runtime.resolveRepo()).rejects.toThrow('Multiple repositories indexed');
+  });
+
+  it('refreshes the registry on repo miss before returning a newly discovered repo', async () => {
+    const repo = {
+      name: 'test-project',
+      path: '/tmp/test-project',
+      storagePath: '/tmp/.gitnexus/test-project',
+      indexedAt: '2026-04-10T00:00:00.000Z',
+      lastCommit: 'abc1234',
+    };
+
+    listRegisteredReposMock.mockResolvedValueOnce([]).mockResolvedValueOnce([repo]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    const resolved = await runtime.resolveRepo('test-project');
+
+    expect(resolved.repoPath).toBe('/tmp/test-project');
+    expect(resolved.name).toBe('test-project');
+    expect(listRegisteredReposMock).toHaveBeenCalledTimes(2);
+  });
 });
