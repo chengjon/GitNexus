@@ -5,6 +5,9 @@ import { SupportedLanguages } from '../../src/config/supported-languages.js';
 const {
   buildSuffixIndexMock,
   resolveImportPathMock,
+  resolveCSharpImportMock,
+  resolveCSharpNamespaceDirMock,
+  loadCSharpProjectConfigMock,
   loadParserMock,
   loadLanguageMock,
   isLanguageAvailableMock,
@@ -13,6 +16,9 @@ const {
 } = vi.hoisted(() => ({
   buildSuffixIndexMock: vi.fn(() => ({ kind: 'suffix-index' })),
   resolveImportPathMock: vi.fn(() => 'src/Feature/Auth/LoginForm.tsx'),
+  resolveCSharpImportMock: vi.fn(() => []),
+  resolveCSharpNamespaceDirMock: vi.fn(() => null),
+  loadCSharpProjectConfigMock: vi.fn(async () => []),
   loadParserMock: vi.fn(),
   loadLanguageMock: vi.fn(async () => undefined),
   isLanguageAvailableMock: vi.fn(() => true),
@@ -46,7 +52,7 @@ vi.mock('../../src/core/ingestion/language-config.js', () => ({
   loadTsconfigPaths: vi.fn(async () => null),
   loadGoModulePath: vi.fn(async () => null),
   loadComposerConfig: vi.fn(async () => null),
-  loadCSharpProjectConfig: vi.fn(async () => []),
+  loadCSharpProjectConfig: loadCSharpProjectConfigMock,
   loadSwiftPackageConfig: vi.fn(async () => null),
 }));
 
@@ -77,8 +83,8 @@ vi.mock('../../src/core/ingestion/resolvers/index.js', () => ({
   resolveJvmMemberImport: vi.fn(() => null),
   resolveGoPackageDir: vi.fn(() => null),
   resolveGoPackage: vi.fn(() => []),
-  resolveCSharpImport: vi.fn(() => []),
-  resolveCSharpNamespaceDir: vi.fn(() => null),
+  resolveCSharpImport: resolveCSharpImportMock,
+  resolveCSharpNamespaceDir: resolveCSharpNamespaceDirMock,
   resolvePhpImport: vi.fn(() => null),
   resolveRustImport: vi.fn(() => null),
 }));
@@ -88,6 +94,8 @@ import { createASTCache } from '../../src/core/ingestion/ast-cache.js';
 import {
   buildImportResolutionContext,
   createImportMap,
+  createNamedImportMap,
+  createPackageMap,
   processImports,
   processImportsFromExtracted,
 } from '../../src/core/ingestion/import-processor.js';
@@ -98,6 +106,10 @@ describe('import-processor indexed suffix resolution', () => {
     resolveImportPathMock.mockClear();
     loadLanguageMock.mockClear();
     isLanguageAvailableMock.mockClear();
+    resolveCSharpImportMock.mockClear();
+    resolveCSharpNamespaceDirMock.mockClear();
+    loadCSharpProjectConfigMock.mockClear();
+    loadCSharpProjectConfigMock.mockResolvedValue([]);
     queryMatches.length = 0;
     parseMock.mockClear();
     loadParserMock.mockResolvedValue({
@@ -179,5 +191,67 @@ describe('import-processor indexed suffix resolution', () => {
     const builtIndex = buildSuffixIndexMock.mock.results[0].value;
     expect(resolveImportPathMock).toHaveBeenCalledTimes(1);
     expect(resolveImportPathMock.mock.calls[0][8]).toBe(builtIndex);
+  });
+
+  it('records named bindings when a single extracted import resolves to one file', async () => {
+    const importMap = createImportMap();
+    const namedImportMap = createNamedImportMap();
+
+    await processImportsFromExtracted(
+      createKnowledgeGraph(),
+      [{ path: 'src/pages/Home.tsx' }, { path: 'src/Feature/Auth/LoginForm.tsx' }],
+      [{
+        filePath: 'src/pages/Home.tsx',
+        rawImportPath: '@/Feature/Auth/LoginForm',
+        language: SupportedLanguages.TypeScript,
+        namedBindings: [{ local: 'LoginForm', exported: 'LoginForm' }],
+      }],
+      importMap,
+      undefined,
+      '/tmp/repo',
+      undefined,
+      undefined,
+      namedImportMap,
+    );
+
+    expect(importMap.get('src/pages/Home.tsx')).toEqual(new Set(['src/Feature/Auth/LoginForm.tsx']));
+    expect(namedImportMap.get('src/pages/Home.tsx')?.get('LoginForm')).toEqual({
+      sourcePath: 'src/Feature/Auth/LoginForm.tsx',
+      exportedName: 'LoginForm',
+    });
+  });
+
+  it('stores package directory suffixes instead of expanding package imports into ImportMap', async () => {
+    resolveCSharpImportMock.mockReturnValue([
+      'src/Services/UserService.cs',
+      'src/Services/AuthService.cs',
+    ]);
+    resolveCSharpNamespaceDirMock.mockReturnValue('/src/Services/');
+    loadCSharpProjectConfigMock.mockResolvedValue([{ rootDir: 'src', baseNamespace: 'MyApp' }]);
+
+    const importMap = createImportMap();
+    const packageMap = createPackageMap();
+
+    await processImportsFromExtracted(
+      createKnowledgeGraph(),
+      [
+        { path: 'src/App.cs' },
+        { path: 'src/Services/UserService.cs' },
+        { path: 'src/Services/AuthService.cs' },
+      ],
+      [{
+        filePath: 'src/App.cs',
+        rawImportPath: 'MyApp.Services',
+        language: SupportedLanguages.CSharp,
+      }],
+      importMap,
+      undefined,
+      '/tmp/repo',
+      undefined,
+      packageMap,
+    );
+
+    expect(importMap.has('src/App.cs')).toBe(false);
+    expect(packageMap.get('src/App.cs')).toEqual(new Set(['/src/Services/']));
   });
 });
