@@ -387,7 +387,7 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   已从旧文档里的 `HIGH` 收敛成 helper-contract 风险：
   `docs/audits/2026-04-10-suffix-resolve-no-index-fallback-retirement.md`
 - `useSigma.ts` 的 camera nudge workaround 也已补单独退役边界说明，并新增 mocked runtime /
-  reducer-level 行为测试；当前剩余缺口已收敛成“缺少真实 Sigma render / edge refresh 的 integration-grade 证据”：
+  reducer-level 行为测试与 `GraphCanvas` selection sync 组件级覆盖；当前剩余缺口已收敛成“缺少真实 Sigma render / edge refresh 的 integration-grade 证据”：
   `docs/audits/2026-04-10-use-sigma-camera-nudge-retirement.md`
 - `gitnexus/src/mcp/local/runtime/backend-runtime.ts:normalizePathForKey`
   仍然是 `HIGH` impact 路径

@@ -109,10 +109,12 @@
     锁定源码边界仍保留 workaround / 绕开路径
   - 当前本地已补 `gitnexus-web/test/unit/useSigma.behavior.test.tsx`，
     用 mocked runtime / reducer-level 行为测试锁定 `setSelectedNode()` 的 camera nudge + refresh、selection 后的 edge highlighting 输出，以及 `focusNode()` 的 direct focus 行为
+  - 当前本地已补 `gitnexus-web/test/unit/GraphCanvas.selection-sync.test.tsx`，
+    用 component-hook selection sync 测试锁定 `GraphCanvas.tsx` 的 app selected node -> sigma selected node 路径当前仍会触发同一 workaround，并改变 connected / unrelated edge highlighting 输出
   - 但当前仍缺少真实 Sigma render / edge refresh integration-grade regression coverage
 - Direct Cutover Risk:
   当前缺口不再是“完全没有行为测试”，而是
-  “还没有真实 Sigma render / edge refresh 的回归证据，或 deterministic 替代路径”。
+  “虽然已有 mocked runtime + component-hook selection sync 证据，但还没有真实 Sigma render / edge refresh 的回归证据，或 deterministic 替代路径”。
   在这之前直接删除，仍可能重新引入 edge stale render。
 - Exit Condition:
   满足以下条件后再退休：

@@ -61,7 +61,7 @@
 
 ### Current Test Boundary
 
-当前本地关于这条 workaround 的 focused coverage 已有两层：
+当前本地关于这条 workaround 的 focused coverage 已有三层：
 
 - [gitnexus-web-use-sigma-workaround.test.ts](/opt/claude/GitNexus/gitnexus/test/unit/gitnexus-web-use-sigma-workaround.test.ts)
   - source-boundary test
@@ -72,8 +72,12 @@
   - 锁定 `setSelectedNode()` 会触发 camera nudge + `sigma.refresh()`
   - 锁定 selection 后 `edgeReducer` 会对 connected / unrelated edges 产生不同输出
   - 锁定 `focusNode()` 走 direct focus path，且对同一节点重复 focus 时不再重复触发 camera animation
+- [GraphCanvas.selection-sync.test.tsx](/opt/claude/GitNexus/gitnexus-web/test/unit/GraphCanvas.selection-sync.test.tsx)
+  - component-hook selection sync test
+  - 锁定 `GraphCanvas.tsx` 的 app selected node -> `setSigmaSelectedNode(appSelectedNode.id)` 同步路径
+  - 锁定这条同步路径当前仍会触发 camera nudge + `sigma.refresh()`，且会影响 connected / unrelated edge highlighting 输出
 
-这说明当前 coverage 已不再只有源码字符串/正则边界。
+这说明当前 coverage 已不再只有源码字符串/正则边界，也不再只停留在 hook 级 mocked runtime。
 
 但它仍不能证明：
 
@@ -88,7 +92,7 @@
 
 - 源码仍显式把它作为 Sigma edge caching workaround 保留
 - `GraphCanvas.tsx` 的常规 selection sync 仍会走到 `setSelectedNode()`
-- 当前虽然已有 mocked runtime + reducer-level behavior coverage，但还没有真实 Sigma render / edge refresh 级别的回归证据
+- 当前虽然已有 mocked runtime + component-hook selection sync + reducer-level behavior coverage，但还没有真实 Sigma render / edge refresh 级别的回归证据
 
 因此现在删除它，不是在做“无用动画清理”，而是在赌：
 
@@ -107,8 +111,8 @@
    - 要么本地实现一个不依赖 camera nudge 的 deterministic refresh 路径
 
 2. 更强的行为级回归测试补齐
-   - 当前已有 mocked runtime behavior test，但还需要更接近真实 Sigma 渲染的 edge refresh / highlight 回归证据
-   - 不能只依赖源码边界测试，或只依赖 mocked runtime 调用断言
+   - 当前已有源码边界、mocked runtime，以及 component-hook selection sync coverage，但还需要更接近真实 Sigma 渲染的 edge refresh / highlight 回归证据
+   - 不能只依赖源码边界测试，或只依赖 mocked runtime / jsdom 级调用断言
 
 3. 调用边界复核
    - 确认 `GraphCanvas.tsx` 和其他 selection sync 调用点在无 workaround 下仍符合预期
@@ -161,7 +165,7 @@ path validated by regression coverage.
 
 - `setSelectedNode()` 里的 camera nudge 仍是显式 workaround
 - 它当前仍位于常规 selection sync 路径上
-- 当前虽然已有 source-boundary + mocked runtime/reducer-level coverage，但仍不足以证明 workaround 已可删除
+- 当前虽然已有 source-boundary + mocked runtime + component-hook selection sync/reducer-level coverage，但仍不足以证明 workaround 已可删除
 
 因此，下一步正确动作不是直接删实现，而是：
 
