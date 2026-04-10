@@ -378,6 +378,9 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 
 当前边界也已更明确：
 
+- 剩余 compatibility shim / workaround 已单独登记到
+  `docs/audits/2026-04-10-compatibility-shim-watchlist.md`，后续应按退出条件治理，
+  而不是继续作为 opportunistic cleanup 顺手删除
 - `gitnexus/src/mcp/local/runtime/backend-runtime.ts:normalizePathForKey`
   仍然是 `HIGH` impact 路径
 - 它直接参与 `init` / `resolveRepo` 主流程，不再适合继续按
