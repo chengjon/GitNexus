@@ -72,6 +72,13 @@
 - `gitnexus/test/unit/resolver-utils.test.ts`
 - `gitnexus/test/unit/resolver-callers-compatibility.test.ts`
 
+与此同时，indexed 主路径的直接证据也已补到 import-processing 层：
+
+- `gitnexus/test/unit/import-processor-indexed-resolution.test.ts`
+  - 锁定 `processImports()` 会构建 suffix index 并把它传给 `resolveImportPath()`
+  - 锁定 `processImportsFromExtracted()` 在有 prebuilt context 时会复用已有 suffix index
+  - 锁定 `processImportsFromExtracted()` 在无 prebuilt context 时会自建 suffix index
+
 这些测试不是偶然遗漏；它们是显式锁定的 compatibility contract：
 
 - `suffixResolve()` 本身仍支持 no-index 调用
@@ -88,7 +95,7 @@
 当前不应直接删除 `suffixResolve()` 的 linear scan fallback，理由有三个：
 
 - 仓内 focused tests 仍把 no-index 行为当成显式兼容契约
-- 相关 callers 仍保留可选 `index?` 形态，而不是 indexed-only 签名
+- import-processing 主路径虽然已有 direct indexed-path evidence，但相关 callers 仍保留可选 `index?` 形态，而不是 indexed-only 签名
 - 即便 package README 已声明 internal deep import 不属于稳定公共 API，
   helper-level behavior contract 的收缩仍然需要单独切片和回归证据
 

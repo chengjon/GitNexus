@@ -72,7 +72,10 @@
   - `processImports()` 与 `processImportsFromExtracted()` 当前都会构建并传入 indexed context
   - 当前仓内 repo-wide 未发现生产路径继续无 index 调用这些 resolver helper；
     无 index reachability 主要由 focused compatibility tests 显式保留
-  - 当前本地已补 focused unit tests：
+  - 当前本地已补 direct indexed-path tests：
+    - `gitnexus/test/unit/import-processor-indexed-resolution.test.ts` 锁定 `processImports()` 会构建 suffix index 并传给 `resolveImportPath()`
+    - 同文件也锁定 `processImportsFromExtracted()` 在有 prebuilt context 时复用已有 suffix index、无 prebuilt context 时自建 suffix index
+  - 当前本地已补 focused compatibility tests：
     - `gitnexus/test/unit/resolver-utils.test.ts` 锁定 no-index fallback 的直接行为
     - `gitnexus/test/unit/resolver-callers-compatibility.test.ts` 锁定 3 个直接 callers 的无 index 兼容路径
 - Direct Cutover Risk:

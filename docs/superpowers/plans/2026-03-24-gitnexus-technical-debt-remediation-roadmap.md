@@ -384,7 +384,8 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
 - 其中 `parsing-processor.ts` 的历史 compatibility export 已补单独退役边界说明：
   `docs/audits/2026-04-10-parsing-processor-compatibility-export-retirement.md`
 - `suffixResolve()` 的 no-index fallback 也已补单独退役边界说明，且当前 blast radius
-  已从旧文档里的 `HIGH` 收敛成 helper-contract 风险：
+  已从旧文档里的 `HIGH` 收敛成 helper-contract 风险；当前还额外补了 import-processing
+  direct indexed-path tests，明确 `processImports()` / `processImportsFromExtracted()` 主路径都在传递 suffix index：
   `docs/audits/2026-04-10-suffix-resolve-no-index-fallback-retirement.md`
 - `useSigma.ts` 的 camera nudge workaround 也已补单独退役边界说明，并新增 mocked runtime /
   reducer-level 行为测试与 `GraphCanvas` selection sync 组件级覆盖；当前剩余缺口已收敛成“缺少真实 Sigma render / edge refresh 的 integration-grade 证据”：
