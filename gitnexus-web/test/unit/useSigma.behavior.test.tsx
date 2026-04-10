@@ -2,35 +2,72 @@ import React, { act, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
-class MockGraph {
-  nodes = new Map<string, { x: number; y: number }>();
-  order = 0;
-
-  addNode(nodeId: string, attrs: { x: number; y: number }) {
-    this.nodes.set(nodeId, attrs);
-    this.order = this.nodes.size;
-  }
-
-  hasNode(nodeId: string) {
-    return this.nodes.has(nodeId);
-  }
-
-  getNodeAttributes(nodeId: string) {
-    const attrs = this.nodes.get(nodeId);
-    if (!attrs) {
-      throw new Error(`Missing mock node: ${nodeId}`);
-    }
-    return attrs;
-  }
-
-  hasEdge() {
-    return false;
-  }
-
-  extremities() {
-    return ['', ''];
-  }
+interface NodeAttrs {
+  x: number;
+  y: number;
 }
+
+interface EdgeAttrs {
+  color: string;
+  size?: number;
+  relationType?: string;
+}
+
+interface SigmaSettings {
+  edgeReducer?: (edge: string, data: EdgeAttrs) => EdgeAttrs & Record<string, unknown>;
+  nodeReducer?: (node: string, data: Record<string, unknown>) => Record<string, unknown>;
+}
+
+type MockGraph = {
+  nodes: Map<string, NodeAttrs>;
+  edges: Map<string, [string, string]>;
+  order: number;
+  addNode: (nodeId: string, attrs: NodeAttrs) => void;
+  addEdge: (edgeId: string, source: string, target: string) => void;
+  hasNode: (nodeId: string) => boolean;
+  getNodeAttributes: (nodeId: string) => NodeAttrs;
+  hasEdge: (source: string, target: string) => boolean;
+  extremities: (edgeId: string) => [string, string];
+};
+
+const createMockGraph = (): MockGraph => {
+  const nodes = new Map<string, NodeAttrs>();
+  const edges = new Map<string, [string, string]>();
+  const graph: MockGraph = {
+    nodes,
+    edges,
+    order: 0,
+    addNode: (nodeId, attrs) => {
+      nodes.set(nodeId, attrs);
+      graph.order = nodes.size;
+    },
+    addEdge: (edgeId, source, target) => {
+      edges.set(edgeId, [source, target]);
+    },
+    hasNode: (nodeId) => nodes.has(nodeId),
+    getNodeAttributes: (nodeId) => {
+      const attrs = nodes.get(nodeId);
+      if (!attrs) {
+        throw new Error(`Missing mock node: ${nodeId}`);
+      }
+      return attrs;
+    },
+    hasEdge: (source, target) => {
+      for (const [edgeSource, edgeTarget] of edges.values()) {
+        if (edgeSource === source && edgeTarget === target) return true;
+      }
+      return false;
+    },
+    extremities: (edgeId) => {
+      const edge = edges.get(edgeId);
+      if (!edge) {
+        throw new Error(`Missing mock edge: ${edgeId}`);
+      }
+      return edge;
+    },
+  };
+  return graph;
+};
 
 type CameraMock = {
   ratio: number;
@@ -50,6 +87,7 @@ type SigmaMock = {
   kill: ReturnType<typeof vi.fn>;
   graph: MockGraph;
   container: HTMLDivElement;
+  settings: SigmaSettings;
 };
 
 let latestGraph: MockGraph | null = null;
@@ -61,10 +99,11 @@ const noverlapAssign = vi.fn();
 const inferSettings = vi.fn(() => ({}));
 
 vi.mock('graphology', () => ({
-  default: class GraphologyMock extends MockGraph {
+  default: class GraphologyMock {
     constructor() {
-      super();
-      latestGraph = this;
+      const graph = createMockGraph();
+      latestGraph = graph;
+      return graph;
     }
   },
 }));
@@ -80,10 +119,12 @@ vi.mock('sigma', () => ({
     kill: ReturnType<typeof vi.fn>;
     graph: MockGraph;
     container: HTMLDivElement;
+    settings: SigmaSettings;
 
-    constructor(graph: MockGraph, container: HTMLDivElement) {
+    constructor(graph: MockGraph, container: HTMLDivElement, settings: SigmaSettings) {
       this.graph = graph;
       this.container = container;
+      this.settings = settings;
       this.camera = {
         ratio: 1,
         animate: vi.fn((next: { ratio?: number }) => {
@@ -179,6 +220,7 @@ describe('useSigma runtime behavior', () => {
     expect(hookApi).toBeTruthy();
     expect(latestSigma).toBeTruthy();
     expect(latestGraph).toBeTruthy();
+    expect(latestSigma!.settings.edgeReducer).toBeTypeOf('function');
   };
 
   it('keeps the selection path on the camera-nudge refresh behavior', async () => {
@@ -196,6 +238,31 @@ describe('useSigma runtime behavior', () => {
     expect(nextCameraState.ratio).toBeCloseTo(1.0001, 6);
     expect(animationOptions).toEqual({ duration: 50 });
     expect(latestSigma!.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates edge highlighting state when setSelectedNode selects a node', async () => {
+    await renderHookHarness();
+
+    latestGraph!.addNode('node-1', { x: 12, y: 34 });
+    latestGraph!.addNode('node-2', { x: 30, y: 45 });
+    latestGraph!.addNode('node-3', { x: 60, y: 75 });
+    latestGraph!.addEdge('edge-connected', 'node-1', 'node-2');
+    latestGraph!.addEdge('edge-unrelated', 'node-2', 'node-3');
+
+    await act(async () => {
+      hookApi.setSelectedNode('node-1');
+    });
+
+    const connected = latestSigma!.settings.edgeReducer!('edge-connected', { color: '#222222', size: 1 });
+    const unrelated = latestSigma!.settings.edgeReducer!('edge-unrelated', { color: '#222222', size: 1 });
+
+    expect(connected.size).toBe(4);
+    expect(connected.zIndex).toBe(2);
+    expect(connected.color).not.toBe('#222222');
+
+    expect(unrelated.size).toBe(0.3);
+    expect(unrelated.zIndex).toBe(0);
+    expect(unrelated.color).not.toBe('#222222');
   });
 
   it('keeps focusNode on the direct focus path without the camera nudge', async () => {

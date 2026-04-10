@@ -108,7 +108,7 @@
   - 当前本地已补 `gitnexus/test/unit/gitnexus-web-use-sigma-workaround.test.ts`，
     锁定源码边界仍保留 workaround / 绕开路径
   - 当前本地已补 `gitnexus-web/test/unit/useSigma.behavior.test.tsx`，
-    用 mocked runtime 行为测试锁定 `setSelectedNode()` 的 camera nudge + refresh，以及 `focusNode()` 的 direct focus 行为
+    用 mocked runtime / reducer-level 行为测试锁定 `setSelectedNode()` 的 camera nudge + refresh、selection 后的 edge highlighting 输出，以及 `focusNode()` 的 direct focus 行为
   - 但当前仍缺少真实 Sigma render / edge refresh integration-grade regression coverage
 - Direct Cutover Risk:
   当前缺口不再是“完全没有行为测试”，而是
@@ -135,7 +135,7 @@
   下一步最合理的动作不是继续 opportunistic 删除，而是：
   - 对 package-surface shim 按显式 retirement gate 处理
   - 对 resolver helper fallback 按 helper-contract 收缩治理
-  - 对前端 workaround 补 integration-grade behavior evidence 或 deterministic 替代路径
+  - 对前端 workaround 继续从 reducer-level 行为证据推进到 integration-grade evidence，或给出 deterministic 替代路径
 
 在这些退出条件满足前，继续保留这些 shim/workaround 是可接受的；
 把它们当作“已经自然消失的旧代码”则不可接受。

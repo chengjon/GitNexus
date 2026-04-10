@@ -70,6 +70,7 @@
 - [useSigma.behavior.test.tsx](/opt/claude/GitNexus/gitnexus-web/test/unit/useSigma.behavior.test.tsx)
   - mocked runtime behavior test
   - 锁定 `setSelectedNode()` 会触发 camera nudge + `sigma.refresh()`
+  - 锁定 selection 后 `edgeReducer` 会对 connected / unrelated edges 产生不同输出
   - 锁定 `focusNode()` 走 direct focus path，且对同一节点重复 focus 时不再重复触发 camera animation
 
 这说明当前 coverage 已不再只有源码字符串/正则边界。
@@ -87,7 +88,7 @@
 
 - 源码仍显式把它作为 Sigma edge caching workaround 保留
 - `GraphCanvas.tsx` 的常规 selection sync 仍会走到 `setSelectedNode()`
-- 当前虽然已有 mocked runtime behavior coverage，但还没有真实 Sigma render / edge refresh 级别的回归证据
+- 当前虽然已有 mocked runtime + reducer-level behavior coverage，但还没有真实 Sigma render / edge refresh 级别的回归证据
 
 因此现在删除它，不是在做“无用动画清理”，而是在赌：
 
@@ -160,7 +161,7 @@ path validated by regression coverage.
 
 - `setSelectedNode()` 里的 camera nudge 仍是显式 workaround
 - 它当前仍位于常规 selection sync 路径上
-- 当前虽然已有 source-boundary + mocked runtime coverage，但仍不足以证明 workaround 已可删除
+- 当前虽然已有 source-boundary + mocked runtime/reducer-level coverage，但仍不足以证明 workaround 已可删除
 
 因此，下一步正确动作不是直接删实现，而是：
 
