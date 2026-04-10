@@ -98,22 +98,29 @@
   `gitnexus-web/src/hooks/useSigma.ts`
   内正常的 selection / refresh flow，本应不依赖 synthetic camera animation
 - Measured:
-  `scope: hook source + focused boundary coverage, time: 2026-04-10`
+  `scope: hook source + GraphCanvas selection sync + focused boundary coverage, time: 2026-04-10`
   - 源码在 `setSelectedNode()` 处仍有明确注释：
     `workaround for Sigma edge caching`
-  - `GraphCanvas.tsx` 仍经由 `useSigma()` 消费该逻辑
+  - `focusNode()` 当前仍显式绕开这段 workaround，源码注释保留了
+    `without the camera nudge from setSelectedNode`
+  - `GraphCanvas.tsx` 当前在 app selected node -> sigma selected node 同步时仍会调用
+    `setSigmaSelectedNode(appSelectedNode.id)`，因此常规 selection sync 仍会走这段 workaround
   - 当前本地已补 `gitnexus/test/unit/gitnexus-web-use-sigma-workaround.test.ts`，
     锁定 `setSelectedNode()` 仍保留 camera nudge，且 `focusNode()` 仍绕开该 workaround
+  - 但当前测试仍属于 source-boundary coverage，不是 behavior regression coverage
 - Direct Cutover Risk:
-  虽然已有 workaround boundary test，但仍没有证明“去掉 camera nudge 后 edge refresh 仍正确”的替代机制或行为回归证据。
-  现在直接删除，仍可能重新引入 edge stale render。
+  当前缺口不是“workaround 是否存在”，而是
+  “删除 camera nudge 后 selection/highlight/edge refresh 是否仍然正确”。
+  在没有 deterministic 替代路径或行为级回归证据之前，直接删除仍可能重新引入 edge stale render。
 - Exit Condition:
-  满足以下至少一项后再退休：
-  - 上游 Sigma 行为已确认修复，且本仓完成版本验证
-  - 本地改成不依赖 camera animation 的 deterministic refresh 路径
-  - 对 selection/highlight/edge refresh 补上 focused regression coverage
+  满足以下条件后再退休：
+  - 上游 Sigma 行为已确认修复，或本地改成不依赖 camera animation 的 deterministic refresh 路径
+  - 对 selection/highlight/edge refresh 补上行为级 regression coverage
+  - 删除 workaround 时同步退役当前源码边界测试
 - Cleanup Tracking:
-  应归入 `gitnexus-web` UI/runtime follow-up，而不是当前 backend/runtime P3 小切片。
+  应归入 dedicated `gitnexus-web` UI/runtime retirement slice，而不是 opportunistic cleanup。
+  具体退役边界见
+  [2026-04-10-use-sigma-camera-nudge-retirement.md](/opt/claude/GitNexus/docs/audits/2026-04-10-use-sigma-camera-nudge-retirement.md)。
 
 ## Current Interpretation
 
@@ -124,9 +131,9 @@
 - Inferred:
   `scope: next safe action, time: 2026-04-10`
   下一步最合理的动作不是继续 opportunistic 删除，而是：
-  - 对 package-surface shim 做显式 retirement 决策
-  - 对 import-resolution fallback 做高风险专项治理
-  - 对前端 workaround 先补 focused regression evidence
+  - 对 package-surface shim 按显式 retirement gate 处理
+  - 对 resolver helper fallback 按 helper-contract 收缩治理
+  - 对前端 workaround 补 behavior regression evidence 或 deterministic 替代路径
 
 在这些退出条件满足前，继续保留这些 shim/workaround 是可接受的；
 把它们当作“已经自然消失的旧代码”则不可接受。
