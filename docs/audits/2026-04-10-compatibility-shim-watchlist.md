@@ -47,7 +47,8 @@
   - 有足够证据证明受支持 consumers 已迁到 `export-detection.ts`
 - Cleanup Tracking:
   后续应作为单独 shim-retirement slice 处理，而不是混在 parsing / ingestion
-  功能改动里顺手删除。
+  功能改动里顺手删除。具体退役边界见
+  [2026-04-10-parsing-processor-compatibility-export-retirement.md](/opt/claude/GitNexus/docs/audits/2026-04-10-parsing-processor-compatibility-export-retirement.md)。
 
 ### 2. `suffixResolve()` no-index linear scan fallback
 
