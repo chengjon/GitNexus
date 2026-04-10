@@ -9,6 +9,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createWorkerPool, WorkerPool } from '../../src/core/ingestion/workers/worker-pool.js';
 import { pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -56,6 +57,71 @@ describe('worker pool integration', () => {
     expect(result.nodes.length).toBeGreaterThan(0);
 
     // Should find the validateInput function
+    const names = result.nodes.map((n: any) => n.properties.name);
+    expect(names).toContain('validateInput');
+  });
+
+  it.skipIf(!hasDistWorker)('preserves the legacy single-message worker protocol', async () => {
+    const workerUrl = pathToFileURL(DIST_WORKER) as URL;
+    const worker = new Worker(workerUrl);
+
+    const fixtureFile = path.resolve(__dirname, '..', 'fixtures', 'mini-repo', 'src', 'validator.ts');
+    const content = fs.readFileSync(fixtureFile, 'utf-8');
+
+    const result = await new Promise<any>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Legacy single-message worker protocol timed out'));
+      }, 10_000);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        worker.removeListener('message', onMessage);
+        worker.removeListener('error', onError);
+        worker.removeListener('exit', onExit);
+      };
+
+      const onMessage = (msg: any) => {
+        if (settled) return;
+        if (msg && msg.type === 'progress') return;
+        if (msg && msg.type === 'error') {
+          settled = true;
+          cleanup();
+          reject(new Error(msg.error));
+          return;
+        }
+
+        settled = true;
+        cleanup();
+        resolve(msg && msg.type === 'result' ? msg.data : msg);
+      };
+
+      const onError = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      const onExit = (code: number) => {
+        if (settled || code === 0) return;
+        settled = true;
+        cleanup();
+        reject(new Error(`Legacy single-message worker exited with code ${code}`));
+      };
+
+      worker.on('message', onMessage);
+      worker.once('error', onError);
+      worker.once('exit', onExit);
+      worker.postMessage([{ path: 'src/validator.ts', content }]);
+    });
+
+    await worker.terminate();
+
+    expect(result.fileCount).toBe(1);
+    expect(result.nodes.length).toBeGreaterThan(0);
+
     const names = result.nodes.map((n: any) => n.properties.name);
     expect(names).toContain('validateInput');
   });
