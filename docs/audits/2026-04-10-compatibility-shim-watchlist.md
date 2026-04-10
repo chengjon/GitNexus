@@ -35,14 +35,16 @@
     `for backward compatibility with any external consumers`
   - 发布线检查显示它至少随 `v1.4.0` 与 `v1.4.5` 对外发布过
   - `v1.5.0` / `v1.5.3` 的 `parsing-processor.ts` 已不再包含该 re-export
-  - 但 `gitnexus/package.json` 在 `v1.4.0`、`v1.5.3` 和当前本地都仍没有显式 `exports` map，
-    README 也未把该 deep import 写成受支持 surface
+  - `gitnexus/package.json` 在 `v1.4.0`、`v1.5.3` 和当前本地都仍没有显式 `exports` map
+  - `gitnexus/README.md` 现已明确：文档化 CLI / MCP surface 才是默认受支持入口，
+    `dist/*`、`src/*` 与内部模块 deep import 不属于稳定公共 API，除非未来另行声明
 - Direct Cutover Risk:
-  这说明该入口既不是“从未发布过”，也不是“有明确 package 契约保护的公共 API”。
-  现在直接删 re-export，风险从“内部清理”升级成“对历史上已发布 deep import 的兼容性赌博”。
+  当前 package surface 边界虽然已经在 `gitnexus/README.md` 外显化，
+  但这条入口仍然属于“历史上已发布过的 deep import”。
+  现在直接删 re-export，仍然会从“文档声明”跨到“真实兼容性收缩”，
+  因而依旧不是普通内部清理。
 - Exit Condition:
-  满足以下至少一项后再退休：
-  - package surface 明确声明该 deep import 不受支持
+  当前已完成第一项 package-surface 明确化；剩余退出条件至少还要满足以下之一：
   - release note / migration note 明确完成该入口退役
   - 有足够证据证明受支持 consumers 已迁到 `export-detection.ts`
 - Cleanup Tracking:

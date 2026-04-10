@@ -23,6 +23,24 @@ If you are modifying this repository itself, top-level development governance li
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+## Supported Package Surface
+
+For the published `gitnexus` package, the supported surface is the documented CLI and MCP behavior in this README.
+
+Supported by default:
+
+- the `gitnexus` CLI commands and flags documented here
+- the `gitnexus mcp` entrypoint and MCP tool behavior documented here
+- documented setup, doctor, analyze, init-project, and refresh-context flows
+
+Not a stable public API unless this README or future package metadata explicitly says otherwise:
+
+- deep imports into `gitnexus/dist/*` or `gitnexus/src/*`
+- file-level imports from internal modules such as parsing / resolver helpers
+- compatibility re-exports kept only for migration windows
+
+If a historically published deep import needs to be retired, do not remove it silently. Land an explicit migration or release note in the same retirement slice.
+
 ## Quick Start
 
 ```bash

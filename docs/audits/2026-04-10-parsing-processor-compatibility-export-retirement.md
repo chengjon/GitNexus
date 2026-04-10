@@ -6,6 +6,7 @@
 
 治理入口：[DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
 相关基线：[2026-04-10-compatibility-shim-watchlist.md](/opt/claude/GitNexus/docs/audits/2026-04-10-compatibility-shim-watchlist.md)
+状态同步（2026-04-10）：`gitnexus/README.md` 已新增 package surface 说明，明确文档化 CLI / MCP surface 才是默认受支持入口；本 note 剩余的 retirement gate 主要是 migration / release note 与同切片测试退役。
 
 ---
 
@@ -32,7 +33,7 @@
 
 - 本地这条分支还在保留它
 - upstream 新版本线已经去掉它
-- 仓库又没有用 `exports` map 或 README 公共 API 文字，把它明确界定成受支持 surface 或不受支持 surface
+- 仓库仍没有用 `exports` map 做 package-level 收口，但现在已在 `gitnexus/README.md` 明确默认受支持的是文档化 CLI / MCP surface
 
 ---
 
@@ -55,8 +56,9 @@
 
 - `gitnexus/package.json`
   在 `v1.4.0`、`v1.5.3` 和当前本地都没有显式 `exports` map
-- `README.md` / `gitnexus/README.md`
-  没有把 `parsing-processor.js` deep import 列成受支持 API
+- `gitnexus/README.md`
+  已明确：默认受支持的是文档化 CLI / MCP surface，`dist/*`、`src/*` 与内部模块 deep import 不属于稳定公共 API，除非未来另行声明
+- 这意味着 `parsing-processor.js` 这类历史 deep import 的删除，仍然不能按“静默内部清理”处理，而应走显式 retirement / migration 路径
 
 ### Feature-tree 结论
 
@@ -75,7 +77,7 @@
 本地当前继续保留这个导出，有两个理由：
 
 - 删除它不会带来当前仓内主流程收益
-- 在没有显式 retirement note / migration note / package surface 边界声明之前，直接删除等于对历史深层使用者做无公告兼容性收缩
+- 即便 package surface 边界现在已在 `gitnexus/README.md` 外显化，历史已发布 deep import 的退休仍需要显式 migration / release note，而不是直接删实现
 
 本轮新增的 focused regression 也已经把这个事实锁定：
 
@@ -95,8 +97,8 @@
 只有在以下动作明确完成后，才适合删除当前 re-export：
 
 1. package surface 决策明确化
-   - 明确声明 `parsing-processor.js` deep import 不再受支持
-   - 或引入 `exports` map，把受支持 surface 缩到公开入口
+   - 已完成第一步：`gitnexus/README.md` 已明确 deep import 默认不属于稳定公共 API
+   - 如果未来要进一步收紧，可再引入 `exports` map，把受支持 surface 缩到公开入口
 
 2. 迁移说明外显化
    - release note / migration note 明确写出：
