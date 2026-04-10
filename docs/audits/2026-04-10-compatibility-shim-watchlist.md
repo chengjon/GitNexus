@@ -26,15 +26,20 @@
 - Canonical Path:
   `gitnexus/src/core/ingestion/export-detection.ts`
 - Measured:
-  `scope: internal source/test imports, time: 2026-04-10`
+  `scope: internal imports + release history + package surface, time: 2026-04-10`
   - `gitnexus/src/core/ingestion/workers/parse-worker.ts` 已直接从 canonical path 导入
   - `gitnexus/test/integration/parsing.test.ts` 已在 `ef2fb72` 切到 canonical path
   - 当前仓内检索未发现新的内部测试或源码继续通过 `parsing-processor.js`
     导入 `isNodeExported`
-  - `gitnexus/package.json` 当前没有显式 `exports` map，无法仅凭仓内搜索排除外部 deep-import 使用者
+  - git 历史显示该 re-export 在 `7376e92` 引入，措辞是
+    `for backward compatibility with any external consumers`
+  - 发布线检查显示它至少随 `v1.4.0` 与 `v1.4.5` 对外发布过
+  - `v1.5.0` / `v1.5.3` 的 `parsing-processor.ts` 已不再包含该 re-export
+  - 但 `gitnexus/package.json` 在 `v1.4.0`、`v1.5.3` 和当前本地都仍没有显式 `exports` map，
+    README 也未把该 deep import 写成受支持 surface
 - Direct Cutover Risk:
-  不能证明外部 consumers 从未把 `parsing-processor.js` 当作兼容入口使用。
-  现在直接删 re-export，风险从“内部清理”升级成“潜在 package surface 破坏”。
+  这说明该入口既不是“从未发布过”，也不是“有明确 package 契约保护的公共 API”。
+  现在直接删 re-export，风险从“内部清理”升级成“对历史上已发布 deep import 的兼容性赌博”。
 - Exit Condition:
   满足以下至少一项后再退休：
   - package surface 明确声明该 deep import 不受支持
