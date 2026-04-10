@@ -118,6 +118,21 @@ describe('BackendRuntime', () => {
     expect(repo.repoPath).toBe('/tmp/gitnexus-lower');
     expect(repo.name).toBe('gitnexus');
   });
+  it('matches mixed-case absolute repo paths via the shared path-comparison helper', async () => {
+    const { lower, upper } = createCaseCollisionRepos();
+
+    listRegisteredReposMock.mockResolvedValue([lower, upper]);
+    const runtime = new BackendRuntime();
+    await runtime.init();
+
+    const requestedPath = path.resolve('/TMP/GITNEXUS-LOWER');
+    const repo = await runtime.resolveRepo(requestedPath);
+
+    expect(repo.repoPath).toBe('/tmp/gitnexus-lower');
+    expect(repo.name).toBe('gitnexus');
+    expect(samePlatformPathMock).toHaveBeenCalledWith('/tmp/gitnexus-lower', requestedPath);
+  });
+
 
   it('throws on ambiguous case-insensitive repo matches with suggested params', async () => {
     const { lower, upper } = createCaseCollisionRepos();

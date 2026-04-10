@@ -71,6 +71,7 @@
   - 锁定 `BackendRuntime.resolveRepo()` 在 duplicate-name case-collision 场景下：
     - exact case-sensitive name 优先于 case-insensitive match
     - exact repo path 优先于 name / id fallbacks
+    - mixed-case absolute repo path 会经共享 `samePlatformPath()` 语义命中
     - case-insensitive 歧义会抛出带 suggested params 的错误
   - 额外锁定主路径错误/恢复语义：
     - 无 repo 时 `resolveRepo()` 会在 refresh retry 后抛 `No indexed repositories`
