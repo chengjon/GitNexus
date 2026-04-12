@@ -88,8 +88,12 @@
   `skill-active-state.json` to `active: false`, and left `omx status` at
   `ralph: inactive (phase: cancelled)`
 - later repository record commits captured the follow-up audit, audits index
-  sync, commit-hygiene warning, rewrite recipe, and OpenSpec hygiene sync:
-  `0970f5a`, `c3dadd1`, `cac14ea`, `ca75770`, `f8529a7`, `f3f924b`
+  sync, commit-hygiene warning, rewrite recipe, OpenSpec hygiene sync, PR
+  closure tracking, fresh post-closure replay evidence, April 13 upstream
+  absence checks, and the final audits index wording cleanup:
+  `0970f5a`, `c3dadd1`, `cac14ea`, `ca75770`, `f8529a7`, `f3f924b`,
+  `94b7989`, `8de89e8`, `10b905c`, `019d5bc`, `d466926`, `d16d9b2`,
+  `75b372d`
 - after those record-only follow-ups, scoped `git status --short` again reduced
   to the same single pre-existing user modification:
   `gitnexus/test/unit/import-processor-indexed-resolution.test.ts`
