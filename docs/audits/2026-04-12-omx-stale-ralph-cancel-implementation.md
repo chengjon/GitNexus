@@ -243,7 +243,7 @@ The verified upstream/source replay is no longer only local:
   - review reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
   - focused verification after that follow-up: `85/85` passing
 
-That publication path superseded the earlier local-only replay state, preserved
+That dev-based publication attempt superseded the earlier local-only replay state, preserved
 the clean commit series, and moved the same scope onto the repository's
 required `dev` base after the owner closed the original `main`-targeted PR.
 A later review loop on `#1509` added two more targeted hardening commits, then
@@ -318,7 +318,7 @@ new stale root Ralph state even after the upstream PR was closed.
   upstream adoption.
 - The later Windows-path-on-POSIX fix (`46622fa`, `85/85`) exists on the fork
   branch and in the closed PR discussion, but not on an active maintainer-owned
-  publication path.
+  upstream adoption path.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 
@@ -327,7 +327,7 @@ new stale root Ralph state even after the upstream PR was closed.
 Keep `omx cancel ralph --stale` as the local operator fix, preserve the
 verified fork branch evidence (`46622fa`, `85/85`), and monitor for the
 maintainer-led narrower replacement that the owner said would be needed before
-any upstream merge path resumes.
+any upstream adoption path reopens.
 
 As of 2026-04-13, a fresh upstream check still shows no new maintainer-led
 replacement PR, issue, or branch carrying this narrower stale-cleanup contract.

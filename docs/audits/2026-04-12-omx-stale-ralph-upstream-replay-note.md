@@ -86,7 +86,7 @@ produced two clean git commits:
 
 Those commits were first pushed on branch `stale-ralph-clean-pr-v2` and opened
 as PR `#1505` against `main`, but the owner closed that PR because repository
-changes must target `dev`. The later `dev`-based publication path was:
+changes must target `dev`. The later `dev`-based publication attempt was:
 
 - dev-based branch: `stale-ralph-clean-pr-dev`
 - closed PR: `Yeachan-Heo/oh-my-codex#1509`
@@ -98,7 +98,7 @@ changes must target `dev`. The later `dev`-based publication path was:
 
 ## Historical Commit Hygiene Note
 
-Earlier live-repair commits outside the clean publication branch contained
+Earlier live-repair commits outside the clean replay branch contained
 shell-quoting damage in parts of their commit bodies:
 
 - literal `\n` sequences appear in trailer sections
@@ -106,11 +106,11 @@ shell-quoting damage in parts of their commit bodies:
 - one sentence lost the intended backticked `` `starting` `` fragment
 
 The code and verification evidence were still valid, but those damaged commits
-are no longer the publication path.
+are no longer the clean replay branch history.
 
 ### Suggested Clean Replacement Subjects
 
-These subject lines are the clean publication subjects that preserve the
+These subject lines are the clean replay subjects that preserve the
 validated intent:
 
 - `Allow safe cleanup of stale Ralph startup state`
