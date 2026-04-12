@@ -52,7 +52,7 @@
 - follow-up installed-package verification passed
   `node --test /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/__tests__/session-scoped-runtime.test.js /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/scripts/__tests__/codex-native-hook.test.js`
   with `62/62` passing
-- clean upstream publication branch is `stale-ralph-clean-pr-v2` with commits
+- clean upstream replay branch is `stale-ralph-clean-pr-v2` with commits
   `1193124` and `bf1b47d`
 - upstream PR `Yeachan-Heo/oh-my-codex#1505` was closed by the owner because
   repository changes must target `dev`, not `main`
