@@ -223,9 +223,9 @@ the installed package environment:
 
 Do not treat those as stale-cancel regressions when replaying the patch.
 
-## Latest PR Review Follow-up
+## Historical PR Review Follow-up Before Closure
 
-After PR `#1509` was opened on `dev`, two review-driven hardening passes were
+Before PR `#1509` was later closed, two review-driven hardening passes were
 added on the same branch:
 
 - `7707816` hardened Windows drive-letter evidence-path handling and preserved
@@ -233,7 +233,7 @@ added on the same branch:
 - `0022b24` cleared a stale legacy/global root Ralph skill entry when the
   session-visible skill file had already moved to another skill
 
-The latest focused verification on that branch was:
+The last focused verification on that branch before closure was:
 
 ```bash
 npm run build
