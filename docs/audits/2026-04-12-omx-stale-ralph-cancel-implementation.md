@@ -242,6 +242,10 @@ the clean commit series, and moves the same scope onto the repository's
 required `dev` base after the owner closed the original `main`-targeted PR.
 A later review loop on `#1509` added two more targeted hardening commits and
 kept the publication line on the same branch instead of reopening a third PR.
+As of 2026-04-12 later that day, the same PR also carries a fresh Codex review
+comment that flags one more unresolved edge case: Windows-style persisted
+evidence paths can still bypass artifact detection when stale validation runs on
+POSIX hosts.
 
 ## Latest Live Re-Verification
 
@@ -288,11 +292,15 @@ operator fix for the recurring stale-Ralph warning in this workspace.
 - The upstream source patch now exists in a public PR outside this repository,
   but it is still not vendored into GitNexus and still depends on upstream
   review/merge.
+- PR `#1509` now also has an open review comment against `resolveRepoPath` /
+  `existsSync` evidence-path handling on POSIX hosts, so the four-commit branch
+  is not yet at a clean review stop.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 
 ## Recommended Next Step
 
-Track upstream PR `#1509` through review and CI so the full four-commit stale-
-Ralph fix set survives package rebuilds and upgrades on the required `dev`
-branch path.
+Track upstream PR `#1509` through review and CI, address the remaining
+Windows-path-on-POSIX stale-validation comment, then preserve the resulting fix
+set so it survives package rebuilds and upgrades on the required `dev` branch
+path.

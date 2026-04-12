@@ -221,7 +221,7 @@ Do not treat those as stale-cancel regressions when replaying the patch.
 After PR `#1509` was opened on `dev`, two review-driven hardening passes were
 added on the same branch:
 
-- `7707816` fixed Windows drive-letter evidence-path handling and preserved
+- `7707816` hardened Windows drive-letter evidence-path handling and preserved
   unrelated root skill entries during session-scoped cleanup
 - `0022b24` cleared a stale legacy/global root Ralph skill entry when the
   session-visible skill file had already moved to another skill
@@ -240,6 +240,20 @@ Result:
 
 One of those 84 tests now specifically covers the mixed session/root skill-state
 shape raised in the latest PR review thread.
+
+## Latest Open Review Comment
+
+After `0022b24`, Codex posted one more review comment on `#1509`:
+
+- discussion: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069643047>
+- concern: `resolveRepoPath` still returns raw Windows-style absolute paths such
+  as `C:\...` on POSIX hosts, so `existsSync` can miss real evidence artifacts
+  and incorrectly allow `omx cancel ralph --stale`
+- status at capture time: open review comment, no follow-up commit yet
+
+Treat that as the current upstream blocker. The branch still has the verified
+four-commit series and `84/84` focused tests, but it is not yet the final
+review-clean publication state.
 
 ## Latest Workspace Proof After PR Migration To `dev`
 

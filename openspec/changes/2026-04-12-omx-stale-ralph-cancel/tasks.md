@@ -65,6 +65,10 @@
   `npm run build` plus
   `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
   with `84/84` passing
+- a later Codex review comment on `#1509` flagged one more unresolved edge case:
+  Windows-style persisted evidence paths can still evade POSIX-host
+  `existsSync` checks during `--stale` validation, and no follow-up commit is
+  published yet
 - later live workspace re-verification in `/opt/claude/GitNexus` again passed
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
   cleared the matching root `skill-active-state`, and a fresh Stop-hook replay
