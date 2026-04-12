@@ -56,7 +56,7 @@
   `1193124` and `bf1b47d`
 - upstream PR `Yeachan-Heo/oh-my-codex#1505` was closed by the owner because
   repository changes must target `dev`, not `main`
-- the later dev-targeted replacement PR was `Yeachan-Heo/oh-my-codex#1509`,
+- the later dev-targeted follow-up PR was `Yeachan-Heo/oh-my-codex#1509`,
   which the owner then closed at `2026-04-12T15:45:57Z`
 - the `dev`-base PR carried four commits at close: `e8c9244`, `6897673`,
   `7707816`, and `0022b24`
@@ -75,7 +75,7 @@
 - the owner closure note said the lifecycle / termination contract change was
   too broad to merge as-is and would need a narrower maintainer-led pass
 - as of `2026-04-13`, fresh upstream `gh pr list` / `gh issue list` checks
-  still show no new maintainer-led replacement PR, issue, or branch for this
+  still show no new maintainer-led follow-up PR, issue, or branch for this
   narrower stale-cleanup contract
 - later live workspace re-verification in `/opt/claude/GitNexus` again passed
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
