@@ -223,6 +223,9 @@ appeared after the original implementation audit.
   repository, so it can be overwritten by reinstall or upgrade.
 - The upstream source patch now exists outside this repository in a separate
   `oh-my-codex` checkout, but that source commit is not vendored into GitNexus.
+- Several local commit bodies created during the live repair path were polluted
+  by shell-quoting artifacts; push/PR preparation should rewrite those messages
+  even though the underlying code and verification results are correct.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 

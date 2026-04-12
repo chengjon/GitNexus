@@ -87,6 +87,19 @@ produced two local git commits:
 Those commits are currently local to that checkout. They still need to be
 pushed or turned into a PR in the actual `oh-my-codex` repository lifecycle.
 
+## Commit Hygiene Note
+
+The local upstream commits above contain shell-quoting damage in parts of their
+commit bodies:
+
+- literal `\n` sequences appear in trailer sections
+- one body accidentally captured refusal-output text inline
+- one sentence lost the intended backticked `` `starting` `` fragment
+
+The code and verification evidence are still valid, but those commit messages
+should be cleaned up before the changes are pushed, rebased into a PR branch,
+or copied into release notes.
+
 ### Stop-hook regression test
 
 The verified stop-hook regression test lives at:
