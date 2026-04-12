@@ -290,6 +290,24 @@ After that replay:
 That second live replay confirms the installed command remains the shortest safe
 operator fix for the recurring stale-Ralph warning in this workspace.
 
+A later fresh replay after the closed-PR / fork-follow-up audit line reached the
+same result again. At that point:
+
+- root `.omx/state/ralph-state.json` had regressed to `active: true`,
+  `current_phase: "starting"`
+- root `.omx/state/skill-active-state.json` had regressed to `active: true`
+- `omx cancel ralph --stale` again returned `Cancelled stale Ralph session.`
+  with `reason: stuck_in_starting_without_execution_artifacts`
+- root `.omx/state/ralph-state.json` was then terminalized with
+  `completed_at: "2026-04-12T16:04:28.274Z"`
+- root `.omx/state/skill-active-state.json` was again reduced to
+  `active: false`, `active_skills: []`
+- a fresh `omx status` after that replay again reported
+  `ralph: inactive (phase: cancelled)` and `skill-active: inactive`
+
+That post-closure replay confirms the local operator command still safely clears
+new stale root Ralph state even after the upstream PR was closed.
+
 ## Residual Risk
 
 - The implementation lives in an installed package path, not in a tracked source

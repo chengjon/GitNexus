@@ -78,6 +78,12 @@
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
   cleared the matching root `skill-active-state`, and a fresh Stop-hook replay
   returned `outputJson: null`
+- a fresh later local replay again found root `.omx/state/ralph-state.json`
+  stuck at `active: true` / `current_phase: "starting"`; rerunning
+  `omx cancel ralph --stale` again cleared the root compatibility state, wrote
+  `completed_at: "2026-04-12T16:04:28.274Z"`, reduced root
+  `skill-active-state.json` to `active: false`, and left `omx status` at
+  `ralph: inactive (phase: cancelled)`
 - later repository record commits captured the follow-up audit, audits index
   sync, commit-hygiene warning, rewrite recipe, and OpenSpec hygiene sync:
   `0970f5a`, `c3dadd1`, `cac14ea`, `ca75770`, `f8529a7`, `f3f924b`

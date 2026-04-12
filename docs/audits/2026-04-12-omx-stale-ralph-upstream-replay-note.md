@@ -298,3 +298,16 @@ again terminalized the root `ralph-state.json`, cleared the matching root
 
 That confirms the command and the verified fork replay still match live
 operator behavior in the current workspace, not just an earlier temp replay.
+
+A later fresh local replay after the PR-closure audit updates again found a root
+compatibility Ralph state stuck in `starting`. Re-running `omx cancel ralph --stale`
+produced the same stale-cleanup output, then left:
+
+- root `ralph-state.json` at `active: false`, `current_phase: "cancelled"`,
+  `completed_at: "2026-04-12T16:04:28.274Z"`
+- root `skill-active-state.json` at `active: false` with `active_skills: []`
+- `omx status` reporting `ralph: inactive (phase: cancelled)` and
+  `skill-active: inactive`
+
+That gives one more post-closure operator proof that the canonical local command
+still safely clears recurring stale root Ralph state in `/opt/claude/GitNexus`.
