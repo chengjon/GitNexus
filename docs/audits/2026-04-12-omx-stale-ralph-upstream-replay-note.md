@@ -79,30 +79,32 @@ Those tests prove:
 ## Upstream Source Replay Status
 
 The canonical source replay was completed in `/tmp/oh-my-codex-upstream` and
-produced two local git commits:
+produced two clean git commits:
 
-- `13f9aa5` `Allow safe cleanup of stale Ralph startup state`
-- `9185353` `Handle stale Ralph cleanup when scoped state already terminated`
+- `1193124` `Allow safe cleanup of stale Ralph startup state`
+- `bf1b47d` `Handle stale Ralph cleanup when scoped state already terminated`
 
-Those commits are currently local to that checkout. They still need to be
-pushed or turned into a PR in the actual `oh-my-codex` repository lifecycle.
+Those commits were pushed on branch `stale-ralph-clean-pr-v2` via fork
+`chengjon/oh-my-codex`, and the upstream publication path is now:
 
-## Commit Hygiene Note
+- PR: `Yeachan-Heo/oh-my-codex#1505`
+- URL: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1505>
 
-The local upstream commits above contain shell-quoting damage in parts of their
-commit bodies:
+## Historical Commit Hygiene Note
+
+Earlier live-repair commits outside the clean publication branch contained
+shell-quoting damage in parts of their commit bodies:
 
 - literal `\n` sequences appear in trailer sections
 - one body accidentally captured refusal-output text inline
 - one sentence lost the intended backticked `` `starting` `` fragment
 
-The code and verification evidence are still valid, but those commit messages
-should be cleaned up before the changes are pushed, rebased into a PR branch,
-or copied into release notes.
+The code and verification evidence were still valid, but those damaged commits
+are no longer the publication path.
 
 ### Suggested Clean Replacement Subjects
 
-If those commits are rewritten before push, these subject lines preserve the
+These subject lines are the clean publication subjects that preserve the
 validated intent:
 
 - `Allow safe cleanup of stale Ralph startup state`
@@ -127,17 +129,17 @@ For the second upstream commit, preserve these points:
 - root `skill-active-state` cleanup must still happen when the session copy is
   already inactive
 
-### Suggested Rewrite Workflow
+### Historical Rewrite Workflow
 
-In `/tmp/oh-my-codex-upstream`, a future maintainer can rewrite the two local
-commit messages before push with a focused interactive rebase over the two
-stale-Ralph commits:
+Before the clean branch was created, a maintainer could have rewritten the two
+damaged local commit messages with a focused interactive rebase over the stale-
+Ralph commits:
 
 ```bash
 git rebase -i d5975af
 ```
 
-Then mark these two commits as `reword`:
+Then they would have marked the stale-Ralph commits as `reword`:
 
 - `13f9aa5` `Allow safe cleanup of stale Ralph startup state`
 - `9185353` `Handle stale Ralph cleanup when scoped state already terminated`
@@ -208,3 +210,24 @@ the installed package environment:
 - missing `.github/workflows/ci.yml`
 
 Do not treat those as stale-cancel regressions when replaying the patch.
+
+## Latest Workspace Proof After PR Creation
+
+After the clean branch was pushed and PR `#1505` was opened, the current
+GitNexus workspace still reproduced the same stale root compatibility shape.
+Running:
+
+```bash
+omx cancel ralph --stale
+```
+
+again terminalized the root `ralph-state.json`, cleared the matching root
+`skill-active-state.json`, and a fresh Stop-hook replay in
+`/opt/claude/GitNexus` returned:
+
+```json
+{"hookEventName":"Stop","omxEventName":"stop","skillState":null,"outputJson":null}
+```
+
+That confirms the command and the upstream PR still match live operator
+behavior in the current workspace, not just an earlier temp replay.

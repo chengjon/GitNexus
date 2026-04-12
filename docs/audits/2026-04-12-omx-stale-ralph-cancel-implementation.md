@@ -217,23 +217,72 @@ cleared:
 That confirms the installed OMX runtime now handles the second edge case that
 appeared after the original implementation audit.
 
+## Publication Status
+
+The verified upstream/source replay is no longer only local:
+
+- clean branch: `stale-ralph-clean-pr-v2`
+- clean commits:
+  - `1193124` `Allow safe cleanup of stale Ralph startup state`
+  - `bf1b47d` `Handle stale Ralph cleanup when scoped state already terminated`
+- upstream PR:
+  - `Yeachan-Heo/oh-my-codex#1505`
+  - <https://github.com/Yeachan-Heo/oh-my-codex/pull/1505>
+
+That publication path supersedes the earlier local-only replay state and avoids
+the shell-quoting-damaged commit bodies that appeared during the live repair
+sequence.
+
+## Latest Live Re-Verification
+
+Later on 2026-04-12, the current GitNexus workspace re-entered the stale root
+compatibility shape:
+
+- root `.omx/state/ralph-state.json` was `active: true` with
+  `current_phase: "starting"`
+- root `.omx/state/skill-active-state.json` was still `active: true`
+- the session-scoped Ralph and skill states for
+  `019d7893-fada-7db0-b2a5-b23e02bc9b6c` were already terminal/inactive
+
+Re-running the canonical operator command:
+
+```bash
+omx cancel ralph --stale
+```
+
+returned:
+
+```text
+Cancelled stale Ralph session.
+session_id: 019d7893-fada-7db0-b2a5-b23e02bc9b6c
+reason: stuck_in_starting_without_execution_artifacts
+cleared:
+  - legacy global ralph-state
+  - matching skill-active-state
+```
+
+After that replay:
+
+- root `.omx/state/ralph-state.json` was terminalized to
+  `active: false`, `current_phase: "cancelled"`
+- root `.omx/state/skill-active-state.json` was `active: false`
+- a fresh Stop-hook replay again returned `outputJson: null`
+
+That second live replay confirms the installed command remains the shortest safe
+operator fix for the recurring stale-Ralph warning in this workspace.
+
 ## Residual Risk
 
 - The implementation lives in an installed package path, not in a tracked source
   repository, so it can be overwritten by reinstall or upgrade.
-- The upstream source patch now exists outside this repository in a separate
-  `oh-my-codex` checkout, but that source commit is not vendored into GitNexus.
-- Several local commit bodies created during the live repair path were polluted
-  by shell-quoting artifacts; push/PR preparation should rewrite those messages
-  even though the underlying code and verification results are correct.
+- The upstream source patch now exists in a public PR outside this repository,
+  but it is still not vendored into GitNexus and still depends on upstream
+  review/merge.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 
 ## Recommended Next Step
 
-Push or PR the two upstream `oh-my-codex` commits so both the original
-`--stale` command and the terminal-scoped/root-stale fallback fix survive
-package rebuilds and upgrades. Before doing that, rewrite the local commit
-messages so they keep the validated subjects but drop the shell-quoting damage
-captured during the live repair path. The replay note now includes a concrete
-rewrite recipe and the body themes to preserve.
+Track upstream PR `#1505` through review and CI so both the original `--stale`
+command and the terminal-scoped/root-stale fallback fix survive package
+rebuilds and upgrades.

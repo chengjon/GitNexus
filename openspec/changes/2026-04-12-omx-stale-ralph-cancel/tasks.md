@@ -52,6 +52,13 @@
 - follow-up installed-package verification passed
   `node --test /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/__tests__/session-scoped-runtime.test.js /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/scripts/__tests__/codex-native-hook.test.js`
   with `62/62` passing
+- clean upstream publication branch is `stale-ralph-clean-pr-v2` with commits
+  `1193124` and `bf1b47d`
+- upstream PR was opened as `Yeachan-Heo/oh-my-codex#1505`
+- later live workspace re-verification in `/opt/claude/GitNexus` again passed
+  `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
+  cleared the matching root `skill-active-state`, and a fresh Stop-hook replay
+  returned `outputJson: null`
 - later repository record commits captured the follow-up audit, audits index
   sync, commit-hygiene warning, rewrite recipe, and OpenSpec hygiene sync:
   `0970f5a`, `c3dadd1`, `cac14ea`, `ca75770`, `f8529a7`, `f3f924b`
