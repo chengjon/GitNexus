@@ -86,12 +86,15 @@ produced two clean git commits:
 
 Those commits were first pushed on branch `stale-ralph-clean-pr-v2` and opened
 as PR `#1505` against `main`, but the owner closed that PR because repository
-changes must target `dev`. The current publication path is now:
+changes must target `dev`. The later `dev`-based publication path was:
 
 - dev-based branch: `stale-ralph-clean-pr-dev`
-- active PR: `Yeachan-Heo/oh-my-codex#1509`
+- closed PR: `Yeachan-Heo/oh-my-codex#1509`
 - URL: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509>
-- latest commit on that PR: `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
+- closed at: `2026-04-12T15:45:57Z`
+- head commit at close: `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
+- owner closure note: the stale Ralph lifecycle / termination contract change was too broad to merge as-is and would need a narrower maintainer-led pass
+- later fork-only follow-up on the same branch: `46622fa` `Preserve repo-local stale evidence across Windows paths`
 
 ## Historical Commit Hygiene Note
 
@@ -164,7 +167,9 @@ the session.
 
 In the canonical `oh-my-codex` source repository:
 
-1. Preserve the four-commit dev-based series above or replay their equivalent source diffs.
+1. Preserve the verified stale-cancel behavior from the four-commit dev-based
+   series plus the later Windows-path follow-up `46622fa`, even if the final
+   maintainer-owned version is reshaped into a narrower patch.
 2. Ensure the stale-cancel logic handles both:
    - normal session-scoped stale Ralph cleanup
    - root fallback when the scoped Ralph entry is absent or already terminal
@@ -172,8 +177,10 @@ In the canonical `oh-my-codex` source repository:
    is already inactive.
 4. Ensure scoped stale cleanup also removes a legacy/global root Ralph skill entry
    when the session-visible skill file has already moved to another skill.
-5. Rebuild `dist/`.
-6. Re-run the focused compiled tests.
+5. Ensure Windows-style absolute paths that still point into repo-local
+   `/.omx/...` artifacts do not evade POSIX-host evidence checks.
+6. Rebuild `dist/`.
+7. Re-run the focused compiled tests.
 
 ## Minimum Replay Checklist
 
@@ -241,7 +248,7 @@ Result:
 One of those 84 tests now specifically covers the mixed session/root skill-state
 shape raised in the latest PR review thread.
 
-## Latest Open Review Comment
+## Latest Review Follow-up And Closure
 
 After `0022b24`, Codex posted one more review comment on `#1509`:
 
@@ -249,11 +256,27 @@ After `0022b24`, Codex posted one more review comment on `#1509`:
 - concern: `resolveRepoPath` still returns raw Windows-style absolute paths such
   as `C:\...` on POSIX hosts, so `existsSync` can miss real evidence artifacts
   and incorrectly allow `omx cancel ralph --stale`
-- status at capture time: open review comment, no follow-up commit yet
 
-Treat that as the current upstream blocker. The branch still has the verified
-four-commit series and `84/84` focused tests, but it is not yet the final
-review-clean publication state.
+That review point was addressed later on the fork branch in:
+
+- `46622fa` `Preserve repo-local stale evidence across Windows paths`
+- reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
+
+The follow-up verification after `46622fa` was:
+
+```bash
+npm run build
+node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js
+```
+
+Result:
+
+- 85 tests passed
+- 0 failed
+
+However, PR `#1509` itself was closed earlier at `2026-04-12T15:45:57Z` with
+an owner note that this lifecycle / termination contract change would need a
+narrower maintainer-led pass rather than merge in its current form.
 
 ## Latest Workspace Proof After PR Migration To `dev`
 
@@ -273,5 +296,5 @@ again terminalized the root `ralph-state.json`, cleared the matching root
 {"hookEventName":"Stop","omxEventName":"stop","skillState":null,"outputJson":null}
 ```
 
-That confirms the command and the upstream PR still match live operator
-behavior in the current workspace, not just an earlier temp replay.
+That confirms the command and the verified fork replay still match live
+operator behavior in the current workspace, not just an earlier temp replay.

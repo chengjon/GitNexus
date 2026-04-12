@@ -228,24 +228,29 @@ The verified upstream/source replay is no longer only local:
 - closed wrong-base PR:
   - `Yeachan-Heo/oh-my-codex#1505`
   - closed by owner because repository changes must target `dev`, not `main`
-- active PR:
+- closed `dev`-base PR:
   - `Yeachan-Heo/oh-my-codex#1509`
   - <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509>
-- current `dev`-base commit series:
+  - closed by the owner at `2026-04-12T15:45:57Z`
+  - owner note: the lifecycle / termination contract change was too broad to merge as-is and needs a narrower maintainer-led pass
+- `dev`-base commit series at PR close:
   - `e8c9244` `Allow safe cleanup of stale Ralph startup state`
   - `6897673` `Handle stale Ralph cleanup when scoped state already terminated`
   - `7707816` `Harden stale Ralph cleanup for portable evidence paths`
   - `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
+- post-close fork follow-up on the same branch:
+  - `46622fa` `Preserve repo-local stale evidence across Windows paths`
+  - review reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
+  - focused verification after that follow-up: `85/85` passing
 
-That publication path supersedes the earlier local-only replay state, preserves
-the clean commit series, and moves the same scope onto the repository's
+That publication path superseded the earlier local-only replay state, preserved
+the clean commit series, and moved the same scope onto the repository's
 required `dev` base after the owner closed the original `main`-targeted PR.
-A later review loop on `#1509` added two more targeted hardening commits and
-kept the publication line on the same branch instead of reopening a third PR.
-As of 2026-04-12 later that day, the same PR also carries a fresh Codex review
-comment that flags one more unresolved edge case: Windows-style persisted
-evidence paths can still bypass artifact detection when stale validation runs on
-POSIX hosts.
+A later review loop on `#1509` added two more targeted hardening commits, then
+flagged one more Windows-path-on-POSIX edge case, and finally ended with the
+owner closing the PR instead of taking the contract change in its current form.
+The follow-up fix for that review point now exists only on the fork branch and
+in the review reply, not in an active upstream PR.
 
 ## Latest Live Re-Verification
 
@@ -289,18 +294,19 @@ operator fix for the recurring stale-Ralph warning in this workspace.
 
 - The implementation lives in an installed package path, not in a tracked source
   repository, so it can be overwritten by reinstall or upgrade.
-- The upstream source patch now exists in a public PR outside this repository,
-  but it is still not vendored into GitNexus and still depends on upstream
-  review/merge.
-- PR `#1509` now also has an open review comment against `resolveRepoPath` /
-  `existsSync` evidence-path handling on POSIX hosts, so the four-commit branch
-  is not yet at a clean review stop.
+- The upstream source patch is still not vendored into GitNexus.
+- PR `#1509` is now closed, and the owner explicitly said the lifecycle /
+  termination contract change needs a narrower maintainer-led pass before any
+  upstream adoption.
+- The latest Windows-path-on-POSIX fix (`46622fa`, `85/85`) exists on the fork
+  branch and in the closed PR discussion, but not on an active maintainer-owned
+  publication path.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 
 ## Recommended Next Step
 
-Track upstream PR `#1509` through review and CI, address the remaining
-Windows-path-on-POSIX stale-validation comment, then preserve the resulting fix
-set so it survives package rebuilds and upgrades on the required `dev` branch
-path.
+Keep `omx cancel ralph --stale` as the local operator fix, preserve the
+verified fork branch evidence (`46622fa`, `85/85`), and monitor for the
+maintainer-led narrower replacement that the owner said would be needed before
+any upstream merge path resumes.
