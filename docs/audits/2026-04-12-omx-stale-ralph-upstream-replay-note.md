@@ -313,7 +313,7 @@ produced the same stale-cleanup output, then left:
 That gives one more post-closure operator proof that the canonical local command
 still safely clears recurring stale root Ralph state in `/opt/claude/GitNexus`.
 
-As of 2026-04-13, upstream still shows no new maintainer-led replacement PR,
+As of 2026-04-13, upstream still shows no new maintainer-led follow-up PR,
 issue, or branch for this narrower stale-cleanup contract. The upstream stop
 point remains: closed PR `#1509`, owner closure note, and fork-only follow-up
 `46622fa`.

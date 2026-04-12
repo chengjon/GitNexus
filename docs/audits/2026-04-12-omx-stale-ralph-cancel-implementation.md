@@ -330,4 +330,4 @@ maintainer-led narrower replacement that the owner said would be needed before
 any maintainer-owned upstream handoff restarts.
 
 As of 2026-04-13, a fresh upstream check still shows no new maintainer-led
-replacement PR, issue, or branch carrying this narrower stale-cleanup contract.
+follow-up PR, issue, or branch carrying this narrower stale-cleanup contract.
