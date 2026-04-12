@@ -318,7 +318,7 @@ new stale root Ralph state even after the upstream PR was closed.
   upstream adoption.
 - The later Windows-path-on-POSIX fix (`46622fa`, `85/85`) exists on the fork
   branch and in the closed PR discussion, but not on an active maintainer-owned
-  upstream adoption path.
+  upstream handoff path.
 - The broader compiled persistence suite still has environment/package-layout
   failures that mask a totally clean green run.
 
@@ -327,7 +327,7 @@ new stale root Ralph state even after the upstream PR was closed.
 Keep `omx cancel ralph --stale` as the local operator fix, preserve the
 verified fork branch evidence (`46622fa`, `85/85`), and monitor for the
 maintainer-led narrower replacement that the owner said would be needed before
-any upstream adoption path reopens.
+any maintainer-owned upstream handoff restarts.
 
 As of 2026-04-13, a fresh upstream check still shows no new maintainer-led
 replacement PR, issue, or branch carrying this narrower stale-cleanup contract.
