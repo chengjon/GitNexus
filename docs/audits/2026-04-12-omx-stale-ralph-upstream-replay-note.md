@@ -27,6 +27,10 @@ The upstream replay must preserve all of these outcomes:
 4. Success terminalizes Ralph state instead of deleting it.
 5. Matching canonical `skill-active-state` is deactivated.
 6. Stop-hook no longer blocks after stale cancellation.
+7. If the current session already has terminal session-scoped Ralph state, a
+   stale legacy root Ralph state can still be cleaned safely.
+8. If the session-scoped `skill-active-state` is already inactive, the matching
+   root `skill-active-state` entry is still cleared.
 
 ## Implementation Anchors From The Verified Local Build
 
@@ -69,6 +73,19 @@ Those tests prove:
 - refusal when context evidence exists
 - refusal for fresh or active Ralph runs
 - cross-session isolation
+- root fallback when no scoped Ralph entry exists
+- root fallback when scoped Ralph state is already terminal
+
+## Upstream Source Replay Status
+
+The canonical source replay was completed in `/tmp/oh-my-codex-upstream` and
+produced two local git commits:
+
+- `13f9aa5` `Allow safe cleanup of stale Ralph startup state`
+- `9185353` `Handle stale Ralph cleanup when scoped state already terminated`
+
+Those commits are currently local to that checkout. They still need to be
+pushed or turned into a PR in the actual `oh-my-codex` repository lifecycle.
 
 ### Stop-hook regression test
 
@@ -83,9 +100,12 @@ the session.
 
 In the canonical `oh-my-codex` source repository:
 
-1. Locate the source equivalents of the currently verified compiled files.
-2. Port the stale-cancel logic into source, not just generated `dist/`.
-3. Port the five CLI tests and the stop-hook regression test.
+1. Preserve both upstream commits above or replay their equivalent source diffs.
+2. Ensure the stale-cancel logic handles both:
+   - normal session-scoped stale Ralph cleanup
+   - root fallback when the scoped Ralph entry is absent or already terminal
+3. Ensure root `skill-active-state` cleanup still occurs when the session copy
+   is already inactive.
 4. Rebuild `dist/`.
 5. Re-run the focused compiled tests.
 
@@ -96,6 +116,7 @@ In the canonical `oh-my-codex` source repository:
 - Source equivalent of `dist/scripts/__tests__/codex-native-hook.test.js` updated
 - generated `dist/` refreshed from source
 - `omx cancel ralph --stale` manually verified in a temp repo
+- terminal scoped + root stale fallback manually verified in a temp repo
 
 ## Verification Commands To Reuse
 

@@ -24,6 +24,8 @@
 
 - [x] 5.1 Add a note describing how to replay the verified local fix into the
   canonical `oh-my-codex` source repository
+- [x] 5.2 Record the follow-up root-fallback edge case and its upstream/source
+  replay status
 
 ## 6. Finalization
 
@@ -41,3 +43,10 @@
 - scoped `git status --short` still shows the new docs / OpenSpec files as
   untracked repository records, while the only tracked code diff remains the
   pre-existing local test change
+- follow-up source replay in `/tmp/oh-my-codex-upstream` passed
+  `npm run build` plus
+  `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
+  with `76/76` passing
+- follow-up installed-package verification passed
+  `node --test /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/__tests__/session-scoped-runtime.test.js /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/scripts/__tests__/codex-native-hook.test.js`
+  with `62/62` passing

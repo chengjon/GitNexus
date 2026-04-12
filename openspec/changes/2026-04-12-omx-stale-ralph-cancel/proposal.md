@@ -26,6 +26,8 @@ behavior needs a formal change record that captures:
   package
 - add an upstream replay note so the verified local fix can be ported into the
   canonical `oh-my-codex` source repository later
+- record the follow-up edge case where a terminal session-scoped Ralph state can
+  hide a stale legacy root Ralph state from `--stale` cleanup
 
 ## Capabilities
 
@@ -48,3 +50,4 @@ behavior needs a formal change record that captures:
 - Affected OMX runtime evidence:
   - local installed package under `/root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex`
   - local `.omx/state/*` Ralph and skill-active files in the GitNexus workspace
+  - local source replay checkout under `/tmp/oh-my-codex-upstream`

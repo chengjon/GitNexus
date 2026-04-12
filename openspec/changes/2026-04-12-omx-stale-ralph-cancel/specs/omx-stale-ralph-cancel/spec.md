@@ -25,6 +25,14 @@ force-clear.
 - **AND** it records that successful cleanup terminalizes Ralph state and clears
   the matching skill-active state
 
+#### Scenario: A maintainer audits the root-fallback edge case
+
+- **WHEN** they inspect the follow-up audit evidence for stale cleanup
+- **THEN** they can see that a terminal session-scoped Ralph entry does not
+  prevent safe cleanup of a stale legacy root Ralph entry
+- **AND** they can see that the matching root `skill-active-state` is cleared
+  when the session-scoped copy is already inactive
+
 ### Requirement: GitNexus SHALL retain verification and replay evidence for stale Ralph cleanup
 
 GitNexus SHALL keep repository-local evidence showing that the documented stale
@@ -45,3 +53,5 @@ environment.
 - **THEN** they can find the installed-package file anchors and test anchors
 - **AND** they can see the minimum replay checklist for porting the fix into the
   canonical `oh-my-codex` source repository
+- **AND** they can see the two local upstream replay commits that captured the
+  original stale-cancel fix and the later root-fallback follow-up
