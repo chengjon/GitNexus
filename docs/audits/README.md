@@ -33,8 +33,9 @@ Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.
   operator fix for a lingering `phase: starting` warning.
 - Those 2026-04-12 stale Ralph audits now also cover the terminal
   session-scoped plus legacy root-state fallback edge case and point to the two
-  clean upstream replay commits plus replacement PR `Yeachan-Heo/oh-my-codex#1509`
-  after owner-closed wrong-base PR `#1505`.
+  clean upstream replay commits, the later closed PR `Yeachan-Heo/oh-my-codex#1509`,
+  and the current fork-only follow-up stop point `46622fa` after owner-closed
+  wrong-base PR `#1505`.
 - Read the 2026-04-09 summary first if you need current state.
 - Read the slice classification audit if you need per-commit evidence.
 - Keep original commit classification separate from current worktree cleanup status.
