@@ -127,6 +127,25 @@ For the second upstream commit, preserve these points:
 - root `skill-active-state` cleanup must still happen when the session copy is
   already inactive
 
+### Suggested Rewrite Workflow
+
+In `/tmp/oh-my-codex-upstream`, a future maintainer can rewrite the two local
+commit messages before push with a focused interactive rebase over the two
+stale-Ralph commits:
+
+```bash
+git rebase -i d5975af
+```
+
+Then mark these two commits as `reword`:
+
+- `13f9aa5` `Allow safe cleanup of stale Ralph startup state`
+- `9185353` `Handle stale Ralph cleanup when scoped state already terminated`
+
+When the editor opens for each commit, keep the validated subject lines above
+and rewrite the bodies using the listed body themes instead of carrying forward
+the shell-damaged text.
+
 ### Stop-hook regression test
 
 The verified stop-hook regression test lives at:
