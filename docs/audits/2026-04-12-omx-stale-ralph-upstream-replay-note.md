@@ -100,6 +100,33 @@ The code and verification evidence are still valid, but those commit messages
 should be cleaned up before the changes are pushed, rebased into a PR branch,
 or copied into release notes.
 
+### Suggested Clean Replacement Subjects
+
+If those commits are rewritten before push, these subject lines preserve the
+validated intent:
+
+- `Allow safe cleanup of stale Ralph startup state`
+- `Handle stale Ralph cleanup when scoped state already terminated`
+
+### Suggested Clean Replacement Body Themes
+
+For the first upstream commit, preserve these points:
+
+- stale Ralph can be stuck in `starting` after a half-started session
+- `omx cancel ralph --stale` is the canonical operator command
+- stale cleanup must stay session-scoped by default
+- cleanup terminalizes Ralph state and clears the matching canonical
+  `skill-active-state`
+
+For the second upstream commit, preserve these points:
+
+- a terminal session-scoped Ralph state can hide a stale legacy root Ralph
+  state
+- root fallback must only activate when the scoped Ralph entry is absent or
+  already terminal
+- root `skill-active-state` cleanup must still happen when the session copy is
+  already inactive
+
 ### Stop-hook regression test
 
 The verified stop-hook regression test lives at:

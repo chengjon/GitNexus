@@ -233,4 +233,6 @@ appeared after the original implementation audit.
 
 Push or PR the two upstream `oh-my-codex` commits so both the original
 `--stale` command and the terminal-scoped/root-stale fallback fix survive
-package rebuilds and upgrades.
+package rebuilds and upgrades. Before doing that, rewrite the local commit
+messages so they keep the validated subjects but drop the shell-quoting damage
+captured during the live repair path.
