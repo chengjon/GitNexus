@@ -328,3 +328,6 @@ Keep `omx cancel ralph --stale` as the local operator fix, preserve the
 verified fork branch evidence (`46622fa`, `85/85`), and monitor for the
 maintainer-led narrower replacement that the owner said would be needed before
 any upstream merge path resumes.
+
+As of 2026-04-13, a fresh upstream check still shows no new maintainer-led
+replacement PR, issue, or branch carrying this narrower stale-cleanup contract.

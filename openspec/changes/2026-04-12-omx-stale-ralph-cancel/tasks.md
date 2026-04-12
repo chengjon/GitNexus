@@ -74,6 +74,9 @@
   with `85/85` passing
 - the owner closure note said the lifecycle / termination contract change was
   too broad to merge as-is and would need a narrower maintainer-led pass
+- as of `2026-04-13`, fresh upstream `gh pr list` / `gh issue list` checks
+  still show no new maintainer-led replacement PR, issue, or branch for this
+  narrower stale-cleanup contract
 - later live workspace re-verification in `/opt/claude/GitNexus` again passed
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
   cleared the matching root `skill-active-state`, and a fresh Stop-hook replay
