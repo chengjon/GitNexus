@@ -278,10 +278,11 @@ However, PR `#1509` itself was closed earlier at `2026-04-12T15:45:57Z` with
 an owner note that this lifecycle / termination contract change would need a
 narrower maintainer-led pass rather than merge in its current form.
 
-## Latest Workspace Proof After PR Migration To `dev`
+## Historical Workspace Proof After PR Migration To `dev`
 
-After the clean branch was migrated onto `origin/dev` and reopened as PR `#1509`,
-the current GitNexus workspace still reproduced the same stale root compatibility shape.
+Before PR `#1509` was later closed, the clean branch had already been migrated
+onto `origin/dev`, and the current GitNexus workspace still reproduced the same
+stale root compatibility shape.
 Running:
 
 ```bash
