@@ -26,6 +26,8 @@
   canonical `oh-my-codex` source repository
 - [x] 5.2 Record the follow-up root-fallback edge case and its upstream/source
   replay status
+- [x] 5.3 Record commit-hygiene warnings and a concrete rewrite recipe for the
+  local upstream replay commits
 
 ## 6. Finalization
 

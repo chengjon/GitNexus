@@ -28,6 +28,8 @@ behavior needs a formal change record that captures:
   canonical `oh-my-codex` source repository later
 - record the follow-up edge case where a terminal session-scoped Ralph state can
   hide a stale legacy root Ralph state from `--stale` cleanup
+- record the follow-up commit-hygiene warning and rewrite recipe for the local
+  upstream replay commits before push/PR preparation
 
 ## Capabilities
 

@@ -55,3 +55,13 @@ environment.
   canonical `oh-my-codex` source repository
 - **AND** they can see the two local upstream replay commits that captured the
   original stale-cancel fix and the later root-fallback follow-up
+
+#### Scenario: A maintainer prepares the local upstream replay commits for push
+
+- **WHEN** they inspect the replay note before pushing or opening a PR
+- **THEN** they can see that the local upstream commit bodies contain
+  shell-quoting damage
+- **AND** they can find a concrete rewrite recipe for cleaning those commit
+  messages before publication
+- **AND** they can find the validated subject/body themes that should be
+  preserved during rewrite
