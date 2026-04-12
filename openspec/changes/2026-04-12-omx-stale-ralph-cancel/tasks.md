@@ -52,3 +52,9 @@
 - follow-up installed-package verification passed
   `node --test /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/__tests__/session-scoped-runtime.test.js /root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/scripts/__tests__/codex-native-hook.test.js`
   with `62/62` passing
+- later repository record commits captured the follow-up audit, audits index
+  sync, commit-hygiene warning, rewrite recipe, and OpenSpec hygiene sync:
+  `0970f5a`, `c3dadd1`, `cac14ea`, `ca75770`, `f8529a7`, `f3f924b`
+- after those record-only follow-ups, scoped `git status --short` again reduced
+  to the same single pre-existing user modification:
+  `gitnexus/test/unit/import-processor-indexed-resolution.test.ts`
