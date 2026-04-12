@@ -1,5 +1,7 @@
 # OMX Stale Ralph Cancel Implementation Plan
 
+> Status note: historical implementation plan only. Execution later diverged into the verified local/operator replay, the source-repo fork follow-up `46622fa`, and the closed-PR stop point documented in the 2026-04-12 stale-Ralph audits. Treat the audit/OpenSpec records as the authoritative completion history, not the unchecked boxes below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a safe `omx cancel ralph --stale` command that clears half-started Ralph state stuck in `starting` without touching unrelated sessions.
