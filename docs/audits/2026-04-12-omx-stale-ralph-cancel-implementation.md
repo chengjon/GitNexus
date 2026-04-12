@@ -252,9 +252,9 @@ owner closing the PR instead of taking the contract change in its current form.
 The follow-up fix for that review point now exists only on the fork branch and
 in the review reply, not in an active upstream PR.
 
-## Latest Live Re-Verification
+## Earlier Live Re-Verification Before The Post-Closure Replay
 
-Later on 2026-04-12, the current GitNexus workspace re-entered the stale root
+Later on 2026-04-12, the workspace re-entered the stale root
 compatibility shape:
 
 - root `.omx/state/ralph-state.json` was `active: true` with

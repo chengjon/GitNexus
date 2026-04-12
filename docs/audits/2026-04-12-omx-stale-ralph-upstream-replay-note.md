@@ -281,7 +281,7 @@ narrower maintainer-led pass rather than merge in its current form.
 ## Historical Workspace Proof After PR Migration To `dev`
 
 Before PR `#1509` was later closed, the clean branch had already been migrated
-onto `origin/dev`, and the current GitNexus workspace still reproduced the same
+onto `origin/dev`, and the workspace at that point still reproduced the same
 stale root compatibility shape.
 Running:
 
