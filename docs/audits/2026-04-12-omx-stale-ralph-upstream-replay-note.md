@@ -91,6 +91,7 @@ changes must target `dev`. The current publication path is now:
 - dev-based branch: `stale-ralph-clean-pr-dev`
 - active PR: `Yeachan-Heo/oh-my-codex#1509`
 - URL: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509>
+- latest commit on that PR: `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
 
 ## Historical Commit Hygiene Note
 
@@ -163,14 +164,16 @@ the session.
 
 In the canonical `oh-my-codex` source repository:
 
-1. Preserve both upstream commits above or replay their equivalent source diffs.
+1. Preserve the four-commit dev-based series above or replay their equivalent source diffs.
 2. Ensure the stale-cancel logic handles both:
    - normal session-scoped stale Ralph cleanup
    - root fallback when the scoped Ralph entry is absent or already terminal
 3. Ensure root `skill-active-state` cleanup still occurs when the session copy
    is already inactive.
-4. Rebuild `dist/`.
-5. Re-run the focused compiled tests.
+4. Ensure scoped stale cleanup also removes a legacy/global root Ralph skill entry
+   when the session-visible skill file has already moved to another skill.
+5. Rebuild `dist/`.
+6. Re-run the focused compiled tests.
 
 ## Minimum Replay Checklist
 
@@ -212,6 +215,31 @@ the installed package environment:
 - missing `.github/workflows/ci.yml`
 
 Do not treat those as stale-cancel regressions when replaying the patch.
+
+## Latest PR Review Follow-up
+
+After PR `#1509` was opened on `dev`, two review-driven hardening passes were
+added on the same branch:
+
+- `7707816` fixed Windows drive-letter evidence-path handling and preserved
+  unrelated root skill entries during session-scoped cleanup
+- `0022b24` cleared a stale legacy/global root Ralph skill entry when the
+  session-visible skill file had already moved to another skill
+
+The latest focused verification on that branch was:
+
+```bash
+npm run build
+node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js
+```
+
+Result:
+
+- 84 tests passed
+- 0 failed
+
+One of those 84 tests now specifically covers the mixed session/root skill-state
+shape raised in the latest PR review thread.
 
 ## Latest Workspace Proof After PR Migration To `dev`
 

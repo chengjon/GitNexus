@@ -231,10 +231,17 @@ The verified upstream/source replay is no longer only local:
 - active PR:
   - `Yeachan-Heo/oh-my-codex#1509`
   - <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509>
+- current `dev`-base commit series:
+  - `e8c9244` `Allow safe cleanup of stale Ralph startup state`
+  - `6897673` `Handle stale Ralph cleanup when scoped state already terminated`
+  - `7707816` `Harden stale Ralph cleanup for portable evidence paths`
+  - `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
 
 That publication path supersedes the earlier local-only replay state, preserves
 the clean commit series, and moves the same scope onto the repository's
 required `dev` base after the owner closed the original `main`-targeted PR.
+A later review loop on `#1509` added two more targeted hardening commits and
+kept the publication line on the same branch instead of reopening a third PR.
 
 ## Latest Live Re-Verification
 
@@ -286,6 +293,6 @@ operator fix for the recurring stale-Ralph warning in this workspace.
 
 ## Recommended Next Step
 
-Track upstream PR `#1509` through review and CI so both the original `--stale`
-command and the terminal-scoped/root-stale fallback fix survive package
-rebuilds and upgrades on the required `dev` branch path.
+Track upstream PR `#1509` through review and CI so the full four-commit stale-
+Ralph fix set survives package rebuilds and upgrades on the required `dev`
+branch path.

@@ -58,6 +58,13 @@
   repository changes must target `dev`, not `main`
 - replacement upstream PR was opened as `Yeachan-Heo/oh-my-codex#1509` against
   `dev`
+- the active `dev`-base PR now carries four commits: `e8c9244`, `6897673`,
+  `7707816`, and `0022b24`
+- the latest review-follow-up on `#1509` added a regression for the mixed
+  session/root skill-state shape and re-ran
+  `npm run build` plus
+  `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
+  with `84/84` passing
 - later live workspace re-verification in `/opt/claude/GitNexus` again passed
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
   cleared the matching root `skill-active-state`, and a fresh Stop-hook replay

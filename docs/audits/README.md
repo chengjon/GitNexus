@@ -14,7 +14,8 @@ Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.
   Replay checklist and upstream status note for porting the verified local
   stale-Ralph fixes into a canonical `oh-my-codex` source checkout, including
   the clean upstream commits, closed wrong-base PR `#1505`, open replacement
-  PR `#1509` on `dev`, and the later live stop-hook re-verification.
+  PR `#1509` on `dev`, the later review-fix commits on that PR, and the live
+  stop-hook re-verification.
 - [2026-04-09-docs-governance-cleanup-summary.md](/opt/claude/GitNexus/docs/audits/2026-04-09-docs-governance-cleanup-summary.md)
   Top-level closeout for the 2026-04-08/09 docs/governance cleanup line.
 - [2026-04-09-language-support-operator-availability-matrix-convergence.md](/opt/claude/GitNexus/docs/audits/2026-04-09-language-support-operator-availability-matrix-convergence.md)
