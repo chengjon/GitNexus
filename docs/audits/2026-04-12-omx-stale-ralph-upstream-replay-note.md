@@ -6,7 +6,7 @@ implementation into the canonical `oh-my-codex` source repository.
 
 ## Why This Note Exists
 
-The working implementation currently lives in the installed package directory:
+The verified local implementation lives in the installed package directory:
 
 - `/root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/index.js`
 - `/root/.nvm/versions/node/v24.7.0/lib/node_modules/oh-my-codex/dist/cli/__tests__/session-scoped-runtime.test.js`
