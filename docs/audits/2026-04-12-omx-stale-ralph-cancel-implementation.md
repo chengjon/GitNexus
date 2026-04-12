@@ -316,7 +316,7 @@ new stale root Ralph state even after the upstream PR was closed.
 - PR `#1509` is now closed, and the owner explicitly said the lifecycle /
   termination contract change needs a narrower maintainer-led pass before any
   upstream adoption.
-- The latest Windows-path-on-POSIX fix (`46622fa`, `85/85`) exists on the fork
+- The later Windows-path-on-POSIX fix (`46622fa`, `85/85`) exists on the fork
   branch and in the closed PR discussion, but not on an active maintainer-owned
   publication path.
 - The broader compiled persistence suite still has environment/package-layout

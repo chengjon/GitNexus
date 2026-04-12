@@ -246,9 +246,9 @@ Result:
 - 0 failed
 
 One of those 84 tests now specifically covers the mixed session/root skill-state
-shape raised in the latest PR review thread.
+shape raised in the later PR review thread.
 
-## Latest Review Follow-up And Closure
+## Review Follow-up, Fix, And Closure
 
 After `0022b24`, Codex posted one more review comment on `#1509`:
 

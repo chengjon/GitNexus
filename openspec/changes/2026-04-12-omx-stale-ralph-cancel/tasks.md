@@ -60,7 +60,7 @@
   `dev`, then closed by the owner at `2026-04-12T15:45:57Z`
 - the `dev`-base PR carried four commits at close: `e8c9244`, `6897673`,
   `7707816`, and `0022b24`
-- the latest review-follow-up on `#1509` added a regression for the mixed
+- the later review follow-up on `#1509` added a regression for the mixed
   session/root skill-state shape and re-ran
   `npm run build` plus
   `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
