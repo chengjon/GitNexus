@@ -84,11 +84,13 @@ produced two clean git commits:
 - `1193124` `Allow safe cleanup of stale Ralph startup state`
 - `bf1b47d` `Handle stale Ralph cleanup when scoped state already terminated`
 
-Those commits were pushed on branch `stale-ralph-clean-pr-v2` via fork
-`chengjon/oh-my-codex`, and the upstream publication path is now:
+Those commits were first pushed on branch `stale-ralph-clean-pr-v2` and opened
+as PR `#1505` against `main`, but the owner closed that PR because repository
+changes must target `dev`. The current publication path is now:
 
-- PR: `Yeachan-Heo/oh-my-codex#1505`
-- URL: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1505>
+- dev-based branch: `stale-ralph-clean-pr-dev`
+- active PR: `Yeachan-Heo/oh-my-codex#1509`
+- URL: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509>
 
 ## Historical Commit Hygiene Note
 
@@ -211,10 +213,10 @@ the installed package environment:
 
 Do not treat those as stale-cancel regressions when replaying the patch.
 
-## Latest Workspace Proof After PR Creation
+## Latest Workspace Proof After PR Migration To `dev`
 
-After the clean branch was pushed and PR `#1505` was opened, the current
-GitNexus workspace still reproduced the same stale root compatibility shape.
+After the clean branch was migrated onto `origin/dev` and reopened as PR `#1509`,
+the current GitNexus workspace still reproduced the same stale root compatibility shape.
 Running:
 
 ```bash

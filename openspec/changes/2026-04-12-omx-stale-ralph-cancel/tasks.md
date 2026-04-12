@@ -54,7 +54,10 @@
   with `62/62` passing
 - clean upstream publication branch is `stale-ralph-clean-pr-v2` with commits
   `1193124` and `bf1b47d`
-- upstream PR was opened as `Yeachan-Heo/oh-my-codex#1505`
+- upstream PR `Yeachan-Heo/oh-my-codex#1505` was closed by the owner because
+  repository changes must target `dev`, not `main`
+- replacement upstream PR was opened as `Yeachan-Heo/oh-my-codex#1509` against
+  `dev`
 - later live workspace re-verification in `/opt/claude/GitNexus` again passed
   `omx cancel ralph --stale`, terminalized the root compatibility Ralph state,
   cleared the matching root `skill-active-state`, and a fresh Stop-hook replay
