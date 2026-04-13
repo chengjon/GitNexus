@@ -1,7 +1,9 @@
 # OMX Stale Ralph Cancel Design
 
+> Status note: historical design record only. The verified local/operator replay, the fork-only follow-up `46622fa`, and the closed-PR stop point are documented in the 2026-04-12 stale-Ralph audits and OpenSpec records. Treat those audit/OpenSpec files as the authoritative completion history, not this earlier proposed design status.
+
 **Date**: 2026-04-12
-**Status**: Proposed
+**Status**: Historical design record
 **Scope**: OMX mode-state cleanup command design
 
 ## Goal
