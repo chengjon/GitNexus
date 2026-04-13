@@ -238,7 +238,7 @@ The verified upstream/source replay is no longer only local:
   - `6897673` `Handle stale Ralph cleanup when scoped state already terminated`
   - `7707816` `Harden stale Ralph cleanup for portable evidence paths`
   - `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
-- post-close verified fork-only stop point on that branch:
+- post-close verified fork-only stop point on the PR branch:
   - `46622fa` `Preserve repo-local stale evidence across Windows paths`
   - review reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
   - focused verification at that stop point: `85/85` passing
