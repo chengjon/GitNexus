@@ -262,7 +262,7 @@ That review point was addressed later at the verified fork-only stop point:
 - `46622fa` `Preserve repo-local stale evidence across Windows paths`
 - reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
 
-The follow-up verification after `46622fa` was:
+Verification at the verified fork-only stop point `46622fa` was:
 
 ```bash
 npm run build
