@@ -14,7 +14,7 @@ Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.
   Replay checklist and upstream status note for porting the verified local
   stale-Ralph fixes into a canonical `oh-my-codex` source checkout, including
   the clean upstream commits, the closed wrong-base PR `#1505`, the later
-  closed dev-targeted follow-up PR `#1509`, the current fork-only stop point
+  closed dev-targeted follow-up PR `#1509`, the verified fork-only stop point
   `46622fa`, and the live stop-hook re-verification.
 - [2026-04-09-docs-governance-cleanup-summary.md](/opt/claude/GitNexus/docs/audits/2026-04-09-docs-governance-cleanup-summary.md)
   Top-level closeout for the 2026-04-08/09 docs/governance cleanup line.
