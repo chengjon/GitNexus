@@ -66,8 +66,8 @@
   `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
   with `84/84` passing
 - a later Codex review comment on `#1509` flagged one more Windows-path-on-
-  POSIX edge case, and that follow-up was fixed only on the fork branch in
-  `46622fa`
+  POSIX edge case, and that follow-up now remains at the verified fork-only
+  stop point `46622fa`
 - the post-close fork follow-up replied on the closed PR discussion and re-ran
   `npm run build` plus
   `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
