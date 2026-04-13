@@ -94,7 +94,7 @@ changes must target `dev`. The later `dev`-based publication attempt was:
 - closed at: `2026-04-12T15:45:57Z`
 - head commit at close: `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
 - owner closure note: the stale Ralph lifecycle / termination contract change was too broad to merge as-is and would need a narrower maintainer-led pass
-- later fork-only follow-up on the same branch: `46622fa` `Preserve repo-local stale evidence across Windows paths`
+- later fork-only stop point on the same branch: `46622fa` `Preserve repo-local stale evidence across Windows paths`
 
 ## Historical Commit Hygiene Note
 
@@ -315,5 +315,5 @@ still safely clears recurring stale root Ralph state in `/opt/claude/GitNexus`.
 
 As of 2026-04-13, upstream still shows no new maintainer-led follow-up PR,
 issue, or branch for this narrower stale-cleanup contract. The upstream stop
-point remains: closed PR `#1509`, owner closure note, and fork-only follow-up
+point remains: closed PR `#1509`, owner closure note, and fork-only stop point
 `46622fa`.

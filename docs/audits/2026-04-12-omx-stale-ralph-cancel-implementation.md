@@ -325,7 +325,7 @@ new stale root Ralph state even after the upstream PR was closed.
 ## Recommended Next Step
 
 Keep `omx cancel ralph --stale` as the local operator fix, preserve the
-verified fork branch evidence (`46622fa`, `85/85`), and monitor for the
+verified fork-only stop point (`46622fa`, `85/85`), and monitor for the
 maintainer-led narrower follow-up that the owner said would be needed before
 any maintainer-owned upstream handoff restarts.
 
