@@ -168,7 +168,7 @@ the session.
 In the canonical `oh-my-codex` source repository:
 
 1. Preserve the verified stale-cancel behavior from the four-commit dev-based
-   series plus the later Windows-path follow-up `46622fa`, even if the final
+   series plus the later verified fork-only stop point `46622fa`, even if the final
    maintainer-owned version is reshaped into a narrower patch.
 2. Ensure the stale-cancel logic handles both:
    - normal session-scoped stale Ralph cleanup
@@ -257,7 +257,7 @@ After `0022b24`, Codex posted one more review comment on `#1509`:
   as `C:\...` on POSIX hosts, so `existsSync` can miss real evidence artifacts
   and incorrectly allow `omx cancel ralph --stale`
 
-That review point was addressed later on the fork branch in:
+That review point was addressed later at the verified fork-only stop point:
 
 - `46622fa` `Preserve repo-local stale evidence across Windows paths`
 - reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
