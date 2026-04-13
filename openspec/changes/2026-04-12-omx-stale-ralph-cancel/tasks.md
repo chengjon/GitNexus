@@ -56,8 +56,8 @@
   `1193124` and `bf1b47d`
 - upstream PR `Yeachan-Heo/oh-my-codex#1505` was closed by the owner because
   repository changes must target `dev`, not `main`
-- the later dev-targeted follow-up PR was `Yeachan-Heo/oh-my-codex#1509`,
-  which the owner then closed at `2026-04-12T15:45:57Z`
+- the later dev-targeted follow-up PR `Yeachan-Heo/oh-my-codex#1509` was
+  closed by the owner at `2026-04-12T15:45:57Z`
 - the `dev`-base PR carried four commits at close: `e8c9244`, `6897673`,
   `7707816`, and `0022b24`
 - the later review follow-up on `#1509` added a regression for the mixed
