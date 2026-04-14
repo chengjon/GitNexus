@@ -57,6 +57,11 @@ current skill docs and the remediation roadmap.
 
 ---
 
+Historical baseline note:
+下方“详细修改建议”保留的是 2026-03-26 基线建议内容。
+其中的 `当前状态` / `建议修改内容` 仅代表当时建议，不应覆盖上方 2026-04-15
+current follow-up snapshot 与后续收敛记录。
+
 ## 详细修改建议
 
 ### 1. gitnexus-cli/SKILL.md

@@ -44,6 +44,11 @@ are still confirmed by the current skill docs and the remediation roadmap.
 
 ---
 
+Historical baseline note:
+下表与后续“详细审核”小节保留的是 2026-03-26 原始审核判断。
+其中的 `状态` / `当前状态` 仅代表当时结论，不应覆盖上方 2026-04-15 current
+follow-up snapshot 与后续收敛记录。
+
 | 技能文件 | 状态 | 优先级 |
 |----------|------|--------|
 | `gitnexus-cli/SKILL.md` | ⚠️ 需更新 | 中 |
@@ -57,6 +62,11 @@ are still confirmed by the current skill docs and the remediation roadmap.
 ---
 
 ## 详细审核
+
+Historical baseline note:
+以下各节的 `当前状态`、`缺失内容`、`建议修改` 均保留 2026-03-26 原始审核语境；
+阅读当前仓库状态时，应以上方 current follow-up snapshot、路线图和后续
+convergence 审计为准。
 
 ### 1. gitnexus-cli/SKILL.md
 
