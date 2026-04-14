@@ -7,6 +7,12 @@ Status note: this document records the pre-repair audit baseline for the reposit
 Status sync (2026-04-08): Finding 3 below is no longer current blocking debt for the repository’s required `Codex + Claude Code` host surface; see [2026-04-08-repo-technical-debt-audit-status-sync.md](/opt/claude/GitNexus/docs/audits/2026-04-08-repo-technical-debt-audit-status-sync.md).
 Broader status sync (2026-04-08): Finding 2 and parts of the repair-order/output-mapping guidance below are now partially superseded by later doc/governance convergence work; use [2026-03-24-gitnexus-technical-debt-remediation-roadmap.md](/opt/claude/GitNexus/docs/superpowers/plans/2026-03-24-gitnexus-technical-debt-remediation-roadmap.md) as the current backlog entrypoint and current stale-doc follow-up index, together with the later repository-local truth-sync slices it links to, before treating the original repair order as the current backlog.
 
+Historical baseline note: the `Summary`, `Current State`, `Findings`, and
+`Registered Follow-Up Decisions` sections below remain the 2026-04-06
+audit-capture baseline. Read them as historical context unless a later
+status-sync note in this page, the remediation roadmap, or the linked
+repository-local truth-sync slices explicitly elevates them as still current.
+
 ## Summary
 
 At audit capture time, the repository was operationally clean: the worktree was clean, the GitNexus index was fresh, and there were no obvious merge-conflict remnants or temporary patch files.
@@ -29,6 +35,11 @@ The main issues are governance and maintenance debt rather than uncommitted code
 - no unresolved merge markers were found outside decorative comment separators
 
 ## Findings
+
+Historical baseline note: each finding below preserves the 2026-04-06
+audit-time reasoning. Where a later status-sync paragraph exists, that later
+record controls current-state reading over the original severity or recommended
+direction text.
 
 ### 1. High: `main` and `upstream/main` have long-lived bidirectional divergence
 
