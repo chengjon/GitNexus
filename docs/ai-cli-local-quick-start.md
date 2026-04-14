@@ -1,6 +1,11 @@
 # AI CLI Local Quick Start
 
-This file is the shortest reliable guide for AI agents, AI CLIs, and local coding assistants using the personal GitNexus fork on this machine.
+This file is the shortest reliable command guide for AI agents, AI CLIs, and
+local coding assistants using the personal GitNexus fork on this machine.
+
+The primary maintained CLI surface for this local workflow remains
+`Claude Code + Codex`. Other MCP hosts may still work, but they are optional
+integrations rather than the main host pair documented here.
 
 ## Development Governance
 
@@ -10,6 +15,9 @@ Treat that document as mandatory for migrations, compatibility layers, duplicate
 
 Audit entrypoint:
 [`audits/README.md`](audits/README.md)
+
+Primary repository entrypoint:
+[`../README.md`](../README.md)
 
 ## Host Scope
 
@@ -73,6 +81,13 @@ Additional outputs after `--with-context`:
 - `CLAUDE.md`
 - `.claude/skills/gitnexus/`
 
+Standard host-readiness checks for the two maintained CLI hosts:
+
+```bash
+gitnexus doctor --host codex --repo .
+gitnexus doctor --host claude-code --repo .
+```
+
 Optional project-local workflows:
 
 ```bash
@@ -80,12 +95,10 @@ gitnexus init-project
 gitnexus refresh-context
 ```
 
-Verification:
+Additional verification:
 
 ```bash
 gitnexus status
-gitnexus doctor --host codex --repo .
-gitnexus doctor --host claude-code --repo .
 ```
 
 ## Language Support Availability
@@ -122,6 +135,12 @@ gitnexus_detect_changes({ scope: "staged", repo: "target-repo", cwd: "/path/to/w
 ```
 
 Codex is more likely to need the explicit worktree hint. For Claude Code, add `cwd` when `detect_changes` metadata shows the server cwd does not match the active worktree.
+
+## Related Entry Points
+
+- [`../README.md`](../README.md) - primary repository entrypoint
+- [`gitnexus-quick-start-guide.md`](gitnexus-quick-start-guide.md) - Chinese quick start guide
+- [`audits/README.md`](audits/README.md) - status-verification and audit index
 
 ## MCP Host Commands
 
