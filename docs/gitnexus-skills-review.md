@@ -4,7 +4,7 @@
 **审核范围**: `.claude/skills/gitnexus/` 下的 7 个技能文件
 **目的**: 识别技能文件与当前代码功能的差异，提出修改建议
 
-Status sync (2026-04-08): This report remains useful as a 2026-03-26 baseline,
+Status sync (2026-04-15): This report remains useful as a 2026-03-26 baseline,
 but its summary table is no longer a current-state status board. Since then,
 the repository has already closed the documented drift for `gitnexus-cli`,
 `gitnexus-guide`, `gitnexus-exploring`, `gitnexus-impact-analysis`,
@@ -25,9 +25,9 @@ are still confirmed by the current skill docs and the remediation roadmap.
 
 ## 审核摘要
 
-## Current Follow-Up Snapshot (2026-04-08)
+## Current Follow-Up Snapshot (2026-04-15)
 
-| 技能文件 | 2026-04-08 读法 |
+| 技能文件 | 2026-04-15 读法 |
 |----------|------------------|
 | `gitnexus-cli/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
 | `gitnexus-guide/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |

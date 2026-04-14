@@ -4,7 +4,7 @@
 **基于审核报告**: `docs/gitnexus-skills-review.md`  
 **目的**: 基于代码库最新变更，优化审核报告中的修改建议
 
-Status sync (2026-04-08): This report remains useful as a 2026-03-26
+Status sync (2026-04-15): This report remains useful as a 2026-03-26
 suggestion baseline, but several recommendation blocks below no longer
 represent current skill-doc follow-up. Since then, the repository has already
 closed the documented drift for `gitnexus-cli`, `gitnexus-guide`,
@@ -28,9 +28,9 @@ current skill docs and the remediation roadmap.
 
 本次修改建议基于对 `docs/gitnexus-skills-review.md` 审核报告的复核，结合项目 README.md 中记录的最新功能更新，对原审核报告中的建议进行补充和修正。
 
-## Current Follow-Up Snapshot (2026-04-08)
+## Current Follow-Up Snapshot (2026-04-15)
 
-| 技能文件 | 2026-04-08 读法 |
+| 技能文件 | 2026-04-15 读法 |
 |----------|------------------|
 | `gitnexus-cli/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
 | `gitnexus-guide/SKILL.md` | 已有后续收敛记录；不应再按本页原样视为待办 |
