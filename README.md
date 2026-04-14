@@ -34,7 +34,7 @@ https://github.com/user-attachments/assets/172685ba-8e54-4ea7-9ad1-e31a3398da72
 
 > *Like DeepWiki, but deeper.* DeepWiki helps you *understand* code. GitNexus lets you *analyze* it — because a knowledge graph tracks every relationship, not just descriptions.
 
-**TL;DR:** The **Web UI** is a quick way to chat with any repo. The **CLI + MCP** is how you make your AI agent actually reliable — it gives **Claude Code** and **Codex** a deep architectural view of your codebase, and it also works with optional MCP hosts such as Cursor, Windsurf, and OpenCode. That means agents stop missing dependencies, breaking call chains, and shipping blind edits. Even smaller models get full architectural clarity, making it compete with goliath models.
+**TL;DR:** The **Web UI** is a fast way to explore a repo. The **CLI + MCP** is the primary development path in this repository: it gives **Claude Code** and **Codex** a deep architectural view of your codebase so agents stop missing dependencies, breaking call chains, and shipping blind edits. Optional MCP hosts such as Cursor, Windsurf, and OpenCode also work, but they are secondary integrations rather than the main maintained CLI surface.
 
 ---
 
@@ -138,7 +138,7 @@ If you are upgrading from an older checkout, the most important practical differ
 
 ## CLI + MCP (recommended)
 
-The CLI indexes your repository and runs an MCP server that gives AI agents deep codebase awareness.
+The CLI is the primary maintained workflow in this repository. It indexes your repository, verifies host wiring for Claude Code and Codex, and runs an MCP server that gives AI agents deep codebase awareness.
 
 ### Quick Start
 
@@ -148,6 +148,13 @@ npx gitnexus analyze
 ```
 
 That remains the main indexing command. By default it updates the index, `.gitnexus/` metadata, repo-local `.git/info/exclude`, and the global repo registry, but it does **not** refresh repo-tracked context files or modify tracked `.gitignore`.
+
+After indexing, the standard host-readiness checks for the repository's primary maintained CLI surface are:
+
+```bash
+npx gitnexus doctor --host codex --repo .
+npx gitnexus doctor --host claude-code --repo .
+```
 
 Use `npx gitnexus analyze --with-context` if you also want to refresh:
 
@@ -159,11 +166,11 @@ Use `npx gitnexus analyze --with-gitignore` if you explicitly want `.gitignore` 
 
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
-Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. After global setup, `npx gitnexus doctor --host codex --repo .` or `npx gitnexus doctor --host claude-code --repo .` checks whether host config, registry entries, and repo indexing are all ready for the current repository. In multi-repo sessions, pass `repo` explicitly to `gitnexus_detect_changes`; in worktrees or when the MCP server cwd differs from the active worktree, also pass `cwd`.
+Use `npx gitnexus init-project` when you only want project-local scaffolding (`.gitignore`, `AGENTS.md`, `CLAUDE.md`, repo skills) without a full re-index. Use `npx gitnexus refresh-context` when the index is already present and you only want to regenerate context files from current metadata. In multi-repo sessions, pass `repo` explicitly to `gitnexus_detect_changes`; in worktrees or when the MCP server cwd differs from the active worktree, also pass `cwd`.
 
 ### AI-Readable Quick Start
 
-For AI CLIs or local agents on this machine, prefer the linked local command instead of `npx`:
+For AI CLIs or local agents on this machine, use the linked local-command variant of the same primary Claude Code + Codex workflow instead of `npx`:
 
 Canonical single-file reference:
 [`docs/ai-cli-local-quick-start.md`](docs/ai-cli-local-quick-start.md)
@@ -199,7 +206,7 @@ gitnexus analyze --with-context
 gitnexus doctor --host codex --repo .
 gitnexus doctor --host claude-code --repo .
 
-# 4. Context-only workflows
+# 4. Optional context-only workflows
 gitnexus init-project
 gitnexus refresh-context
 
@@ -218,7 +225,7 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 
 ### MCP Setup
 
-`gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
+`gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once. The MCP service itself is shared across the repository's primary maintained CLI hosts, while the host registration examples below are host-specific.
 
 ### Editor Support
 
