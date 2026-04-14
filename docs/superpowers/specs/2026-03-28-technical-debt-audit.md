@@ -15,6 +15,11 @@ phrasing here as still current.
 
 ---
 
+Historical baseline note: the preserved sections below remain a 2026-03-28
+worktree-era audit baseline. Read all status tables and progress notes here as
+historical context unless a later status-sync note or the remediation roadmap
+explicitly reaffirms them as still current.
+
 ## 1. Active Worktree Status
 
 This section is intentionally preserved as a 2026-03-28 worktree snapshot. It
@@ -56,6 +61,11 @@ Rationale:
 
 ## 2. Design Documents Status
 
+Historical baseline note: the `Document Status` and `Actual Repo Status`
+columns below preserve the 2026-03-28 audit-time comparison and should not be
+read as the current merged-state status board without checking the later
+truth-sync records first.
+
 | Document | Document Status | Actual Repo Status | Verified |
 |----------|-----------------|--------------------|----------|
 | `wiki-generator-page-generation-design` | ✅ Draft | ✅ Draft exists | ✅ Match |
@@ -85,6 +95,10 @@ Reader guidance (2026-04-08):
 - `kuzu-adapter.ts` and `analyze.ts` lines below should be read as historical
   local-main evidence from the audit date; defer to the current roadmap for the
   latest repository-wide convergence status
+
+Historical baseline note: the `Status` values in the roadmap table below remain
+the audit-time reading of a worktree-era slice. Where they conflict with later
+truth-sync slices or the current roadmap, the later records control.
 
 | Phase | Item | Status | Notes |
 |-------|------|--------|-------|
