@@ -67,7 +67,7 @@ npx gitnexus doctor --host claude-code --repo .
 ### 3. 配置 AI 编辑器
 
 当前仓库主维护的 CLI 支持面对外表述应优先理解为：`Claude Code + Codex`。
-其他 MCP host 可继续使用，但属于可选集成面，而不是当前主支持对。
+其他 MCP host 可继续使用，但属于可选集成面，而不是当前主支持面。
 
 两者都属于当前仓库的主支持 CLI 面；这里的差异仅在宿主 UX 与自动化行为，
 不代表支持层级差异。
