@@ -10,6 +10,12 @@ blockers on the already-landed slice.
 
 ---
 
+Historical review note: the `Overall Assessment`, concern lists, `Summary`,
+and historical approval recommendation below remain the 2026-04-05 pre-
+implementation review baseline. Read them as historical design-review context
+unless the later truth-synced design record, archived OpenSpec change, or
+current roadmap explicitly reaffirms them as still current.
+
 ## Overall Assessment
 
 The design is well-scoped, pragmatic, and correctly targets the real operational gaps. The "lightweight control plane" approach is the right call — it preserves the existing router/worker boundary without introducing a daemon dependency. The incremental rollout plan is sound.
@@ -185,6 +191,9 @@ The proposal uses `.gitnexus/runtime/mcp-processes/` under the repo's `.gitnexus
 ---
 
 ## Summary
+
+Historical review note: the recommendation below records the review-time gate
+for the proposed design, not a current gate on the landed implementation.
 
 | Category | Count |
 |----------|-------|
