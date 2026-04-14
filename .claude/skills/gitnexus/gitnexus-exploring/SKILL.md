@@ -47,6 +47,13 @@ description: "Use when the user asks how code works, wants to understand archite
 
 ## Tools
 
+Alias note:
+
+```
+- `search` is an alias for `query`
+- `explore` is an alias for `context`
+```
+
 **gitnexus_query** — find execution flows related to a concept:
 
 ```
