@@ -238,7 +238,7 @@ The verified upstream/source replay is no longer only local:
   - `6897673` `Handle stale Ralph cleanup when scoped state already terminated`
   - `7707816` `Harden stale Ralph cleanup for portable evidence paths`
   - `0022b24` `Clear stale root Ralph skill state during scoped cleanup`
-- post-close verified fork-only stop point on the PR branch:
+- post-close PR-branch state at the verified fork-only stop point:
   - `46622fa` `Preserve repo-local stale evidence across Windows paths`
   - review reply: <https://github.com/Yeachan-Heo/oh-my-codex/pull/1509#discussion_r3069689242>
   - focused verification at that stop point: `85/85` passing
@@ -249,7 +249,7 @@ required `dev` base after the owner closed the original `main`-targeted PR.
 A later review loop on `#1509` added two more targeted hardening commits, then
 flagged one more Windows-path-on-POSIX edge case, and finally ended with the
 owner closing the PR instead of taking the contract change in its current form.
-That review-point fix now exists only at the verified fork-only stop point and
+That review-point fix now survives only at the verified fork-only stop point and
 in the review reply, not in an active upstream PR.
 
 ## Earlier Live Re-Verification Before The Post-Closure Replay

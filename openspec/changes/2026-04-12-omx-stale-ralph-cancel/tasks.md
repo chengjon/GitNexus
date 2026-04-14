@@ -68,7 +68,8 @@
 - a later Codex review comment on `#1509` flagged one more Windows-path-on-
   POSIX edge case, and that follow-up now remains at the verified fork-only
   stop point `46622fa`
-- the post-close review reply at the verified fork-only stop point re-ran
+- the post-close review reply on the closed PR at that verified fork-only stop
+  point re-ran
   `npm run build` plus
   `node --test dist/cli/__tests__/session-scoped-runtime.test.js dist/scripts/__tests__/codex-native-hook.test.js`
   with `85/85` passing
