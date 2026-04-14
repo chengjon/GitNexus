@@ -6,6 +6,12 @@ Method: refreshed `git fetch upstream`, updated divergence count, targeted diff 
 Status: review-only follow-up to the earlier upstream doc/governance convergence baseline
 Status sync (2026-04-08): after refreshed fetch to `be24010`, the live shared replay baseline moved to `285 209`; no new safe shared-file replay slice was identified, and the current follow-up record is [2026-04-08-upstream-shared-doc-replay-status-sync.md](/opt/claude/GitNexus/docs/audits/2026-04-08-upstream-shared-doc-replay-status-sync.md).
 
+Historical baseline note: the `Refresh Summary`, `High-Level Decision`, and
+`Evidence Review` sections below remain the 2026-04-06 refreshed-fetch
+baseline. Treat the replay counts and “right now” wording there as historical
+review context unless the later 2026-04-08 follow-up record or the remediation
+roadmap explicitly supersedes them.
+
 ## Refresh Summary
 
 - `git fetch upstream` advanced `upstream/main` from `9eeb20b` to `cb772b9`
@@ -19,6 +25,10 @@ Status sync (2026-04-08): after refreshed fetch to `be24010`, the live shared re
 This review supersedes the earlier same-day "current replay baseline" wording in the baseline report. The live shared-doc replay baseline after the latest fetch is `280 208`.
 
 ## High-Level Decision
+
+Historical baseline note: this decision records the 2026-04-06 replay review
+cut line. The current live replay baseline and current reopen rule should defer
+to the later follow-up record linked above.
 
 No additional safe shared-file replay slice should be applied right now.
 
