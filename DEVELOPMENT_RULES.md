@@ -4,6 +4,9 @@ These rules apply to the entire repository: code, docs, scripts, tests, migratio
 
 These rules are hard constraints for design, implementation, review, and deletion decisions. Any change that violates them is a merge blocker unless the exception is explicitly documented in the same change and justified as temporary.
 
+When any repository entrypoint, local note, historical plan, or convenience
+workflow conflicts with these rules, this file takes precedence.
+
 ## 1. Single Source of Truth and No Duplicate Layers
 
 - Each production behavior MUST have one canonical implementation, one canonical entry point, and one canonical contract.

@@ -46,10 +46,11 @@ On long threads, restate the active scope before major edits so local governance
 
 ## Reference Documentation
 
-- `DEVELOPMENT_RULES.md` for repository-wide governance and merge blockers
-- `README.md` for product surface and supported host/setup guidance
-- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations
-- `docs/audits/` and `openspec/changes/` for active repo-hygiene and convergence records
+- `DEVELOPMENT_RULES.md` first for repository-wide governance and merge blockers
+- `README.md` next for the primary product surface and supported host/setup guidance
+- `docs/README.md` for documentation navigation across quick starts, audits, and historical records
+- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations after the main README framing
+- `docs/audits/README.md` and `openspec/changes/` for status verification, active repo-hygiene records, and convergence history
 - the `gitnexus:start` ... `gitnexus:end` block below for GitNexus-specific MCP, index, and impact-analysis rules
 
 ## Changelog
