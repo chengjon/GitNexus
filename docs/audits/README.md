@@ -1,8 +1,17 @@
 # Audits Index
 
-This directory stores repository audit records, convergence notes, and truth-sync writeups.
+This directory is the status-verification entrypoint for repository audit
+records, convergence notes, and truth-sync writeups. Use the repository README
+and quick-start docs first for the main product workflow, then use this index
+to confirm current state or read historical convergence records.
 
 Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
+
+Primary repository entrypoint:
+[../README.md](/opt/claude/GitNexus/README.md)
+
+Documentation navigation entrypoint:
+[../README.md](/opt/claude/GitNexus/docs/README.md)
 
 ## Start Here
 
@@ -29,13 +38,12 @@ Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.
 
 ## Notes
 
-- Read the 2026-04-12 OMX stale Ralph audits first if you need the shortest
-  operator fix for a lingering `phase: starting` warning.
-- Those 2026-04-12 stale Ralph audits now also cover the terminal
-  session-scoped plus legacy root-state fallback edge case and point to the two
-  clean upstream replay commits, the owner-closed PRs `#1505` and
-  `Yeachan-Heo/oh-my-codex#1509`, and the verified fork-only stop point
-  `46622fa`.
-- Read the 2026-04-09 summary first if you need current state.
-- Read the slice classification audit if you need per-commit evidence.
+- Read the 2026-04-12 OMX stale Ralph implementation audit first if you need
+  the shortest operator fix for a lingering `phase: starting` warning.
+- Read the 2026-04-12 stale Ralph upstream replay note when you need the
+  owner-closed PR timeline for `#1505` / `#1509` and the verified fork-only
+  stop point `46622fa`.
+- Read the 2026-04-09 docs governance cleanup summary first when you need
+  current documentation and governance cleanup state.
+- Read the slice classification audit when you need per-commit evidence.
 - Keep original commit classification separate from current worktree cleanup status.
