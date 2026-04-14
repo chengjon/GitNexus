@@ -7,9 +7,9 @@
 Status sync (2026-04-08): This report remains useful as a 2026-03-26 baseline,
 but its summary table is no longer a current-state status board. Since then,
 the repository has already closed the documented drift for `gitnexus-cli`,
-`gitnexus-guide`, `gitnexus-impact-analysis`, `gitnexus-refactoring`, and
-`gitnexus-pr-review`, while `gitnexus-debugging` has absorbed the suggested
-regression-debugging note.
+`gitnexus-guide`, `gitnexus-exploring`, `gitnexus-impact-analysis`,
+`gitnexus-refactoring`, and `gitnexus-pr-review`, while `gitnexus-debugging`
+has absorbed the suggested regression-debugging note.
 Treat the remaining open items here as historical review context unless they
 are still confirmed by the current skill docs and the remediation roadmap.
 
@@ -31,7 +31,7 @@ are still confirmed by the current skill docs and the remediation roadmap.
 |----------|------------------|
 | `gitnexus-cli/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
 | `gitnexus-guide/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
-| `gitnexus-exploring/SKILL.md` | 原始“低优先级小改进建议”仍可视为可选 follow-up |
+| `gitnexus-exploring/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
 | `gitnexus-impact-analysis/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
 | `gitnexus-debugging/SKILL.md` | 建议中的 regression note 已被当前 skill 吸收 |
 | `gitnexus-refactoring/SKILL.md` | 已有后续收敛记录；不应再按本表原样视为待办 |
