@@ -35,6 +35,8 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 - [ ] gitnexus_detect_changes() — verify only expected files changed
 - [ ] If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`
 - [ ] In worktrees, also pass `cwd` explicitly if the MCP server may be running elsewhere
+- [ ] Check `git_diff_path`, `process_cwd`, `path_resolution`, and `fallback_reason`
+- [ ] Treat `path_resolution = registry_repo` as a fallback that needs explanation
 - [ ] Run tests for affected processes
 ```
 
@@ -87,6 +89,11 @@ gitnexus_detect_changes({scope: "all", repo: "RepoName"})
 → Changed: 8 files, 12 symbols
 → Affected processes: LoginFlow, TokenRefresh
 → Risk: MEDIUM
+→ git_repo_path: /path/to/repo
+→ git_diff_path: /path/to/repo/.worktrees/refactor-branch
+→ process_cwd: /path/to/repo/.worktrees/refactor-branch
+→ path_resolution: cwd_worktree | registry_repo
+→ fallback_reason: null | different_repo | not_git_repo | repo_identity_unresolved
 ```
 
 Multi-repo / worktree example:
@@ -99,6 +106,19 @@ gitnexus_detect_changes({
   repo: "RepoName",
   cwd: "/path/to/repo/.worktrees/refactor-branch"
 })
+```
+
+Use `repo` when the MCP server exposes more than one indexed repo. Use `cwd`
+when the MCP server `process.cwd()` may not match the active worktree.
+
+Path verification note:
+
+```
+- `git_diff_path` tells you which path actually ran `git diff`
+- `process_cwd` tells you which cwd participated in repo/worktree identity resolution
+- `path_resolution = cwd_worktree` means the tool followed the effective worktree path
+- `path_resolution = registry_repo` means it fell back to the indexed repo path
+- `fallback_reason` explains why fallback happened; `null` means no fallback
 ```
 
 **gitnexus_cypher** — custom reference queries:
