@@ -96,7 +96,39 @@ workflow conflicts with these rules, this file takes precedence.
 - One-off migration helpers or debug tools MUST live in intentional locations, be named for their exact purpose, and be deleted after use unless they are promoted to supported tooling with ownership and documentation. Generic names such as `debug.mjs`, `migration.sh`, or `cutover.py` are not specific enough in managed script paths.
 - In this repository, developer-facing markdown entrypoints in the repository root or first-level `docs/`, `eval/`, and `gitnexus/` directories MUST reference `DEVELOPMENT_RULES.md` so contributors can reach the governing policy from the entrypoint they actually started with.
 
-## 7. Review Checklist
+## 7. Line Scope, Workline Separation, and Cross-Domain Control
+
+- Every non-trivial change line MUST declare a one-line scope contract in its working notes, user update, or PR governance context. That scope statement MUST identify the target feature or target slice and MUST explicitly exclude unrelated governance churn, unrelated docs edits, unrelated refactors, naming cleanup, and formatting-only edits.
+- Feature work, governance work, and refactor work MUST be treated as separate lanes. They MUST NOT be mixed in one commit unless the secondary change is strictly required for the primary lane to function.
+- "While here" edits are prohibited. Authors MUST NOT expand a line just because another small cleanup is nearby.
+- A minimal slice is the default expectation. If a staged diff spills into low-relevance files, adjacent domains, or unrelated module trees, the slice MUST be reduced before merge.
+- In this repository, staged `gitnexus_detect_changes({scope: "staged", repo: "GitNexus", cwd: "/opt/claude/GitNexus"})` is the required scope gate before commit whenever the change is larger than a trivial local doc correction.
+- Directory and module boundaries MUST be treated as ownership boundaries during review, even if the same author technically has write access everywhere.
+- If a line needs a small cross-domain compatibility adjustment, that cross-domain scope MUST be called out explicitly in the same change. If the change materially invades another responsibility domain, it MUST be split into a separately tracked line instead of being absorbed informally.
+
+## 8. Functional Completion and Regression Closure
+
+- A feature is not complete when the code merely lands or compiles. Delivery is complete only when execution-path verification, regression protection, and fact registration are also complete.
+- For feature work, authors MUST close the loop with all of the following unless the change is explicitly documentation-only:
+  - direct verification through the actual CLI, runtime, API, or user-facing path touched by the change
+  - guard coverage added or updated through unit tests, feature tests, or a focused verification script appropriate to the risk
+  - repository-level anti-regression coverage when the changed path is shared, high-churn, or release-critical
+  - current-source-of-truth documentation updated when the behavior, boundary, enablement condition, or known limitation changes
+- A feature change without guard coverage plus execution-path verification MUST be treated as partial, not finished.
+- Completed iterations SHOULD leave behind reusable regression assets rather than only implementation edits.
+
+## 9. Current Fact Sources and Session Alignment
+
+- `OpenSpec` is the primary source of truth for accepted change intent, capability boundaries, and architecture-level behavior contracts.
+- Current repository entrypoint documents such as `README.md`, `docs/README.md`, and other actively maintained operator-facing docs MAY define the present operating state when they are updated in the same change and do not conflict with `OpenSpec`.
+- Historical audits, design notes, and superseded plans are archival records only. They MUST NOT be treated as current execution authority unless a current source explicitly points to them for a still-valid constraint.
+- Authors MUST NOT introduce hidden compatibility promises, hidden workflow rules, or undocumented temporary constraints inside one session or one PR. If a limitation or temporary compromise matters to future work, it MUST be recorded in `OpenSpec` or another current source-of-truth document in the same line.
+- When resuming a line or handing work across sessions, the active baseline review MUST include:
+  - the current source of truth for the touched area
+  - the explicit line scope for the current slice
+  - the documented known limitations or temporary constraints that still apply
+
+## 10. Review Checklist
 
 Before merging any change that adds, migrates, deprecates, or deletes behavior, verify all of the following:
 
@@ -105,9 +137,12 @@ Before merging any change that adds, migrates, deprecates, or deletes behavior, 
 - every temporary layer has a documented exit condition
 - every deletion passed reachability and feature-tree review
 - every metric statement is labeled as measured, inferred, or historical baseline
+- the line stayed inside its declared scope and lane
+- feature work includes execution-path verification and regression closure
+- current facts and limitations are recorded in a current source of truth rather than left implicit in session context
 - no stray temporary entry points or backup files remain in the changed scope
 
-## 8. Automation Hooks
+## 11. Automation Hooks
 
 - CI quality checks enforce temporary and backup-style filename hygiene for managed repository paths.
 - CI quality checks also enforce that developer-facing markdown entrypoints in the repository root or first-level `docs/`, `eval/`, and `gitnexus/` directories reference `DEVELOPMENT_RULES.md`, except for explicit exemptions such as `CHANGELOG.md` and the rules file itself.
