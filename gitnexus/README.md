@@ -23,6 +23,11 @@ If you are modifying this repository itself, top-level development governance li
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+If the repository change becomes a PR, also follow
+[`../.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
 ## Supported Package Surface
 
 For the published `gitnexus` package, the supported surface is the documented CLI and MCP behavior in this README.
