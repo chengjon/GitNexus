@@ -270,6 +270,11 @@ Kotlin / Swift 等语言支持仍然带有明显环境依赖：
   - 一轮按 `messages` / `runnables` / `utils` 等高体量子树拆分
   - 一轮仅拆 `langsmith` 与 prompt-related 子树
   - 两轮都引入了新的循环 chunk 警告，因此最终回退到稳定的 `worker-langchain-core` 边界
+- `docs/audits/2026-04-06-gitnexus-web-build-boundary-fix.md` 的旧修复正文边界说明也已继续收敛：
+  - 现在在顶部与 `Residual Notes` 入口前显式注明这些段落属于
+    2026-04-06 fixed-and-verified build-boundary baseline
+  - 避免读者继续把旧 `Problem` / `Residual Notes` 语气直接读成当前 live build blocker
+  - 该结论已登记为：`openspec/changes/2026-04-15-gitnexus-web-build-boundary-body-sync/`
   - 这意味着 LangChain warning 仍是 follow-up，但当前已明确“继续按现有子树边界强拆”不是可接受方向
 - 2026-04-07 还重新验证了 Mermaid `core` 入口路线：
   - 将 alias 切到 `mermaid.core.mjs`

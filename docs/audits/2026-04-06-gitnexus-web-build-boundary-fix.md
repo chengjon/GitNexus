@@ -5,6 +5,12 @@ Scope: `/opt/claude/GitNexus/gitnexus-web`
 Method: failing build reproduction, local dependency restoration, TypeScript verification, targeted root-cause debugging, and mitigation validation  
 Status: fixed and verified in the current repo
 
+Historical fix note: the `Problem`, `Root Cause`, `Fix`, `Verification`, and
+`Residual Notes` sections below remain the 2026-04-06 fixed-and-verified
+build-boundary baseline. Read them as historical build-fix context unless the
+current roadmap or a later frontend follow-up explicitly reaffirms them as
+still current.
+
 ## Problem
 
 `gitnexus-web` type-level verification was pending because full production build
@@ -67,6 +73,10 @@ Observed build result:
   `web-tree-sitter` browser externalization
 
 ## Residual Notes
+
+Reader note: the residual wording below preserves the 2026-04-06
+post-fix follow-up posture. It should not be read as a current blocking build
+failure or as proof that the original boundary issue remains unresolved.
 
 - `dev` and `preview` scripts still use the normal Vite CLI entrypoint. This
   slice only fixes the production build path that was blocking validation.
