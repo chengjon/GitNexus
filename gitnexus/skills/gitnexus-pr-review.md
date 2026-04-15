@@ -33,6 +33,7 @@ description: "Use when the user wants to review a pull request, understand what 
 
 ```
 - [ ] Fetch PR diff (gh pr diff or git diff base...head)
+- [ ] Read the PR governance fields first: Line Scope, Workline Lane, Scope Deviations, Current Source of Truth
 - [ ] gitnexus_detect_changes to map changes to affected execution flows
 - [ ] In multi-repo MCP sessions, pass `repo` explicitly
 - [ ] In worktrees, also pass `cwd` if the MCP server may not be in the PR worktree, then check `path_resolution`
@@ -40,9 +41,22 @@ description: "Use when the user wants to review a pull request, understand what 
 - [ ] Review d=1 items (WILL BREAK) — are callers updated?
 - [ ] gitnexus_context on key changed symbols to understand full picture
 - [ ] Check if affected processes have test coverage
+- [ ] Cross-check Validation notes: Execution Path Verification, Regression Coverage, Current Docs / Facts Updated
 - [ ] Assess overall risk level
 - [ ] Write review summary with findings
 ```
+
+## PR Governance Read
+
+Review these fields before reading the diff in detail:
+
+- `Line Scope` tells you the intended slice boundary. Flag unrelated governance churn, side quests, or opportunistic refactors that leak past it.
+- `Workline Lane` should be exactly one of `feature`, `governance`, or `refactor`. Mixed intent in one PR is a risk signal unless the secondary change is strictly required.
+- `Scope Deviations` should disclose any unavoidable cross-domain compatibility change instead of hiding it in the patch.
+- `Current Source of Truth` should start with `OpenSpec` when the PR changes capability or architecture behavior, then name any current repo entrypoint docs updated in the same line.
+- `Execution Path Verification` should prove the changed runtime, CLI, API, or user-facing path was actually exercised.
+- `Regression Coverage` should show which unit tests, feature tests, or focused scripts were added or rerun to guard the change.
+- `Current Docs / Facts Updated` should tell you whether current source-of-truth docs changed with the behavior, boundary, enablement condition, or known limitation.
 
 ## Review Dimensions
 
