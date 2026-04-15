@@ -86,9 +86,14 @@ describe('repository governance integration', () => {
     );
 
     expect(readme).toContain('../DEVELOPMENT_RULES.md');
+    expect(readme).toContain('../.github/PULL_REQUEST_TEMPLATE.md');
     expect(readme).toContain('Development Governance');
     expect(readme).toContain('migrations');
     expect(readme).toContain('compatibility layers');
+    expect(readme).toContain('Line Scope');
+    expect(readme).toContain('Workline Lane');
+    expect(readme).toContain('Current Source of Truth');
+    expect(readme).toContain('Validation');
   });
 
   it('links the eval README to the root development rules document', async () => {
