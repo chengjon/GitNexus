@@ -19,6 +19,12 @@ Source: `2026-03-27-wiki-generator-support-run-pipeline-design.md`
 
 ---
 
+Historical review note: the `整体评价`, issue list, suggestions, and `总结`
+sections below remain the 2026-03-27 design-review baseline. Read them as
+historical review context unless the later truth-synced design record, current
+source/test anchors, or the remediation roadmap explicitly reaffirms them as
+still current.
+
 ## 整体评价
 
 这份文档整体质量很高，结构清晰，推理充分。选择 **Option B**（提取 support helpers + `run()` shell together）是正确的权衡。以下问题与建议保留为历史 review 语境下的设计反馈。
@@ -152,6 +158,10 @@ gitnexus/src/core/wiki/
 ---
 
 ## 总结
+
+Historical review note: the recommendation framing below records review-time
+design feedback, not a current implementation gate on the already-landed
+support/run-pipeline slice.
 
 这份设计文档的方向是正确的。核心价值在于：
 
