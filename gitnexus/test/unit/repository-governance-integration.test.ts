@@ -63,6 +63,10 @@ describe('repository governance integration', () => {
 
     expect(agents).toContain('DEVELOPMENT_RULES.md');
     expect(agents).toContain('mandatory and takes precedence');
+    expect(agents).toContain('Line Scope');
+    expect(agents).toContain('Workline Separation and Scope Lock');
+    expect(agents).toContain('Functional Completion Standard');
+    expect(agents).toContain('Source of Truth and Session Alignment');
     expect(claude).toContain('DEVELOPMENT_RULES.md');
     expect(claude).toContain('mandatory and takes precedence');
     expect(claude).toContain('.github/PULL_REQUEST_TEMPLATE.md');
