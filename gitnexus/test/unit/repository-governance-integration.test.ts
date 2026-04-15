@@ -75,8 +75,12 @@ describe('repository governance integration', () => {
 
     expect(agents).toContain('../DEVELOPMENT_RULES.md');
     expect(agents).toContain('MUST follow');
+    expect(agents).toContain('../.github/PULL_REQUEST_TEMPLATE.md');
+    expect(agents).toContain('Line Scope');
     expect(claude).toContain('../DEVELOPMENT_RULES.md');
     expect(claude).toContain('MUST follow');
+    expect(claude).toContain('../.github/PULL_REQUEST_TEMPLATE.md');
+    expect(claude).toContain('Validation');
   });
 
   it('links the inner gitnexus README to the root development rules document', async () => {
