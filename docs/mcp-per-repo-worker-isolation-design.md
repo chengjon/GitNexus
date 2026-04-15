@@ -6,6 +6,11 @@ If you are implementing this design in the current GitNexus repository, top-leve
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+If the implementation work becomes a PR on this repository, also follow
+[`../.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
 ## Status
 
 Implemented current MCP router/worker architecture; retained as a historical

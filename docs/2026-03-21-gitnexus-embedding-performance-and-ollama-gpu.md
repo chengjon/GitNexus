@@ -9,6 +9,11 @@ If you are using this note to change the current GitNexus repository, top-level 
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+If the related repository change becomes a PR, also follow
+[`../.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
 ## Scope
 
 This note captures the highest-value ways to reduce `gitnexus analyze --embeddings`
