@@ -5,6 +5,12 @@ Scope: `/opt/claude/GitNexus`
 Method: local `package.json` / `package-lock.json` review plus npm registry metadata checks (`npm view` with writable cache under `/tmp/.npm`)  
 Status: review-only decision baseline; no package versions were changed in this slice
 
+Historical review note: the `Current Repository State`, dependency-graph
+findings, `Provisional Recommendation`, and operator guidance below remain the
+2026-04-06 review-only decision baseline. Read them as historical dependency
+review context unless the later exit-strategy slice, current roadmap, or a
+future package-changing record explicitly reaffirms them as still current.
+
 ## Review Goal
 
 Turn the previously recorded `kuzu` / `kuzu-wasm` dependency debt into a bounded decision surface for the next operator.
@@ -105,6 +111,10 @@ Each track must end in exactly one of these outcomes:
 
 ## Provisional Recommendation
 
+Historical review note: the recommendation below records the review-time
+decision posture for this dependency-governance baseline, not a standalone live
+package-policy source after the later exit-strategy follow-up.
+
 Based on the currently available evidence, the recommended near-term decision is:
 
 - CLI `kuzu`: rationale-backed pin, not blind upgrade
@@ -144,6 +154,11 @@ Current repository mitigation status:
 - If neither yields a clean supported path, what explicit pin-and-monitor rationale is acceptable for the web app?
 
 ## Immediate Operating Rule
+
+Reader note: the operating rule and next-step wording below preserve the
+2026-04-06 review-only baseline. For current tracked-exception reading or any
+future package-change trigger, defer to the later exit-strategy record before
+treating this older wording as the live dependency policy.
 
 Until this review becomes a package-change slice:
 
