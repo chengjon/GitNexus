@@ -44,6 +44,13 @@ Repository-wide development rules live in [`DEVELOPMENT_RULES.md`](DEVELOPMENT_R
 
 If your change touches migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, or backup files, treat that document as mandatory review policy rather than optional guidance.
 
+PRs should also follow the lightweight governance structure in [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md):
+
+- keep one explicit `Line Scope`
+- use one `Workline Lane` (`feature`, `governance`, or `refactor`)
+- name the `Current Source of Truth`
+- record `Execution Path Verification`, `Regression Coverage`, and `Current Docs / Facts Updated` in `Validation`
+
 Repository audit entrypoint:
 [`docs/audits/README.md`](docs/audits/README.md)
 
