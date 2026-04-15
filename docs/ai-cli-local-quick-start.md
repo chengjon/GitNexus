@@ -13,6 +13,14 @@ If you are modifying this repository while following this quick start, top-level
 
 Treat that document as mandatory for migrations, compatibility layers, duplicate implementations, deletions, metric claims, temporary entry points, and backup files.
 
+When the change becomes a PR, also use the lightweight fields in
+[`../.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md):
+
+- one explicit `Line Scope`
+- one `Workline Lane`
+- one `Current Source of Truth`
+- `Execution Path Verification`, `Regression Coverage`, and `Current Docs / Facts Updated`
+
 Audit entrypoint:
 [`audits/README.md`](audits/README.md)
 
