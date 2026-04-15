@@ -4,6 +4,12 @@
 **Status:** Implemented locally in installed `oh-my-codex` package
 **Scope:** `omx cancel ralph --stale`
 
+Historical implementation note: the `Outcome`, verification sections,
+publication timeline, residual-risk summary, and `Recommended Next Step` below
+remain the 2026-04-12 local/operator implementation baseline. Read them as
+historical implementation and replay context unless a later OMX follow-up note
+explicitly reaffirms them as still current.
+
 ## Outcome
 
 The shortest safe cleanup command for the recurring warning
@@ -219,6 +225,11 @@ appeared after the original implementation audit.
 
 ## Publication Status
 
+Historical implementation note: the replay and PR timeline below records the
+2026-04-12 publication state of the verified local fix. Do not treat it as an
+active upstream handoff unless a later follow-up record says that handoff has
+restarted.
+
 The verified upstream/source replay is no longer only local:
 
 - clean branch: `stale-ralph-clean-pr-v2`
@@ -323,6 +334,11 @@ new stale root Ralph state even after the upstream PR was closed.
   failures that mask a totally clean green run.
 
 ## Recommended Next Step
+
+Reader note: the operator and upstream-monitoring wording below preserves the
+2026-04-12 post-closure follow-up posture. It is historical guidance, not a
+standing GitNexus task queue or an instruction to reopen OMX work in this repo
+by default.
 
 Keep `omx cancel ralph --stale` as the local operator fix, preserve the
 verified fork-only stop point (`46622fa`, `85/85`), and monitor for the

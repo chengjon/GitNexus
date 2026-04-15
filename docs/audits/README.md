@@ -16,7 +16,7 @@ Documentation navigation entrypoint:
 ## Start Here
 
 - [2026-04-12-omx-stale-ralph-cancel-implementation.md](/opt/claude/GitNexus/docs/audits/2026-04-12-omx-stale-ralph-cancel-implementation.md)
-  Local implementation and verification record for `omx cancel ralph --stale`,
+  Historical local implementation and verification record for `omx cancel ralph --stale`,
   including the later root-fallback edge case where terminal scoped Ralph state
   can hide a stale legacy root entry.
 - [2026-04-12-omx-stale-ralph-upstream-replay-note.md](/opt/claude/GitNexus/docs/audits/2026-04-12-omx-stale-ralph-upstream-replay-note.md)
@@ -39,7 +39,8 @@ Documentation navigation entrypoint:
 ## Notes
 
 - Read the 2026-04-12 OMX stale Ralph implementation audit first if you need
-  the shortest operator fix for a lingering `phase: starting` warning.
+  the historical implementation record and shortest operator fix for a
+  lingering `phase: starting` warning.
 - Read the 2026-04-12 stale Ralph upstream replay note when you need the
   owner-closed PR timeline for `#1505` / `#1509` and the verified fork-only
   stop point `46622fa`.
