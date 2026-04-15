@@ -7,6 +7,9 @@ to confirm current state or read historical convergence records.
 
 Governance rules: [DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
 
+PR governance template:
+[../.github/PULL_REQUEST_TEMPLATE.md](/opt/claude/GitNexus/.github/PULL_REQUEST_TEMPLATE.md)
+
 Primary repository entrypoint:
 [../README.md](/opt/claude/GitNexus/README.md)
 
@@ -47,4 +50,5 @@ Documentation navigation entrypoint:
 - Read the 2026-04-09 docs governance cleanup summary first when you need
   current documentation and governance cleanup state.
 - Read the slice classification audit when you need per-commit evidence.
+- If an audit or cleanup line turns into a PR on this repository, keep the PR body aligned with the lightweight governance fields: `Line Scope`, one `Workline Lane`, `Current Source of Truth`, and the `Validation` closure notes.
 - Keep original commit classification separate from current worktree cleanup status.

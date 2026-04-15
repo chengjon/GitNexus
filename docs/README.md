@@ -7,6 +7,9 @@ historical records.
 
 Governance rules: [../DEVELOPMENT_RULES.md](/opt/claude/GitNexus/DEVELOPMENT_RULES.md)
 
+PR governance template:
+[../.github/PULL_REQUEST_TEMPLATE.md](/opt/claude/GitNexus/.github/PULL_REQUEST_TEMPLATE.md)
+
 Primary repository entrypoint:
 [../README.md](/opt/claude/GitNexus/README.md)
 
@@ -27,4 +30,5 @@ Primary repository entrypoint:
 - Use this docs index when you need navigation across quick starts, audits, and historical records.
 - Use the audits index when you need current governance or audit state before touching historical docs.
 - Use the AI CLI quick start or Chinese quick start guide when you need local CLI and MCP expectations.
+- If you are changing this repository and opening a PR, fill the lightweight PR governance fields: `Line Scope`, one `Workline Lane`, `Current Source of Truth`, and the `Validation` closure notes.
 - Keep original historical commit classification separate from current workspace cleanup status.
