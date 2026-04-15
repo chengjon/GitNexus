@@ -2,6 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> Status note: historical implementation plan only. The later
+> `2026-04-06-kuzu-dependency-review` audit/OpenSpec slice is the authoritative
+> completion record for what was actually captured, validated, and kept as the
+> review-only dependency baseline. Treat the checked steps below as historical
+> planning context, not as the current operator task queue.
+
+Historical implementation-plan note: the `Goal`, `Architecture`, and checked
+task breakdown below remain the 2026-04-06 planning-time baseline. Read them
+as historical planning context unless the later dependency-review records
+explicitly reassert them as still current.
+
 **Goal:** Turn the audited `kuzu` / `kuzu-wasm` dependency debt into a bounded upgrade-or-replacement review plan with explicit decision criteria for CLI and web separately.
 
 **Architecture:** Keep this slice review-only. Do not change dependency versions yet. Record the current deprecated direct and transitive dependency line, define separate evaluation tracks for CLI `kuzu` and web `kuzu-wasm`, and establish the decision rule for upgrade, replacement, or rationale-backed pinning.
@@ -9,6 +20,11 @@
 **Tech Stack:** Markdown, OpenSpec, npm dependency metadata
 
 ---
+
+Reader note: the checked tasks below preserve the 2026-04-06 planning-time
+execution breakdown. They are historical plan artifacts, not a current live
+task board, because the later dependency-review audit/OpenSpec records now
+define the retained review-only baseline.
 
 ### Task 1: Record The Review Slice
 
