@@ -1,4 +1,4 @@
-<!-- version: 1.1.0 -->
+<!-- version: 1.2.0 -->
 <!-- local structured header adapted from upstream template -->
 
 Last reviewed: 2026-04-15
@@ -38,6 +38,11 @@ Before substantial multi-step work:
 
 On long threads, restate the active scope before major edits so local governance and current-task rules do not get diluted.
 
+Every non-trivial workline MUST also state a one-line `Line Scope` contract before implementation:
+
+- `Line Scope: this line only delivers <target feature or target slice>; do not add unrelated governance, docs churn, refactors, naming cleanup, formatting-only edits, or side quests.`
+- Treat that line-scope statement as a hard boundary, not a soft preference. If new work falls outside it, split it into a later line instead of extending the current one.
+
 ## Delivery Priority and Docs Governance
 
 - Day-to-day delivery priority is locked as: functional testing and iteration-to-release work first, historical document convergence second.
@@ -54,6 +59,56 @@ On long threads, restate the active scope before major edits so local governance
   - obsolete plans that are already abandoned and no longer consulted
 - Prioritize docs governance only for high-traffic or still-referenced historical documents that are easy to misread as active requirements, active gates, or current execution queues.
 - If feature delivery, testing closure, or release verification is still incomplete, prefer continuing that mainline work before opening another docs-only slice.
+
+## Workline Separation and Scope Lock
+
+- Separate work into exactly one of these lanes per line and per commit:
+  - feature lane: capability addition, bug fix, or product iteration
+  - governance lane: docs, historical-boundary sync, audits, and technical-debt records
+  - refactor lane: structural cleanup without mixing in product behavior changes
+- Do not mix feature, governance, and refactor intent in a single commit unless the extra change is strictly required to make the primary lane work.
+- Keep each slice minimal and single-directional:
+  - do not cross modules unless the target behavior genuinely spans them
+  - do not cross responsibility domains for convenience
+  - do not "fix nearby issues" or "clean up while here"
+  - do not bundle naming or formatting convergence unless it is required for the target change
+- Before committing, use staged `gitnexus_detect_changes({scope: "staged", repo: "GitNexus", cwd: "/opt/claude/GitNexus"})` as the scope gate. If it surfaces low-relevance files or cross-domain spillover, trim the slice before continuing.
+
+## Functional Completion Standard
+
+- Feature work is not complete when code compiles or the local edit looks finished. A feature line is complete only after all required closure steps are done.
+- Every feature delivery MUST close the loop with all of the following:
+  - capability self-check through the actual CLI, runtime, or user-facing execution path touched by the change
+  - guard coverage added or updated through unit tests, feature tests, or focused verification scripts appropriate to the changed behavior
+  - repository-level anti-regression coverage when the change affects a shared or release-critical path
+  - fact registration in the canonical docs when the change alters behavior, boundaries, enablement conditions, or known limits
+- No guard test plus no execution-path verification means the work is still a draft, not a finished delivery.
+- Each completed iteration should leave behind regression assets, not only changed implementation files.
+
+## Source of Truth and Session Alignment
+
+- `OpenSpec` is the first source of truth for architecture, capability contracts, and accepted change intent.
+- Current repository entrypoint docs such as `README.md`, `docs/README.md`, and other actively maintained operator-facing docs describe the present local operating state when they are kept current in the same change.
+- Historical audits, design notes, and legacy plans are records, not execution authority, unless a current source explicitly points back to them.
+- Do not invent hidden rules, hidden compatibility promises, or private simplifications inside one session. If a limitation, temporary compromise, or cross-module rule matters, record it in `OpenSpec` or another current repository source-of-truth document added or updated in the same line.
+- When switching to a new workline or resuming with fresh context, re-read:
+  - the current baseline source of truth for that area
+  - the active line scope
+  - the known local limitations or temporary constraints documented for that area
+
+## Ownership and Cross-Domain Changes
+
+- Treat directory and module boundaries as ownership boundaries even when the code is technically editable from one session.
+- Before modifying files outside the obvious target area, confirm whether the change is:
+  - a small compatibility adjustment required by the primary line
+  - or a separate responsibility-domain change that should be queued independently
+- Cross-domain edits that are unavoidable for the target line MUST be called out explicitly in the user update and commit scope.
+- If a change would materially invade another active line, split it into a follow-up instead of quietly absorbing it into the current patch.
+- When parallel lines are active, prefer branch isolation that matches the lane:
+  - `feat/*` for feature lines
+  - `chore/docs/*` for governance lines
+  - dedicated refactor branches for structural cleanup
+- `main` should remain the integration branch for verified, converged work rather than a place to interleave unrelated active lines.
 
 ## Context Budget
 
@@ -74,6 +129,7 @@ On long threads, restate the active scope before major edits so local governance
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-04-15 | 1.2.0 | Added line-scope contracts, workline separation, functional completion closure rules, source-of-truth alignment, and cross-domain ownership boundaries for day-to-day development. |
 | 2026-04-15 | 1.1.0 | Added delivery-priority rules that keep feature/test/release work ahead of historical-doc convergence, while retaining the existing low-intensity docs governance workflow. |
 | 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
 
