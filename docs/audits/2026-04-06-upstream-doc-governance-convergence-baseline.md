@@ -11,6 +11,13 @@ Status note:
 - the latest shared replay decision now lives in [2026-04-06-upstream-shared-doc-replay-review.md](/opt/claude/GitNexus/docs/audits/2026-04-06-upstream-shared-doc-replay-review.md)
 - after another `git fetch upstream` on `2026-04-08`, `upstream/main` advanced to `be24010` and the live shared replay baseline moved to `285 209`; see [2026-04-08-upstream-shared-doc-replay-status-sync.md](/opt/claude/GitNexus/docs/audits/2026-04-08-upstream-shared-doc-replay-status-sync.md)
 
+Historical baseline note: the `Refresh Summary`, hotspot inventories,
+convergence rules, and replay-order guidance below remain the first
+2026-04-06 refreshed-fetch baseline capture. Read them as historical
+same-day convergence context unless the later shared replay review,
+2026-04-08 status-sync record, or current remediation roadmap explicitly
+reaffirms them as still current.
+
 ## Refresh Summary
 
 - `git fetch upstream` advanced `upstream/main` from `ffabe85` to `9eeb20b`
@@ -151,6 +158,11 @@ These upstream changes touch shared top-level governance surfaces and need manua
 - Reconcile shared top-level docs manually and in small slices.
 
 ## Recommended Replay Order
+
+Reader note: the sequencing below preserves the first refreshed-fetch replay
+ordering from 2026-04-06. For current live replay prioritization or cut lines,
+defer to the later shared replay review and follow-up status-sync records linked
+above before treating this older order as the current operator checklist.
 
 1. Start from a clean review branch based on local `main` after the current repo-hygiene wave is committed.
 2. Re-run `git fetch upstream` and confirm the divergence baseline again before touching docs.
