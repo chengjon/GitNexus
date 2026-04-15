@@ -5,6 +5,12 @@ Scope: `/opt/claude/GitNexus`
 Method: prior audit and exact-pinning review synthesis, current npm registry metadata checks, GitHub repository metadata checks, GitNexus process/context review, and targeted local import scans  
 Status: decision follow-up to the review-only and exact-pinning slices; this document does not change dependency versions
 
+Historical decision note: the verified inputs, candidate matrix, `Exit Criteria`,
+and `Current Decision` below remain the 2026-04-06 dependency-governance
+follow-up baseline. Read them as historical exit-strategy context unless the
+current roadmap or a later package-changing record explicitly reaffirms them as
+still current.
+
 ## Goal
 
 Turn the current `kuzu` / `kuzu-wasm` state from "audited and pinned" into an explicit exit strategy with:
@@ -98,6 +104,11 @@ Assessment:
 
 ## Exit Criteria
 
+Historical decision note: the criteria below record the 2026-04-06
+dependency-governance exit conditions for this tracked-exception baseline. They
+should not be treated as an automatically current migration checklist unless a
+later dependency record or roadmap note reaffirms them.
+
 ### CLI native track exit criteria
 
 The repository should only replace or unpin the CLI `kuzu` line if all of the following are true:
@@ -126,6 +137,11 @@ The repository should only replace or unpin the web `kuzu-wasm` line if all of t
 4. Once local `gitnexus-web` dependencies are available again, build and type-level validation passes before any migration is accepted.
 
 ## Current Decision
+
+Reader note: the decision and reopen-trigger wording below preserve the
+2026-04-06 exit-strategy baseline. For current live package policy, defer to
+the current remediation roadmap and any later dependency-changing slice before
+treating this older wording as the sole authoritative trigger source.
 
 The repository should keep the exact pins introduced by the current mitigation slice:
 
