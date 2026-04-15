@@ -4,6 +4,10 @@ This repository's top-level development governance lives in `../DEVELOPMENT_RULE
 
 Even when working inside `gitnexus/`, migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, and backup files MUST follow `../DEVELOPMENT_RULES.md`.
 
+If the repository change becomes a PR, also follow `../.github/PULL_REQUEST_TEMPLATE.md`
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

@@ -9,6 +9,10 @@ This repository's top-level development governance lives in `DEVELOPMENT_RULES.m
 
 For any work involving migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, or backup files, `DEVELOPMENT_RULES.md` is mandatory and takes precedence over local convenience patterns.
 
+If the repository change becomes a PR, also follow `.github/PULL_REQUEST_TEMPLATE.md`
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
 **Project:** GitNexus
 **Environment:** local development fork
 **Maintainer:** repository maintainers and current fork operators
@@ -53,6 +57,7 @@ This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-04-16 | 1.1.0 | Added a direct PR-governance reminder pointing Claude Code users to the lightweight PR template fields. |
 | 2026-04-06 | 1.0.0 | Added a local structured Claude header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
