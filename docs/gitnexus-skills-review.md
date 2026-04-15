@@ -21,6 +21,11 @@ are still confirmed by the current skill docs and the remediation roadmap.
 
 涉及 migrations、compatibility layers、duplicate implementations、deletions、metric claims、temporary entry points 或 backup files 时，把该文档视为强制规则，而不是可选建议。
 
+如果这次修改会形成 PR，也请同步遵守
+[`../.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)
+里的轻量治理字段：`Line Scope`、单一 `Workline Lane`、`Current Source of Truth`，
+以及 `Validation` 下的闭环字段。
+
 ---
 
 ## 审核摘要
