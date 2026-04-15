@@ -4,6 +4,11 @@
 **Purpose:** Explain how to replay the locally verified `omx cancel ralph --stale`
 implementation into the canonical `oh-my-codex` source repository.
 
+Historical replay note: the verified behavior list, replay-status timeline,
+replay strategy, checklist, and command snippets below remain the 2026-04-12
+upstream-replay baseline. Read them as historical replay context unless a
+later OMX follow-up explicitly reaffirms them as still current.
+
 ## Why This Note Exists
 
 The verified local implementation lives in the installed package directory:
@@ -77,6 +82,11 @@ Those tests prove:
 - root fallback when scoped Ralph state is already terminal
 
 ## Upstream Source Replay Status
+
+Historical replay note: the branch / PR status below records the 2026-04-12
+publication snapshot for the verified replay effort. Do not treat it as an
+active upstream handoff unless a later follow-up record says that handoff has
+restarted.
 
 The canonical source replay was completed in `/tmp/oh-my-codex-upstream` and
 produced two clean git commits:
@@ -164,6 +174,10 @@ It proves the session stops blocking after stale Ralph cancellation terminalizes
 the session.
 
 ## Replay Strategy
+
+Reader note: the strategy and checklist below preserve the 2026-04-12 replay
+plan for a future maintainer-led handoff. They are historical replay guidance,
+not a standing GitNexus execution queue by default.
 
 In the canonical `oh-my-codex` source repository:
 

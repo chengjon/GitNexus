@@ -20,7 +20,7 @@ Documentation navigation entrypoint:
   including the later root-fallback edge case where terminal scoped Ralph state
   can hide a stale legacy root entry.
 - [2026-04-12-omx-stale-ralph-upstream-replay-note.md](/opt/claude/GitNexus/docs/audits/2026-04-12-omx-stale-ralph-upstream-replay-note.md)
-  Replay checklist and upstream status note for porting the verified local
+  Historical replay checklist and upstream status note for porting the verified local
   stale-Ralph fixes into a canonical `oh-my-codex` source checkout, including
   the clean upstream commits, the closed wrong-base PR `#1505`, the later
   closed dev-targeted follow-up PR `#1509`, the verified fork-only stop point
@@ -42,8 +42,8 @@ Documentation navigation entrypoint:
   the historical implementation record and shortest operator fix for a
   lingering `phase: starting` warning.
 - Read the 2026-04-12 stale Ralph upstream replay note when you need the
-  owner-closed PR timeline for `#1505` / `#1509` and the verified fork-only
-  stop point `46622fa`.
+  historical PR timeline for `#1505` / `#1509` and the verified fork-only stop
+  point `46622fa`.
 - Read the 2026-04-09 docs governance cleanup summary first when you need
   current documentation and governance cleanup state.
 - Read the slice classification audit when you need per-commit evidence.
