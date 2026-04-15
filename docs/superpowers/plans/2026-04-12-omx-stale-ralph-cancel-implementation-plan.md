@@ -4,6 +4,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Historical implementation-plan note: the `Goal`, `Architecture`, planned file
+map, constraints, and unchecked task steps below remain the 2026-04-12
+plan-time baseline. Read them as historical planning context unless the later
+stale-Ralph audits or OpenSpec records explicitly reassert them as still
+current.
+
 **Goal:** Add a safe `omx cancel ralph --stale` command that clears half-started Ralph state stuck in `starting` without touching unrelated sessions.
 
 **Architecture:** Extend the existing `omx cancel` branch in the installed `oh-my-codex` CLI so it can recognize one Ralph-specific stale-startup shape, terminalize the matched Ralph state, and clear the matching canonical `skill-active` marker. Keep ordinary `omx cancel` behavior unchanged, keep the default scope session-local, and prove the change with compiled-node tests that reproduce the current stop-hook warning path.
@@ -29,6 +35,11 @@
   - Reproduce the stop-hook warning shape and prove stale cancel removes the block
 
 ## Constraints
+
+Reader note: the unchecked tasks below preserve the 2026-04-12 planning-time
+execution breakdown. They are historical plan artifacts, not a current live
+task board, because later implementation and replay history diverged from this
+original checkbox sequence.
 
 - The canonical operator surface remains `omx cancel`; do not add a new top-level cleanup command.
 - The installed package currently exposes the operational code in `dist/`; do not assume matching TypeScript source files are available.
