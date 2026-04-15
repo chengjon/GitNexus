@@ -1,7 +1,7 @@
-<!-- version: 1.0.0 -->
+<!-- version: 1.1.0 -->
 <!-- local structured header adapted from upstream template -->
 
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-15
 
 ## Repository Development Rules
 
@@ -38,6 +38,23 @@ Before substantial multi-step work:
 
 On long threads, restate the active scope before major edits so local governance and current-task rules do not get diluted.
 
+## Delivery Priority and Docs Governance
+
+- Day-to-day delivery priority is locked as: functional testing and iteration-to-release work first, historical document convergence second.
+- Historical document governance remains active, but only as low-intensity background maintenance. It MUST NOT displace core execution, module-boundary acceptance, critical-path coverage, or release validation work.
+- Default resource allocation after planning should favor:
+  - end-to-end execution self-test closure
+  - module-boundary acceptance and regression checks
+  - critical-path test coverage and missing use-case fill-in
+  - packaging, release-readiness, and post-change validation
+- The existing docs-governance workflow stays in force when a docs slice is needed: single-page slice, boundary/status note, Chinese audit, OpenSpec change, validate, staged risk detection, then commit.
+- Do not batch historical-doc cleanup as the main thread. Insert only one or two doc-governance slices after a completed feature iteration, code cleanup pass, or verification round.
+- Apply an explicit stop line for low-value historical material. Do not proactively chase:
+  - deeply nested legacy design drafts
+  - obsolete plans that are already abandoned and no longer consulted
+- Prioritize docs governance only for high-traffic or still-referenced historical documents that are easy to misread as active requirements, active gates, or current execution queues.
+- If feature delivery, testing closure, or release verification is still incomplete, prefer continuing that mainline work before opening another docs-only slice.
+
 ## Context Budget
 
 - Keep the repository grounded in current local source-of-truth docs instead of generic playbooks.
@@ -57,6 +74,7 @@ On long threads, restate the active scope before major edits so local governance
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-04-15 | 1.1.0 | Added delivery-priority rules that keep feature/test/release work ahead of historical-doc convergence, while retaining the existing low-intensity docs governance workflow. |
 | 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
