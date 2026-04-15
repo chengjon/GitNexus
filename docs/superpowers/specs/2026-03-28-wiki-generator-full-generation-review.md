@@ -18,6 +18,12 @@ Target: `2026-03-28-wiki-generator-full-generation-design.md`
 - The remaining comments below should be read as historical review context, not
   as current blockers for an extraction that is already merged.
 
+Historical review note: the `Verdict`, issue list, suggestions, and `Summary`
+sections below remain the 2026-03-28 design-review baseline. Read them as
+historical review context unless the later truth-sync record, technical-debt
+audit, current source/test anchors, or the remediation roadmap explicitly
+reaffirms them as still current.
+
 ## Verdict
 
 Historical review record; the primary blocker has been resolved in landed code.
@@ -108,6 +114,10 @@ Section 9.3 lists `test/unit/wiki-full-generation.test.ts` both as a new file to
 ---
 
 ## Summary
+
+Historical review note: the blocker/severity framing below records review-time
+design feedback, not a current implementation gate on the already-landed
+full-generation slice.
 
 At review time, the design was ready to implement after resolving issue #1
 (`failedModules` dual-channel). In the current landed repository state, that
