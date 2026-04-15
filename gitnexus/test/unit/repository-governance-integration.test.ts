@@ -65,6 +65,10 @@ describe('repository governance integration', () => {
     expect(agents).toContain('mandatory and takes precedence');
     expect(claude).toContain('DEVELOPMENT_RULES.md');
     expect(claude).toContain('mandatory and takes precedence');
+    expect(claude).toContain('.github/PULL_REQUEST_TEMPLATE.md');
+    expect(claude).toContain('Line Scope');
+    expect(claude).toContain('Workline Lane');
+    expect(claude).toContain('Validation');
   });
 
   it('anchors the inner gitnexus host instruction files to the root development rules', async () => {
