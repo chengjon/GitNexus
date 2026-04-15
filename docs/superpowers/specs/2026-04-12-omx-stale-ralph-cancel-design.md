@@ -6,6 +6,11 @@
 **Status**: Historical design record
 **Scope**: OMX mode-state cleanup command design
 
+Historical design note: the `Goal`, proposed command surface, design
+requirements, replay-oriented test plan, and `Recommendation` below remain the
+2026-04-12 design-time baseline. Read them as historical design context unless
+the later audits or OpenSpec records explicitly reassert them as still current.
+
 ## Goal
 
 Add a safe OMX command that clears the recurring warning:
@@ -21,6 +26,11 @@ written, but the workflow never progressed beyond startup and now behaves like a
 stale residual mode.
 
 ## Recommended Command
+
+Historical design note: the command recommendation below records the proposed
+operator surface at design time. The authoritative completion history for what
+was later implemented and verified lives in the stale-Ralph audit/OpenSpec
+records, not in this earlier design framing.
 
 ```bash
 omx cancel ralph --stale
@@ -205,6 +215,10 @@ Minimum automated cases:
   proven safe.
 
 ## Recommendation
+
+Reader note: the recommendation below preserves the 2026-04-12 design-time
+rollout posture. It is historical design guidance, not a current GitNexus task
+queue or a live OMX execution instruction by default.
 
 Implement exactly one new operator-facing form first:
 
