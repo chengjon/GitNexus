@@ -272,6 +272,10 @@ describe('repository governance integration', () => {
       'utf8',
     );
 
+    expect(prTemplate).toContain('Line Scope:');
+    expect(prTemplate).toContain('Workline Lane:');
+    expect(prTemplate).toContain('Scope Deviations:');
+    expect(prTemplate).toContain('Current Source of Truth:');
     expect(prTemplate).toContain('Canonical Path:');
     expect(prTemplate).toContain('Compatibility Layer / Shim:');
     expect(prTemplate).toContain('Exit Condition:');
@@ -281,6 +285,9 @@ describe('repository governance integration', () => {
     expect(prTemplate).toContain('Measured:');
     expect(prTemplate).toContain('Inferred:');
     expect(prTemplate).toContain('Historical Baseline:');
+    expect(prTemplate).toContain('Execution Path Verification:');
+    expect(prTemplate).toContain('Regression Coverage:');
+    expect(prTemplate).toContain('Current Docs / Facts Updated:');
   });
 
   it('documents repo-relative path expectations for GitNexus evidence in the PR template and top-level rules', async () => {

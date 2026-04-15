@@ -508,10 +508,14 @@ export function findPullRequestBodyViolations(body, changedFiles = []) {
   const developmentRulesCheckSection = readSection(content, 'Development Rules Check');
   const governanceSection = readSection(content, 'Governance Notes');
   const metricsSection = readSection(content, 'Metrics Claims');
+  const validationSection = readSection(content, 'Validation');
   const notesSection = readSection(content, 'Notes');
   const missingGovernanceLabels = REQUIRED_PR_GOVERNANCE_LABELS.filter((label) => !governanceSection.includes(label));
   const missingLabels = REQUIRED_PR_METRIC_LABELS.filter((label) => !metricsSection.includes(label));
   const violations = [];
+  const lineScopeValue = readBulletValue(governanceSection, 'Line Scope:');
+  const worklineLaneValue = readBulletValue(governanceSection, 'Workline Lane:');
+  const currentSourceOfTruthValue = readBulletValue(governanceSection, 'Current Source of Truth:');
   const canonicalPathValue = readBulletValue(governanceSection, 'Canonical Path:');
   const compatibilityValue = readBulletValue(governanceSection, 'Compatibility Layer / Shim:');
   const directCutoverRiskValue = readBulletValue(governanceSection, 'Direct Cutover Risk:');
@@ -524,6 +528,14 @@ export function findPullRequestBodyViolations(body, changedFiles = []) {
   const inferredValue = readBulletValue(metricsSection, 'Inferred:');
   const historicalBaselineValue = readBulletValue(metricsSection, 'Historical Baseline:');
   const metricsNaValue = readBulletValue(metricsSection, 'N/A:');
+  const executionPathVerificationFieldPresent = validationSection.includes('Execution Path Verification:');
+  const regressionCoverageFieldPresent = validationSection.includes('Regression Coverage:');
+  const currentDocsFactsUpdatedFieldPresent = validationSection.includes('Current Docs / Facts Updated:');
+  const validationNaFieldPresent = validationSection.includes('N/A:');
+  const executionPathVerificationValue = readBulletValue(validationSection, 'Execution Path Verification:');
+  const regressionCoverageValue = readBulletValue(validationSection, 'Regression Coverage:');
+  const currentDocsFactsUpdatedValue = readBulletValue(validationSection, 'Current Docs / Facts Updated:');
+  const validationNaValue = readBulletValue(validationSection, 'N/A:');
 
   const normalizedChanges = changedFiles
     .map((entry) => ({
@@ -556,6 +568,34 @@ export function findPullRequestBodyViolations(body, changedFiles = []) {
     violations.push({
       rule: 'pr-markdown-entrypoint-checklist',
       message: 'Development Rules Check must retain the developer-facing markdown entrypoint checklist item when repository-root or first-level docs/eval/gitnexus markdown entrypoints change.',
+    });
+  }
+
+  if (relevantChanges.length > 0 && governanceSection.includes('Line Scope:') && !hasValue(lineScopeValue)) {
+    violations.push({
+      rule: 'pr-line-scope',
+      message: 'Line Scope must be filled when managed files change.',
+    });
+  }
+
+  if (relevantChanges.length > 0 && governanceSection.includes('Workline Lane:') && !hasValue(worklineLaneValue)) {
+    violations.push({
+      rule: 'pr-workline-lane',
+      message: 'Workline Lane must be filled when managed files change.',
+    });
+  }
+
+  if (relevantChanges.length > 0 && hasValue(worklineLaneValue) && !/^(feature|governance|refactor|n\/a)$/i.test(worklineLaneValue)) {
+    violations.push({
+      rule: 'pr-workline-lane-format',
+      message: 'Workline Lane must be exactly one of: feature, governance, refactor, or N/A.',
+    });
+  }
+
+  if (relevantChanges.length > 0 && governanceSection.includes('Current Source of Truth:') && !hasValue(currentSourceOfTruthValue)) {
+    violations.push({
+      rule: 'pr-current-source-of-truth',
+      message: 'Current Source of Truth must be filled when managed files change.',
     });
   }
 
@@ -832,9 +872,41 @@ export function findPullRequestBodyViolations(body, changedFiles = []) {
     if (hasMeaningfulMetricValue(metricField.value) && !hasMetricContext(metricField.value)) {
       violations.push({
         rule: 'pr-metric-context',
-        message: `${metricField.label} metric claims must include explicit \`scope:\` and \`time:\` context when they contain a real claim.`,
+      message: `${metricField.label} metric claims must include explicit \`scope:\` and \`time:\` context when they contain a real claim.`,
       });
     }
+  }
+
+  const validationClosureFieldsPresent =
+    executionPathVerificationFieldPresent ||
+    regressionCoverageFieldPresent ||
+    currentDocsFactsUpdatedFieldPresent ||
+    validationNaFieldPresent;
+
+  if (
+    relevantChanges.length > 0 &&
+    validationClosureFieldsPresent &&
+    !hasValue(executionPathVerificationValue) &&
+    !hasValue(regressionCoverageValue) &&
+    !hasValue(currentDocsFactsUpdatedValue) &&
+    !hasValue(validationNaValue)
+  ) {
+    violations.push({
+      rule: 'pr-validation-content',
+      message: 'Validation must include execution-path verification, regression coverage, current-docs/facts updates, or an explicit N/A note.',
+    });
+  }
+
+  if (
+    relevantChanges.length > 0 &&
+    validationClosureFieldsPresent &&
+    hasValue(validationNaValue) &&
+    (hasValue(executionPathVerificationValue) || hasValue(regressionCoverageValue) || hasValue(currentDocsFactsUpdatedValue))
+  ) {
+    violations.push({
+      rule: 'pr-validation-na-exclusive',
+      message: 'Validation `N/A:` must stay empty whenever execution-path verification, regression coverage, or current docs/facts updates are filled.',
+    });
   }
 
   if (/mechanical split/i.test(content)) {

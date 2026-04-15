@@ -17,6 +17,14 @@
 
 ## Governance Notes
 
+- Line Scope:
+<!-- State the one-line scope contract for this slice, for example `this line only delivers structured doctor output for repo-state; no unrelated docs churn, refactors, naming cleanup, or side quests.` -->
+- Workline Lane:
+<!-- Use exactly one lane: feature, governance, refactor, or N/A. Do not mix lanes in one PR unless the secondary change is strictly required for the primary lane. -->
+- Scope Deviations:
+<!-- Call out any unavoidable cross-domain compatibility adjustment or write `none`. If this materially invades another responsibility domain, split it into a separate line instead of hiding it here. -->
+- Current Source of Truth:
+<!-- Name the current authority for this change, starting with `OpenSpec` when capability or architecture behavior is involved. Add any current repo entrypoint doc that was updated in the same line, for example `OpenSpec; README.md`. -->
 - Canonical Path:
 <!-- Name exactly one stable canonical path as a repo-relative path, for example `gitnexus/src/router.ts`. Do not put shim, compat, *_new.*, or *_v2.* paths here. Do not put a temporary script or debug entry point here either. -->
 - Compatibility Layer / Shim:
@@ -45,7 +53,11 @@
 
 ## Validation
 
-<!-- List the commands, tests, benchmarks, or manual checks you ran. -->
+- Execution Path Verification:
+- Regression Coverage:
+- Current Docs / Facts Updated:
+- N/A:
+<!-- Use the three fields above for concrete execution-path proof, regression guard coverage, and source-of-truth updates. Only fill `N/A:` when the PR is docs-only or one of those categories genuinely does not apply. -->
 
 ## Notes
 

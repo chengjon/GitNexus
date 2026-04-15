@@ -261,6 +261,166 @@ Some change.
     expect(violations.find((entry) => entry.rule === 'pr-governance-fields')?.message).toContain('GitNexus Evidence');
   });
 
+  it('requires optional line-scope fields when the PR body includes them', () => {
+    const violations = findPullRequestBodyViolations(`
+## Summary
+
+Some change.
+
+## Governance Notes
+
+- Line Scope:
+- Workline Lane:
+- Scope Deviations: none
+- Current Source of Truth:
+- Canonical Path: gitnexus/src/router.ts
+- Compatibility Layer / Shim:
+- Exit Condition:
+- Deletion Reachability:
+- GitNexus Evidence:
+- N/A: none
+
+## Metrics Claims
+
+- Measured: none
+- Inferred:
+- Historical Baseline:
+- N/A:
+`, [
+      { status: 'M', path: 'gitnexus/src/router.ts' },
+    ]);
+
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'pr-line-scope' }),
+        expect.objectContaining({ rule: 'pr-workline-lane' }),
+        expect.objectContaining({ rule: 'pr-current-source-of-truth' }),
+      ]),
+    );
+  });
+
+  it('rejects unsupported workline lane values when the field is present', () => {
+    const violations = findPullRequestBodyViolations(`
+## Summary
+
+Some change.
+
+## Governance Notes
+
+- Line Scope: this line only delivers router cutover; no unrelated docs churn or side quests
+- Workline Lane: feature + refactor
+- Scope Deviations: none
+- Current Source of Truth: OpenSpec; README.md
+- Canonical Path: gitnexus/src/router.ts
+- Compatibility Layer / Shim:
+- Exit Condition:
+- Deletion Reachability:
+- GitNexus Evidence:
+- N/A: none
+
+## Metrics Claims
+
+- Measured: none
+- Inferred:
+- Historical Baseline:
+- N/A:
+`, [
+      { status: 'M', path: 'gitnexus/src/router.ts' },
+    ]);
+
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'pr-workline-lane-format' }),
+      ]),
+    );
+  });
+
+  it('requires validation closure content when the new validation fields are present', () => {
+    const violations = findPullRequestBodyViolations(`
+## Summary
+
+Some change.
+
+## Governance Notes
+
+- Line Scope: this line only delivers router cutover; no unrelated docs churn or side quests
+- Workline Lane: feature
+- Scope Deviations: none
+- Current Source of Truth: OpenSpec
+- Canonical Path: gitnexus/src/router.ts
+- Compatibility Layer / Shim:
+- Exit Condition:
+- Deletion Reachability:
+- GitNexus Evidence:
+- N/A: none
+
+## Metrics Claims
+
+- Measured: none
+- Inferred:
+- Historical Baseline:
+- N/A:
+
+## Validation
+
+- Execution Path Verification:
+- Regression Coverage:
+- Current Docs / Facts Updated:
+- N/A:
+`, [
+      { status: 'M', path: 'gitnexus/src/router.ts' },
+    ]);
+
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'pr-validation-content' }),
+      ]),
+    );
+  });
+
+  it('rejects validation N/A when validation proof fields are also filled', () => {
+    const violations = findPullRequestBodyViolations(`
+## Summary
+
+Some change.
+
+## Governance Notes
+
+- Line Scope: this line only delivers router cutover; no unrelated docs churn or side quests
+- Workline Lane: feature
+- Scope Deviations: none
+- Current Source of Truth: OpenSpec
+- Canonical Path: gitnexus/src/router.ts
+- Compatibility Layer / Shim:
+- Exit Condition:
+- Deletion Reachability:
+- GitNexus Evidence:
+- N/A: none
+
+## Metrics Claims
+
+- Measured: none
+- Inferred:
+- Historical Baseline:
+- N/A:
+
+## Validation
+
+- Execution Path Verification: npm run test -- router
+- Regression Coverage:
+- Current Docs / Facts Updated:
+- N/A: docs-only
+`, [
+      { status: 'M', path: 'gitnexus/src/router.ts' },
+    ]);
+
+    expect(violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'pr-validation-na-exclusive' }),
+      ]),
+    );
+  });
+
   it('requires the markdown-entrypoint checklist item when developer-facing markdown entrypoints change', () => {
     const violations = findPullRequestBodyViolations(`
 ## Summary
