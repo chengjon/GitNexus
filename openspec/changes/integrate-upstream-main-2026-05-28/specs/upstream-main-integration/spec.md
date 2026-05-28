@@ -130,6 +130,18 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   embedding path, while persisted node-limit settings feed bare
   `analyze --embeddings`
 
+#### Scenario: A maintainer requests structured doctor diagnostics
+
+- **WHEN** a maintainer runs `gitnexus doctor --json` with optional `--repo` or
+  `--host` selectors
+- **THEN** GitNexus prints structured JSON with an `overall` status and named
+  checks for runtime, native-runtime, language-support, capabilities, and
+  embeddings
+- **AND** repo selectors add a `git-repo` check without requiring a reindex
+- **AND** host selectors add a `host-config` check for supported local MCP hosts
+- **AND** the human-readable `gitnexus doctor` output continues to show the
+  current upstream runtime, capability, and embedding summary
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked

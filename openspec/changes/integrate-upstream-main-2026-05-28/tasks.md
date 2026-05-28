@@ -74,6 +74,10 @@
   - [x] 7.4.4 Replay `config embeddings`: the CLI can show, set, and clear
         persisted embedding runtime settings that feed the current upstream
         embedding configuration.
+  - [x] 7.4.5 Replay the required `doctor` diagnostics surface:
+        `doctor [path]` accepts `--json`, `--repo`, `--host`, `--gpu`, and
+        `--fix`, and JSON output includes runtime, native-runtime,
+        language-support, capability, embedding, repo, and host checks.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
@@ -85,6 +89,8 @@
   - [x] 7.5.4 Add focused regression coverage for `config embeddings`
         help, persistence, environment override precedence, Ollama HTTP mode,
         and configured `analyze --embeddings` node limits.
+  - [x] 7.5.5 Add focused regression coverage for `doctor` help flags and
+        structured JSON diagnostics.
 - [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
       old local files
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
@@ -290,3 +296,14 @@
   tests passing. The build still reports large chunk warnings and an ineffective
   dynamic import warning for `ProcessFlowModal`; those remain optimization debt,
   not a current blocker that justifies restoring the old Vite helper files.
+- CLI doctor/runtime surface replay restored the required operator-facing subset
+  without restoring the old Kuzu-era doctor implementation. Red/green coverage:
+  `HOME=/tmp/gitnexus-lbdb-home
+  GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus npx vitest run
+  test/unit/cli-index-help.test.ts test/unit/doctor-command.test.ts
+  test/unit/doctor-format.test.ts --reporter=dot` passed: 3 test files, 20
+  tests.
+- `npm run build` under `gitnexus` passed after the doctor replay. Built CLI
+  smoke for `doctor --help` and `doctor --json --repo <worktree>` exited 0 and
+  produced `runtime`, `native-runtime`, `capabilities`, `language-support`,
+  `embeddings`, and `git-repo` checks.
