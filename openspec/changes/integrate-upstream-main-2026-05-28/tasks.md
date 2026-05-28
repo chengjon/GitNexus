@@ -71,6 +71,9 @@
   - [x] 7.4.3 Replay standalone `refresh-context`: host context files can be
         refreshed from existing `.gitnexus/meta.json` without running a full
         reindex.
+  - [x] 7.4.4 Replay `config embeddings`: the CLI can show, set, and clear
+        persisted embedding runtime settings that feed the current upstream
+        embedding configuration.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
@@ -79,6 +82,9 @@
         parameter and returned path-resolution metadata.
   - [x] 7.5.3 Add focused help and execution-path coverage for the
         `refresh-context` command and its context-refresh options.
+  - [x] 7.5.4 Add focused regression coverage for `config embeddings`
+        help, persistence, environment override precedence, Ollama HTTP mode,
+        and configured `analyze --embeddings` node limits.
 - [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
       old local files
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
@@ -87,6 +93,9 @@
   - [x] 7.6.2 Verify wiki generator coverage for current command flags,
         grouping batching, LLM client behavior, Mermaid sanitization, and built
         CLI help.
+  - [x] 7.6.3 Verify embedding runtime coverage for HTTP embedding, embedding
+        config, pipeline, chunking, HF env, semantic search/model behavior, and
+        persisted config commands.
 
 ## 8. Final Cutover Guard
 
@@ -254,3 +263,19 @@
   --reporter=dot` passed: 4 test files, 119 tests. Built CLI
   `node dist/cli/index.js wiki --help` exited 0 and exposed `--provider`,
   `--review`, `--model`, `--gist`, and `--api-key`.
+- Embedding runtime/configuration replay restored the documented
+  `gitnexus config embeddings show|set|clear` surface without restoring the old
+  local embedding runtime files. `HOME=/tmp/gitnexus-lbdb-home
+  GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus npx vitest run
+  test/unit/embedding-config.test.ts test/unit/http-embedder.test.ts
+  test/unit/embedding-pipeline.test.ts test/unit/embedding-chunking.test.ts
+  test/unit/hf-env.test.ts test/unit/analyze-embeddings-limit.test.ts
+  test/unit/lbug-embedding-hashes.test.ts test/unit/semantic-chunk-search.test.ts
+  test/unit/model/semantic-model.test.ts test/unit/config-command.test.ts
+  --reporter=dot` passed: 10 test files, 133 tests.
+- `HOME=/tmp/gitnexus-lbdb-home
+  GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus npm run build` passed after
+  the embedding config replay.
+- Built CLI smoke for `config embeddings set/show/clear` passed with a temporary
+  `GITNEXUS_HOME`: set wrote provider `ollama`, node limit `90000`, and batch
+  size `8`; show printed effective config; clear removed only `embeddings`.

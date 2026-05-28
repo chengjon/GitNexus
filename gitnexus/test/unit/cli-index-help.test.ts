@@ -32,6 +32,8 @@ const allHelpCommands = [
   ['setup'],
   ['analyze'],
   ['refresh-context'],
+  ['config'],
+  ['config', 'embeddings'],
   ['index'],
   ['serve'],
   ['mcp'],
@@ -284,6 +286,19 @@ describe('CLI help surface', () => {
     expect(result.stdout).toContain('--skip-agents-md');
     expect(result.stdout).toContain('--no-stats');
     expect(result.stdout).toContain('--skip-skills');
+  });
+
+  it('config embeddings help exposes show/set/clear commands', () => {
+    const result = runHelp('config');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('embeddings');
+
+    const embeddingsResult = runHelpArgs(['config', 'embeddings']);
+    expect(embeddingsResult.status).toBe(0);
+    expect(embeddingsResult.stdout).toContain('show');
+    expect(embeddingsResult.stdout).toContain('set');
+    expect(embeddingsResult.stdout).toContain('clear');
   });
 
   it('localizes commander-generated option metadata labels', () => {

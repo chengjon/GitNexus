@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { getEmbeddingDims, isEmbedderReady } from '../../src/mcp/core/embedder.js';
 
 const ENV_KEYS = [
@@ -10,6 +13,10 @@ const ENV_KEYS = [
   'GITNEXUS_EMBEDDING_RETRY_CAP_MS',
   'GITNEXUS_EMBEDDING_MIN_INTERVAL_MS',
   'GITNEXUS_EMBEDDING_REQUEST_DIMS',
+  'GITNEXUS_EMBEDDING_PROVIDER',
+  'GITNEXUS_OLLAMA_BASE_URL',
+  'GITNEXUS_OLLAMA_MODEL',
+  'GITNEXUS_HOME',
 ] as const;
 
 /** 384d mock vector matching the default schema dimensions. */
@@ -18,10 +25,18 @@ const mockVec = Array.from({ length: 384 }, (_, i) => i / 384);
 describe('HTTP embedding backend', () => {
   // Save original env state before any test mutates it
   const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  let tmpHome: string | null = null;
 
-  afterEach(() => {
+afterEach(() => {
     vi.useRealTimers();
-    vi.unstubAllGlobals();
+  });
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-http-embedder-'));
+    process.env.GITNEXUS_HOME = path.join(tmpHome, '.gitnexus');
+  });
+
+  afterEach(async () => {    vi.unstubAllGlobals();
     vi.resetModules();
     // Restore env vars to pre-test state so a mid-test throw can't leak
     for (const key of ENV_KEYS) {
@@ -30,6 +45,10 @@ describe('HTTP embedding backend', () => {
       } else {
         process.env[key] = savedEnv[key];
       }
+    }
+    if (tmpHome) {
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      tmpHome = null;
     }
   });
 

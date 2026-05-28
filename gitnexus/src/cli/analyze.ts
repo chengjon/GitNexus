@@ -79,6 +79,7 @@ import {
   isPrefixRuntimeLoadable,
   resolveEmbeddingRuntime,
 } from '../core/embeddings/runtime-install.js';
+import { resolveEmbeddingNodeLimit } from '../core/embeddings/config.js';
 import { warnIfNpm11NpxRisk } from './resolve-invocation.js';
 
 // Capture stderr.write at module load BEFORE anything (LadybugDB native
@@ -1031,7 +1032,10 @@ const analyzeCommandImpl = async (
     }
     embeddingsNodeLimit = parsed;
   }
-  const embeddingsEnabled = !!options.embeddings;
+const embeddingsEnabled = !!options?.embeddings;
+  if (embeddingsEnabled) {
+    embeddingsNodeLimit = resolveEmbeddingNodeLimit(embeddingsNodeLimit);
+  }
 
   const setPositiveEnv = (
     optionName: string,

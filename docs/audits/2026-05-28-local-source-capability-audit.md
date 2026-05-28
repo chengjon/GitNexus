@@ -231,6 +231,17 @@ Upstream has a broader embeddings directory with `config.ts`, `http-client.ts`,
 override behavior should not be copied by file. Verify the required operator
 configuration contract and port only missing controls.
 
+Follow-up result: `Reimplemented narrow config command gap`.
+
+The current upstream embedding stack already covers local/HTTP embedding,
+chunking, HF env handling, and semantic model tests, but it was missing the
+operator-facing `gitnexus config embeddings show|set|clear` surface still
+documented in the local fork. The replay restores that narrow CLI surface on top
+of upstream's current embedding config shape: saved settings live under
+`~/.gitnexus/config.json`, environment variables still take precedence, Ollama
+settings activate the OpenAI-compatible HTTP embedding path, and saved
+`nodeLimit` feeds bare `analyze --embeddings`.
+
 ### 8. Test and Config Harness
 
 Representative local files:
