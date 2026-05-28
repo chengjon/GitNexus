@@ -233,6 +233,12 @@ function tryRealpath(p: string): string {
   }
 }
 
+function sameCanonicalPath(left: string, right: string): boolean {
+  const a = canonicalizePath(left);
+  const b = canonicalizePath(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 /**
  * Resolve the git diff cwd for detect_changes, auto-detecting linked worktrees.
  *
@@ -548,13 +554,30 @@ export class LocalBackend {
         path.isAbsolute(repoParam) || repoParam.includes(path.sep) || repoParam.includes('/');
 
       const resolvePathMatch = (): RepoHandle | undefined => {
-        const canonicalTarget = canonicalizePath(repoParam);
-        return [...this.repos.values()].find((handle) => {
-          const stored = canonicalizePath(handle.repoPath);
-          return process.platform === 'win32'
-            ? stored.toLowerCase() === canonicalTarget.toLowerCase()
-            : stored === canonicalTarget;
+        const handles = [...this.repos.values()];
+        const exact = handles.find((handle) => sameCanonicalPath(handle.repoPath, repoParam));
+        if (exact) return exact;
+
+        if (!looksLikePath) return undefined;
+
+        const targetCanonicalRoot = getCanonicalRepoRoot(repoParam);
+        if (!targetCanonicalRoot) return undefined;
+
+        const canonicalRootMatches = handles.filter((handle) => {
+          const handleCanonicalRoot = getCanonicalRepoRoot(handle.repoPath);
+          return (
+            !!handleCanonicalRoot && sameCanonicalPath(handleCanonicalRoot, targetCanonicalRoot)
+          );
         });
+        if (canonicalRootMatches.length === 1) return canonicalRootMatches[0];
+        if (canonicalRootMatches.length > 1) {
+          throw new RegistryAmbiguousTargetError(
+            repoParam,
+            canonicalRootMatches.map((h) => this.handleToRegistryEntry(h)),
+          );
+        }
+
+        return undefined;
       };
 
       // Path-like params first (absolute or contains separators) — aligns with
