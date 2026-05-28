@@ -68,12 +68,17 @@
   - [x] 7.4.2 Replay MCP `detect_changes` cwd compatibility: `cwd` remains a
         supported client working-directory hint, while the upstream `worktree`
         override remains the stricter explicit path.
+  - [x] 7.4.3 Replay standalone `refresh-context`: host context files can be
+        refreshed from existing `.gitnexus/meta.json` without running a full
+        reindex.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
         worktree `repo` parameter to an index registered under the main checkout.
   - [x] 7.5.2 Add focused regression coverage for the `cwd` compatibility
         parameter and returned path-resolution metadata.
+  - [x] 7.5.3 Add focused help and execution-path coverage for the
+        `refresh-context` command and its context-refresh options.
 
 ## 8. Final Cutover Guard
 
@@ -208,3 +213,15 @@
   `GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus`: 3 changed files,
   14 changed symbols, `risk_level=low`, `path_resolution=cwd_worktree`,
   `fallback_reason=null`.
+- Third source replay slice completed for host integration/context refresh.
+  Upstream `setup` and analyze-time AI context generation already absorb the
+  local host adapter split, but the local standalone
+  `gitnexus refresh-context [path]` command was absent in `upstream-sync` and
+  remained a required operator-facing capability.
+- Focused red/green: `refresh-context --help` first fell back to root help,
+  proving the command was not registered. After the replay it exposes
+  `refresh-context [options] [path]`, `--skip-agents-md`, `--no-stats`, and
+  `--skip-skills`.
+- `HOME=/tmp/gitnexus-lbdb-home npx vitest run
+  test/unit/cli-index-help.test.ts test/unit/refresh-context-command.test.ts
+  --reporter=dot` passed: 2 test files, 14 tests.

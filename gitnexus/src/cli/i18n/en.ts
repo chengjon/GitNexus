@@ -104,6 +104,8 @@ export const en = {
   'help.command.setup.description':
     'One-time setup: configure MCP for Cursor, Claude Code, OpenCode, Codex',
   'help.command.analyze.description': 'Index a repository (full analysis)',
+  'help.command.refreshContext.description':
+    'Refresh AGENTS.md / CLAUDE.md context files and repo skills',
   'help.command.index.description':
     'Register an existing .gitnexus/ folder into the global registry (no re-analysis needed)',
   'help.command.serve.description': 'Start local HTTP server for web UI connection',
@@ -158,6 +160,11 @@ export const en = {
     'Skip installing standard GitNexus skill files under .claude/skills/gitnexus/. Does not suppress community skills from --skills (those use .claude/skills/generated/). Use --index-only to skip all AI-context file injection.',
   'help.option.analyze.indexOnly':
     'Pure index mode: skip all file injection (AGENTS.md, CLAUDE.md, skills)',
+  'help.option.refreshContext.skipAgentsMd':
+    'Skip updating the gitnexus section in AGENTS.md and CLAUDE.md',
+  'help.option.refreshContext.noStats':
+    'Omit volatile file/symbol counts from AGENTS.md and CLAUDE.md',
+  'help.option.refreshContext.skipSkills': 'Skip installing standard GitNexus skill files',
   'help.option.skipGit':
     'Treat the provided path/cwd as the index root and skip parent git-root discovery',
   'help.option.analyze.name':

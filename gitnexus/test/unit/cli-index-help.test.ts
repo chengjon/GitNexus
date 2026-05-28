@@ -32,6 +32,7 @@ const allHelpCommands = [
   [],
   ['setup'],
   ['analyze'],
+  ['refresh-context'],
   ['index'],
   ['serve'],
   ['mcp'],
@@ -246,6 +247,16 @@ describe('CLI help surface', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('--repair-fts');
+  });
+
+  it('refresh-context help exposes context refresh controls', () => {
+    const result = runHelp('refresh-context');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('refresh-context [options] [path]');
+    expect(result.stdout).toContain('--skip-agents-md');
+    expect(result.stdout).toContain('--no-stats');
+    expect(result.stdout).toContain('--skip-skills');
   });
 
   it('localizes commander-generated option metadata labels', () => {

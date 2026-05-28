@@ -92,6 +92,14 @@ program
   .action(createLbugLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
 
 program
+  .command('refresh-context [path]')
+  .description('Refresh AGENTS.md / CLAUDE.md context files and repo skills')
+  .option('--skip-agents-md', 'Skip updating the gitnexus section in AGENTS.md and CLAUDE.md')
+  .option('--no-stats', 'Omit volatile file/symbol counts from AGENTS.md and CLAUDE.md')
+  .option('--skip-skills', 'Skip installing standard GitNexus skill files')
+  .action(createLazyAction(() => import('./refresh-context.js'), 'refreshContextCommand'));
+
+program
   .command('index [path...]')
   .description(
     'Register an existing .gitnexus/ folder into the global registry (no re-analysis needed)',
