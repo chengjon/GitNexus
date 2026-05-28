@@ -116,3 +116,13 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** the result includes path-resolution metadata describing the indexed
   repo path, git diff path, client cwd, resolution mode, fallback reason, and
   warnings
+
+#### Scenario: A maintainer refreshes AI host context without reindexing
+
+- **WHEN** a maintainer runs `gitnexus refresh-context [path]` inside or against
+  a git repository with existing `.gitnexus/meta.json`
+- **THEN** GitNexus refreshes the `AGENTS.md` and `CLAUDE.md` GitNexus sections
+  from the existing index metadata
+- **AND** the command does not require a full `gitnexus analyze` run
+- **AND** `--skip-agents-md`, `--no-stats`, and `--skip-skills` remain available
+  as focused context-refresh controls

@@ -128,6 +128,7 @@ export const zhCN = {
   'help.command.uninstall.description':
     '撤销 `setup`：从所有检测到的编辑器中移除 GitNexus 的 MCP 配置、技能和钩子',
   'help.command.analyze.description': '索引仓库（完整分析）',
+  'help.command.refreshContext.description': '刷新 AGENTS.md / CLAUDE.md 上下文文件和仓库 skill',
   'help.command.index.description': '将现有 .gitnexus/ 文件夹注册到全局注册表（无需重新分析）',
   'help.command.serve.description': '启动供 Web UI 连接的本地 HTTP 服务器',
   'help.command.mcp.description':
@@ -180,6 +181,9 @@ export const zhCN = {
   'help.option.analyze.skipSkills':
     '跳过直接安装在 .claude/skills/ 和 .agents/skills/ 下的标准 GitNexus skill 文件。不抑制 --skills 生成的社区 skill（位于 .claude/skills/gitnexus-area-*）。使用 --index-only 可跳过所有 AI 上下文文件注入。',
   'help.option.analyze.indexOnly': '纯索引模式：跳过所有文件注入（AGENTS.md、CLAUDE.md、skills）',
+  'help.option.refreshContext.skipAgentsMd': '跳过更新 AGENTS.md 和 CLAUDE.md 中的 gitnexus 区块',
+  'help.option.refreshContext.noStats': '从 AGENTS.md 和 CLAUDE.md 中省略易变的文件/符号计数',
+  'help.option.refreshContext.skipSkills': '跳过安装标准 GitNexus skill 文件',
   'help.option.skipGit': '将提供的路径/cwd 视为索引根目录，并跳过向上查找 git 根目录',
   'help.option.analyze.name':
     '在 ~/.gitnexus/registry.json 中使用自定义名称注册该仓库（用于区分路径 basename 相同的仓库，例如两个不同的 .../app 目录）',
