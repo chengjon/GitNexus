@@ -68,15 +68,15 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 6 | Host integration and context refresh | 12 files: 12 absent | Reimplement selectively | Blocks if Codex/Claude/Cursor host setup, freshness, and local context refresh behavior must survive |
 | 7 | Embedding runtime/configuration | 7 files: 5 absent, 2 upstream wins | Verify then reimplement config gaps | Blocks if local Ollama/config override behavior is required beyond upstream embedding support |
 | 8 | Test/config harness | 7 files: 6 absent, 1 upstream wins | Remap tests/config only after target capability decisions | Does not block by itself; supports other blockers |
-| 9 | Core ingestion/resolution pipeline | 7 files: 4 absent, 3 upstream wins | Absorb upstream; reimplement only proven gaps | Direct replay is unsafe because upstream replaced this architecture |
-| 10 | Kuzu storage/index adapter | 6 files: 6 absent | Retire | Should not block; upstream has LadybugDB replacement |
+| 9 | Core ingestion/resolution pipeline | 7 files: 4 absent, 3 upstream wins | Verified absorbed; no replay now | Does not block: current scope-based ingestion/resolver surface covers the old helper behavior under focused tests |
+| 10 | Kuzu storage/index adapter | 6 files: 6 absent | Verified retired under LadybugDB | Does not block: Kuzu files stay retired and current LadybugDB/storage tests pass |
 | 11 | CLI command/runtime surface | 5 files: 2 absent, 3 upstream wins | Reimplemented narrow `doctor` diagnostics surface | No longer blocks for `doctor --json/--repo/--host`; continue verifying other CLI-only gaps separately |
 | 12 | Dependency/package surface | 4 files: 4 upstream wins | Absorb upstream | Does not block; do not restore old package locks |
 | 13 | Web ingestion/selection behavior | 4 files: 4 absent | Selection verified with regression coverage; browser ingestion retired | Does not block: old browser ingestion worker is superseded; current Sigma selection behavior is tested |
 | 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
 | 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verified absorbed/enhanced; no replay now | Does not block: current panel/agent surfaces have broader upstream code and targeted tests pass |
 | 16 | CI/governance automation | 2 files: 2 absent | Reimplemented missing PR governance workflow dependency | No longer blocks: `pr-governance.yml` now has the script and unit coverage it invokes |
-| 17 | Core graph/index/search pipeline | 2 files: 2 upstream wins | Absorb upstream | Does not block; upstream owns this layer |
+| 17 | Core graph/index/search pipeline | 2 files: 2 upstream wins | Verified absorbed/enhanced; no replay now | Does not block: upstream storage/repo-manager surface is broader and current repo-manager/LadybugDB tests pass |
 | 18 | Hook/plugin runtime | 1 file: 1 upstream wins plus local ENOENT override fix in `upstream-sync` | Absorb upstream plus keep minimal fix | Does not block after current tests pass |
 | 19 | Miscellaneous local source surface | 31 files: 11 absent, 20 upstream wins | Split into the rows above before replay | Treat as no blanket replay |
 
@@ -296,11 +296,24 @@ Representative local files:
 - `gitnexus/src/core/ingestion/resolvers/utils.ts`
 - `gitnexus/src/core/ingestion/utils.ts`
 
-Decision: `Absorb upstream; reimplement only proven gaps`.
+Decision: `Verified absorbed; no replay now`.
 
 Upstream has a much larger scope-based ingestion and language extractor surface.
 Direct replay of local pipeline helpers is high risk and should not precede
 behavior-level proof that upstream lacks a specific local capability.
+
+Follow-up result: the old helper files remain absent, but representative local
+symbols map into the current upstream-shaped ingestion surface:
+`inferCallForm` and `extractReceiverName` live under `call-extractors`,
+`call-processor`, `call-types`, `tree-sitter-queries`, and
+`utils/call-analysis`; `detectFrameworkFromPath` lives under
+`entry-point-scoring` and `framework-detection`; suffix resolution now lives
+under `import-processor` and language-specific `import-resolvers`.
+
+Verification:
+
+- `HOME=/tmp/gitnexus-row9-home npm test -- test/unit/call-form.test.ts test/unit/framework-detection.test.ts test/unit/ingestion-utils.test.ts test/unit/import-resolver-factory.test.ts test/unit/laravel-route-extraction.test.ts test/unit/php-namespace-extraction.test.ts test/unit/kotlin-scope-captures.test.ts test/unit/kotlin-static-marker.test.ts test/integration/resolvers/vue.test.ts test/integration/resolvers/swift.test.ts test/integration/resolvers/typescript-hof-callbacks.test.ts test/integration/resolvers/typescript-jsx-as-call.test.ts test/integration/resolvers/route-mapping.test.ts --reporter=dot`
+  passed: 13 files, 400 tests.
 
 ### 10. Kuzu Storage and Index Adapter
 
@@ -311,12 +324,22 @@ Representative local files:
 - `gitnexus/src/core/kuzu/load-graph.ts`
 - `gitnexus/src/mcp/core/kuzu-adapter.ts`
 
-Decision: `Retire`.
+Decision: `Verified retired under LadybugDB`.
 
 Upstream moved to LadybugDB with `gitnexus/src/core/lbug/**` and
 `gitnexus/src/mcp/core/lbug-adapter.ts`. Kuzu-specific source files should not
 be carried forward. Any still-needed behavior must be described as LadybugDB
 behavior and reimplemented there.
+
+Follow-up result: no Kuzu files are replayed. The current branch keeps the
+LadybugDB adapter, extension loading, checkpoint, WAL, embedding-hash, native
+runtime, readonly-error, FTS repair, and repo-manager surfaces as the retained
+storage/index implementation.
+
+Verification:
+
+- `HOME=/tmp/gitnexus-row10-home npm test -- test/unit/lbug-adapter-wal-schema.test.ts test/unit/lbug-checkpoint-lifecycle.test.ts test/unit/lbug-checkpoint.test.ts test/unit/lbug-config-wal.test.ts test/unit/lbug-embedding-hashes.test.ts test/unit/lbug-extension-loader.test.ts test/unit/lbug-native-check.test.ts test/unit/lbug-native-safe-path.test.ts test/unit/lbug-pool-win-fts-probe.test.ts test/unit/lbug-readonly-error.test.ts test/unit/repo-manager.test.ts test/unit/repo-manager-ensure-ignore-readonly.test.ts test/unit/repo-manager-finalize-invariant.test.ts test/unit/run-analyze-fts-repair.test.ts --reporter=dot`
+  passed: 14 files, 179 tests, 2 skipped.
 
 ### 11. CLI Command and Runtime Surface
 
@@ -482,10 +505,17 @@ Representative local files:
 - `gitnexus/src/storage/git.ts`
 - `gitnexus/src/storage/repo-manager.ts`
 
-Decision: `Absorb upstream`.
+Decision: `Verified absorbed/enhanced; no replay now`.
 
-Upstream wins and the analysis smoke passed. Do not replay local versions unless
-a focused regression proves a missing behavior.
+Upstream wins and the analysis smoke passed. The current `git.ts` and
+`repo-manager.ts` exports are substantially broader than local main, including
+canonical repo root handling, registry ambiguity/finalization errors, safe
+storage-path checks, readonly index handling, and Ladybug-era cleanup paths.
+Do not replay local versions unless a focused regression proves a missing
+behavior.
+
+Verification is shared with row 10 through the focused repo-manager/LadybugDB
+suite above.
 
 ### 18. Hook and Plugin Runtime
 

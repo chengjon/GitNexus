@@ -130,6 +130,10 @@
         `LocalBackend`/LadybugDB surfaces cover MCP routing, `detect_changes`,
         `impact`, query safety, and API impact under focused regression
         coverage.
+  - [x] 7.6.9 Verify core ingestion/storage/graph absorption: old ingestion
+        helper files and Kuzu adapters remain retired, while current
+        scope-based ingestion, import resolution, LadybugDB, and repo-manager
+        surfaces cover the retained behavior under focused regression coverage.
 
 ## 8. Final Cutover Guard
 
@@ -270,6 +274,14 @@
   `gitnexus/src/mcp/core/lbug-adapter.ts`; the row is verified by focused MCP
   backend tests (5 files, 94 tests) and focused impact/API-impact tests
   (5 files, 58 tests).
+- Core ingestion/storage/graph absorption audit completed without replaying old
+  ingestion helper files, Kuzu adapters, or older storage files. Static
+  comparison maps call-form, receiver extraction, framework detection, and
+  suffix/import resolution to current scope-based ingestion/import-resolver
+  modules; Kuzu behavior remains retired under LadybugDB; repo-manager/storage
+  remains upstream-owned. Focused ingestion/resolver tests passed (13 files,
+  400 tests) and focused LadybugDB/repo-manager tests passed (14 files,
+  179 tests, 2 skipped).
 - Third source replay slice completed for host integration/context refresh.
   Upstream `setup` and analyze-time AI context generation already absorb the
   local host adapter split, but the local standalone

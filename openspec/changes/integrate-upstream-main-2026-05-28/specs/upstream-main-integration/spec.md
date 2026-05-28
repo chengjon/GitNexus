@@ -212,6 +212,22 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   `detect_changes`, impact, impact-by-uid, impact grouping, impact confidence,
   impact pagination, and API impact
 
+#### Scenario: Core ingestion and storage use the upstream architecture
+
+- **WHEN** a maintainer reviews the old local ingestion helper files,
+  Kuzu adapters, and older storage/repo-manager implementations
+- **THEN** GitNexus does not replay those files directly into the integration
+  branch
+- **AND** call-form inference, receiver extraction, framework detection, and
+  suffix/import resolution are retained through the current scope-based
+  ingestion and import-resolver modules
+- **AND** Kuzu-specific source remains retired in favor of LadybugDB adapters,
+  extension loading, checkpoint/WAL handling, readonly handling, FTS repair, and
+  repo-manager storage safety checks
+- **AND** focused regression coverage protects ingestion/resolver behavior,
+  LadybugDB behavior, and repo-manager behavior before `origin/main` cutover is
+  considered
+
 #### Scenario: A maintainer refreshes AI host context without reindexing
 
 - **WHEN** a maintainer runs `gitnexus refresh-context [path]` inside or against
