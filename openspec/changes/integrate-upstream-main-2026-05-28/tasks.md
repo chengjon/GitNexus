@@ -78,6 +78,10 @@
         `doctor [path]` accepts `--json`, `--repo`, `--host`, `--gpu`, and
         `--fix`, and JSON output includes runtime, native-runtime,
         language-support, capability, embedding, repo, and host checks.
+  - [x] 7.4.6 Restore the PR governance workflow dependency:
+        `.github/workflows/pr-governance.yml` invokes
+        `gitnexus/scripts/ci/repository-governance-check.mjs`, so the script
+        and its unit coverage must exist on `upstream-sync`.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
@@ -94,6 +98,9 @@
   - [x] 7.5.6 Add focused regression coverage for current `gitnexus-web`
         Sigma selection behavior that replaced the old local selection-sync
         test files.
+  - [x] 7.5.7 Restore and run repository governance check coverage for PR-body,
+        compatibility metadata, temporary-script metadata, and markdown
+        entrypoint governance.
 - [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
       old local files
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
@@ -112,6 +119,9 @@
   - [x] 7.6.5 Verify web ingestion/selection behavior: retire the old
         browser-side ingestion worker/import processor, and keep the current
         selection/highlighting behavior under regression coverage.
+  - [x] 7.6.6 Verify CI/governance automation continuity: the preserved root
+        `pr-governance.yml` workflow now has its invoked package-local script
+        and unit tests restored.
 
 ## 8. Final Cutover Guard
 
@@ -320,3 +330,13 @@
   test/unit/useSigma.selection.test.tsx --reporter=dot`: 1 test file, 3 tests.
   The full `gitnexus-web` unit suite also passed with 23 test files and 285
   tests.
+- CI/governance automation was a true workflow dependency gap:
+  `.github/workflows/pr-governance.yml` invoked
+  `gitnexus/scripts/ci/repository-governance-check.mjs`, but the script was
+  absent on `upstream-sync`. Red/green: restoring only
+  `test/unit/repository-governance-check.test.ts` failed before test execution;
+  after restoring the script, `HOME=/tmp/gitnexus-lbdb-home
+  GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus npx vitest run
+  test/unit/repository-governance-check.test.ts --reporter=dot` passed: 1 test
+  file, 83 tests. A workflow-shaped `--mode pr-body` smoke also exited 0 and
+  printed `Pull request governance body check passed.`

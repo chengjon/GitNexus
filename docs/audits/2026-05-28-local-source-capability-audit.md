@@ -75,7 +75,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 13 | Web ingestion/selection behavior | 4 files: 4 absent | Selection verified with regression coverage; browser ingestion retired | Does not block: old browser ingestion worker is superseded; current Sigma selection behavior is tested |
 | 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
 | 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verify visual/UX gaps | Does not block unless local UI behavior is required |
-| 16 | CI/governance automation | 2 files: 2 absent | Reimplement or replace with root governance workflow | Blocks local release discipline only if these checks are expected in CI |
+| 16 | CI/governance automation | 2 files: 2 absent | Reimplemented missing PR governance workflow dependency | No longer blocks: `pr-governance.yml` now has the script and unit coverage it invokes |
 | 17 | Core graph/index/search pipeline | 2 files: 2 upstream wins | Absorb upstream | Does not block; upstream owns this layer |
 | 18 | Hook/plugin runtime | 1 file: 1 upstream wins plus local ENOENT override fix in `upstream-sync` | Absorb upstream plus keep minimal fix | Does not block after current tests pass |
 | 19 | Miscellaneous local source surface | 31 files: 11 absent, 20 upstream wins | Split into the rows above before replay | Treat as no blanket replay |
@@ -421,11 +421,31 @@ Representative local files:
 - `gitnexus/scripts/ci/repository-governance-check.mjs`
 - `gitnexus/test/unit/repository-governance-check.test.ts`
 
-Decision: `Reimplement or replace with root governance workflow`.
+Decision: `Reimplemented missing PR governance workflow dependency`.
 
-The root `pr-governance.yml` governance workflow is preserved. Package-local CI
-governance scripts are absent and should be reintroduced only if the root
-workflow does not enforce the same rule.
+This was a true CI continuity gap. `upstream-sync` preserved the root
+`.github/workflows/pr-governance.yml` workflow, and that workflow still invokes
+`node gitnexus/scripts/ci/repository-governance-check.mjs`, but the script and
+its unit test were absent.
+
+The local package governance script was restored because it is the implementation
+behind the preserved root workflow. Its coverage enforces PR-body governance
+fields, metric-claim sections, compatibility metadata, temporary-script
+metadata, and developer-facing markdown entrypoint anchors.
+
+Verification on 2026-05-29:
+
+- Red/green: restoring only the test first failed before test execution because
+  `repository-governance-check.mjs` was missing.
+- After restoring the script,
+  `HOME=/tmp/gitnexus-lbdb-home
+  GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus npx vitest run
+  test/unit/repository-governance-check.test.ts --reporter=dot` passed: 1 test
+  file, 83 tests.
+- Workflow-shaped smoke passed:
+  `node gitnexus/scripts/ci/repository-governance-check.mjs --mode pr-body
+  --repo-root . --event-path <temp-event-json>` printed
+  `Pull request governance body check passed.`
 
 ### 17. Core Graph, Index, and Search Pipeline
 

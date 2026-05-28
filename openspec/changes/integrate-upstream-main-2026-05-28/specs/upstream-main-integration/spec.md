@@ -153,6 +153,17 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** direct `focusNode` calls continue to use the direct focus path rather
   than replaying the retired browser-ingestion worker architecture
 
+#### Scenario: The PR governance workflow runs
+
+- **WHEN** GitHub Actions runs `.github/workflows/pr-governance.yml`
+- **THEN** the referenced
+  `gitnexus/scripts/ci/repository-governance-check.mjs` script exists in the
+  integration branch
+- **AND** the script can validate PR-body governance sections in `--mode pr-body`
+- **AND** its unit coverage protects PR governance fields, metric sections,
+  compatibility metadata, temporary-script metadata, and developer-facing
+  markdown entrypoint anchors
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked
