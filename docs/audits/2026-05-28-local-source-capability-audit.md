@@ -118,6 +118,16 @@ right next step is to run focused fixtures for local-only language behaviors
 against upstream: Vue SFC, Laravel routes, PHP metadata, optional Swift/Kotlin
 availability, and language support report output.
 
+Follow-up result: `Absorb upstream for covered surfaces`.
+
+The `upstream-sync` branch now verifies this capability through focused upstream
+fixtures rather than local file replay. The verification covered Vue SFC
+extraction, Laravel route extraction, PHP namespace extraction, framework
+detection, tree-sitter language availability, and Vue/PHP/Kotlin/Swift resolver
+behavior. No language/parser files were replayed. Any future language gap should
+start as a failing fixture against the current upstream-shaped ingestion
+architecture.
+
 ### 3. Wiki Generator
 
 Representative local files:

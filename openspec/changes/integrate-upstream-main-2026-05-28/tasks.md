@@ -79,6 +79,11 @@
         parameter and returned path-resolution metadata.
   - [x] 7.5.3 Add focused help and execution-path coverage for the
         `refresh-context` command and its context-refresh options.
+- [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
+      old local files
+  - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
+        routes, PHP namespaces, framework detection, tree-sitter language
+        availability, and Vue/PHP/Kotlin/Swift resolver behavior.
 
 ## 8. Final Cutover Guard
 
@@ -225,3 +230,17 @@
 - `HOME=/tmp/gitnexus-lbdb-home npx vitest run
   test/unit/cli-index-help.test.ts test/unit/refresh-context-command.test.ts
   --reporter=dot` passed: 2 test files, 14 tests.
+- Language/framework parsing was verified as absorbed for the covered surfaces;
+  direct replay of old local ingestion files is not required for those surfaces.
+  `HOME=/tmp/gitnexus-lbdb-home npx vitest run
+  test/unit/vue-sfc-extractor.test.ts
+  test/unit/laravel-route-extraction.test.ts
+  test/unit/php-namespace-extraction.test.ts
+  test/unit/framework-detection.test.ts
+  test/integration/tree-sitter-languages.test.ts
+  test/integration/resolvers/vue.test.ts
+  test/integration/resolvers/php.test.ts
+  test/integration/resolvers/kotlin.test.ts
+  test/integration/resolvers/swift.test.ts
+  test/integration/resolvers/route-mapping.test.ts --reporter=dot` passed: 10
+  test files, 649 tests.

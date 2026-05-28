@@ -94,6 +94,15 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** any still-required behavior is reimplemented against the current
   LadybugDB architecture
 
+#### Scenario: A source capability is already covered by upstream-shaped fixtures
+
+- **WHEN** a local source capability maps to an upstream replacement architecture
+  and focused fixtures pass against the replacement
+- **THEN** GitNexus treats the capability as absorbed for the covered behavior
+- **AND** the old local files are not replayed into the integration branch
+- **AND** any later uncovered gap must start from a focused failing fixture
+  against the current upstream-shaped implementation
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked
