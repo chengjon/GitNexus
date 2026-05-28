@@ -63,7 +63,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 1 | Core regression test coverage | 82 files: 61 absent, 21 upstream wins | Remap tests | Blocks "all local upgrades effective"; tests must be mapped to retained capabilities |
 | 2 | Language support and framework parsing | 18 files: 16 absent, 2 upstream wins | Verify then reimplement gaps | Blocks if Vue SFC, Laravel/PHP metadata, Swift/Kotlin reporting, or language availability matrix is required |
 | 3 | Wiki generator | 17 files: 16 absent, 1 upstream wins | Reimplement selectively | Blocks if local full/incremental/module-tree wiki generation is required |
-| 4 | MCP local backend/tools | 17 files: 14 absent, 3 upstream wins | Reimplement on upstream local-backend/LadybugDB | Blocks; current MCP path has already shown Kuzu/Ladybug index mismatch risk |
+| 4 | MCP local backend/tools | 17 files: 14 absent, 3 upstream wins | Verified upstream-shaped; narrow detect_changes gaps already replayed | No longer blocks: current LocalBackend/LadybugDB surface covers MCP routing, detect_changes, impact, query safety, and API impact with focused regression coverage |
 | 5 | Web build/runtime asset handling | 13 files: 11 absent, 2 upstream wins | Verified absorbed/retired; no replay now | Does not block: current web build/tests pass; remaining chunk warnings are optimization debt, not missing behavior |
 | 6 | Host integration and context refresh | 12 files: 12 absent | Reimplement selectively | Blocks if Codex/Claude/Cursor host setup, freshness, and local context refresh behavior must survive |
 | 7 | Embedding runtime/configuration | 7 files: 5 absent, 2 upstream wins | Verify then reimplement config gaps | Blocks if local Ollama/config override behavior is required beyond upstream embedding support |
@@ -167,7 +167,7 @@ Representative local files:
 - `gitnexus/src/mcp/local/tools/handlers/impact-handler.ts`
 - `gitnexus/src/mcp/local/tools/shared/query-safety.ts`
 
-Decision: `Reimplement on upstream local-backend/LadybugDB`.
+Decision: `Verified upstream-shaped; narrow detect_changes gaps already replayed`.
 
 Upstream now has `gitnexus/src/mcp/local/local-backend.ts` and
 `gitnexus/src/mcp/core/lbug-adapter.ts`. The local split handler/runtime design
@@ -175,10 +175,24 @@ is absent. Direct replay would fight upstream's backend shape. The capability
 should be decomposed into behavior contracts and applied to the upstream local
 backend.
 
-This is a cutover blocker because the final staged `gitnexus_detect_changes`
-MCP call failed after upstream analysis migrated the worktree index to LadybugDB
-while the installed MCP still looked for `.gitnexus/kuzu`. The upstream CLI gate
-worked, but the MCP-host path still needs a dedicated compatibility check.
+Follow-up result: the blocker has been reduced to upstream-shaped behavior and
+focused regression coverage. Static comparison confirms the old local split
+files are still absent, but their relevant surfaces now live in
+`gitnexus/src/mcp/local/local-backend.ts` and `gitnexus/src/mcp/tools.ts`:
+`LocalBackend`, `resolveWorktreeCwd`, query-safety constants,
+`detect_changes`, `impact`, `cypher`, and `api_impact`.
+
+The previously proven real gap was not the old file layout; it was the
+MCP-host path after analysis migrated the index to LadybugDB. Earlier replay
+slices restored linked-worktree repo selector handling, `cwd` compatibility,
+and path-resolution metadata on the current `LocalBackend` implementation.
+
+Verification:
+
+- `HOME=/tmp/gitnexus-row4-home npm test -- test/integration/local-backend.test.ts test/integration/local-backend-calltool.test.ts test/unit/mcp/group-repo-routing.test.ts test/unit/detect-changes-worktree.test.ts test/unit/mcp-stdout-sentinel.test.ts --reporter=dot`
+  passed: 5 files, 94 tests.
+- `HOME=/tmp/gitnexus-row4-home npm test -- test/integration/api-impact-e2e.test.ts test/unit/group/impact-by-uid.test.ts test/unit/impact-batching-grouping.test.ts test/unit/impact-confidence.test.ts test/unit/impact-pagination.test.ts --reporter=dot`
+  passed: 5 files, 58 tests.
 
 ### 5. Web Build and Runtime Asset Handling
 
@@ -490,8 +504,9 @@ The current `upstream-sync` branch already includes the minimal helper fix in
    to explicit capability acceptance criteria.
 2. Start with `Detect-changes/worktree path handling`, because local governance
    depends on it and current MCP/CLI behavior diverges after LadybugDB analysis.
-3. Audit `MCP local backend/tools` against upstream `local-backend.ts` and
-   `lbug-adapter.ts`; port behavior, not files.
+3. Completed: audit `MCP local backend/tools` against upstream
+   `local-backend.ts` and `lbug-adapter.ts`; keep behavior on the upstream
+   backend shape instead of replaying the old split files.
 4. Verify `Host integration and context refresh` behavior for Codex, Claude
    Code, Cursor, and generic stdio.
 5. Run focused fixtures for language/framework parsing before porting local Vue,

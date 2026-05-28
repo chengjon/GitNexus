@@ -125,6 +125,11 @@
   - [x] 7.6.7 Verify web UI panel/agent graph UX continuity: current upstream
         `CodeReferencesPanel` and `agent` surfaces are broader than local main
         and targeted agent/selection tests pass, so no old UI files are replayed.
+  - [x] 7.6.8 Verify MCP local backend/tools continuity: old split
+        backend-contract/runtime/handler files remain retired, while current
+        `LocalBackend`/LadybugDB surfaces cover MCP routing, `detect_changes`,
+        `impact`, query safety, and API impact under focused regression
+        coverage.
 
 ## 8. Final Cutover Guard
 
@@ -259,6 +264,12 @@
   `GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus`: 3 changed files,
   14 changed symbols, `risk_level=low`, `path_resolution=cwd_worktree`,
   `fallback_reason=null`.
+- MCP local-backend continuity audit completed without replaying the old split
+  files. Static comparison maps the retained behavior to current
+  `gitnexus/src/mcp/local/local-backend.ts`, `gitnexus/src/mcp/tools.ts`, and
+  `gitnexus/src/mcp/core/lbug-adapter.ts`; the row is verified by focused MCP
+  backend tests (5 files, 94 tests) and focused impact/API-impact tests
+  (5 files, 58 tests).
 - Third source replay slice completed for host integration/context refresh.
   Upstream `setup` and analyze-time AI context generation already absorb the
   local host adapter split, but the local standalone

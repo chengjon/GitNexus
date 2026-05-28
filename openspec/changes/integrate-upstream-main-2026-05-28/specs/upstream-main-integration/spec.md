@@ -198,6 +198,20 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   repo path, git diff path, client cwd, resolution mode, fallback reason, and
   warnings
 
+#### Scenario: MCP local tools run on the upstream backend shape
+
+- **WHEN** a maintainer reviews the old local MCP split files for
+  backend-contract, backend-runtime, detect-changes handler, impact handler, and
+  query-safety
+- **THEN** GitNexus does not replay those files directly into the integration
+  branch
+- **AND** the retained behavior is provided through the current
+  `LocalBackend`, LadybugDB adapter, and MCP tool definitions
+- **AND** focused regression coverage protects local-backend calls,
+  MCP tool routing, group repo routing, stdout isolation, worktree-aware
+  `detect_changes`, impact, impact-by-uid, impact grouping, impact confidence,
+  impact pagination, and API impact
+
 #### Scenario: A maintainer refreshes AI host context without reindexing
 
 - **WHEN** a maintainer runs `gitnexus refresh-context [path]` inside or against
