@@ -60,25 +60,25 @@ proposed replacement baseline. Each capability must be classified before cutover
 
 | # | Capability | Local source status | Decision | Cutover impact |
 |---:|---|---|---|---|
-| 1 | Core regression test coverage | 82 files: 61 absent, 21 upstream wins | Remap tests | Blocks "all local upgrades effective"; tests must be mapped to retained capabilities |
-| 2 | Language support and framework parsing | 18 files: 16 absent, 2 upstream wins | Verify then reimplement gaps | Blocks if Vue SFC, Laravel/PHP metadata, Swift/Kotlin reporting, or language availability matrix is required |
-| 3 | Wiki generator | 17 files: 16 absent, 1 upstream wins | Reimplement selectively | Blocks if local full/incremental/module-tree wiki generation is required |
+| 1 | Core regression test coverage | 82 files: 61 absent, 21 upstream wins | Mapped to retained capabilities; no blanket restore | No longer blocks: focused upstream-shaped regression suites now cover each retained/replayed capability |
+| 2 | Language support and framework parsing | 18 files: 16 absent, 2 upstream wins | Verified absorbed for covered surfaces; no replay now | Does not block: Vue, Laravel/PHP, framework detection, tree-sitter availability, and Vue/PHP/Kotlin/Swift resolver behavior are covered by focused fixtures |
+| 3 | Wiki generator | 17 files: 16 absent, 1 upstream wins | Verified current wiki behavior; no replay now | Does not block: current upstream wiki generator flags/client/grouping/Mermaid behavior are covered; future gaps are product requests |
 | 4 | MCP local backend/tools | 17 files: 14 absent, 3 upstream wins | Verified upstream-shaped; narrow detect_changes gaps already replayed | No longer blocks: current LocalBackend/LadybugDB surface covers MCP routing, detect_changes, impact, query safety, and API impact with focused regression coverage |
 | 5 | Web build/runtime asset handling | 13 files: 11 absent, 2 upstream wins | Verified absorbed/retired; no replay now | Does not block: current web build/tests pass; remaining chunk warnings are optimization debt, not missing behavior |
-| 6 | Host integration and context refresh | 12 files: 12 absent | Reimplement selectively | Blocks if Codex/Claude/Cursor host setup, freshness, and local context refresh behavior must survive |
-| 7 | Embedding runtime/configuration | 7 files: 5 absent, 2 upstream wins | Verify then reimplement config gaps | Blocks if local Ollama/config override behavior is required beyond upstream embedding support |
-| 8 | Test/config harness | 7 files: 6 absent, 1 upstream wins | Remap tests/config only after target capability decisions | Does not block by itself; supports other blockers |
+| 6 | Host integration and context refresh | 12 files: 12 absent | Reimplemented standalone `refresh-context`; host setup absorbed/deferred | No longer blocks: required context refresh CLI is restored; broader host-adapter parity needs future behavior tests |
+| 7 | Embedding runtime/configuration | 7 files: 5 absent, 2 upstream wins | Reimplemented narrow config command gap | No longer blocks: persisted embedding config commands work on current upstream embedding stack |
+| 8 | Test/config harness | 7 files: 6 absent, 1 upstream wins | Verified current harness; remapped tests only | Does not block: old harness files stay retired and focused upstream-shaped suites pass |
 | 9 | Core ingestion/resolution pipeline | 7 files: 4 absent, 3 upstream wins | Verified absorbed; no replay now | Does not block: current scope-based ingestion/resolver surface covers the old helper behavior under focused tests |
 | 10 | Kuzu storage/index adapter | 6 files: 6 absent | Verified retired under LadybugDB | Does not block: Kuzu files stay retired and current LadybugDB/storage tests pass |
 | 11 | CLI command/runtime surface | 5 files: 2 absent, 3 upstream wins | Reimplemented narrow `doctor` diagnostics surface | No longer blocks for `doctor --json/--repo/--host`; continue verifying other CLI-only gaps separately |
-| 12 | Dependency/package surface | 4 files: 4 upstream wins | Absorb upstream | Does not block; do not restore old package locks |
+| 12 | Dependency/package surface | 4 files: 4 upstream wins | Verified upstream package surface; no replay now | Does not block: keep upstream 1.6.5/package-lock surfaces and do not restore old local locks/scripts |
 | 13 | Web ingestion/selection behavior | 4 files: 4 absent | Selection verified with regression coverage; browser ingestion retired | Does not block: old browser ingestion worker is superseded; current Sigma selection behavior is tested |
-| 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
+| 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplemented worktree path handling | No longer blocks: linked-worktree repo selection, `cwd` compatibility, and path-resolution metadata are covered |
 | 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verified absorbed/enhanced; no replay now | Does not block: current panel/agent surfaces have broader upstream code and targeted tests pass |
 | 16 | CI/governance automation | 2 files: 2 absent | Reimplemented missing PR governance workflow dependency | No longer blocks: `pr-governance.yml` now has the script and unit coverage it invokes |
 | 17 | Core graph/index/search pipeline | 2 files: 2 upstream wins | Verified absorbed/enhanced; no replay now | Does not block: upstream storage/repo-manager surface is broader and current repo-manager/LadybugDB tests pass |
-| 18 | Hook/plugin runtime | 1 file: 1 upstream wins plus local ENOENT override fix in `upstream-sync` | Absorb upstream plus keep minimal fix | Does not block after current tests pass |
-| 19 | Miscellaneous local source surface | 31 files: 11 absent, 20 upstream wins | Split into the rows above before replay | Treat as no blanket replay |
+| 18 | Hook/plugin runtime | 1 file: 1 upstream wins plus local ENOENT override fix in `upstream-sync` | Verified absorbed plus minimal fix | Does not block: standalone hook/plugin suites pass; combined burst run still has the known concurrent hook flake |
+| 19 | Miscellaneous local source surface | 31 files: 11 absent, 20 upstream wins | Closed by row split; no blanket replay | Does not block: remaining files are governed by rows 1-18 |
 
 ## Detailed Capability Notes
 
@@ -92,13 +92,25 @@ Representative local files:
 - `gitnexus/test/unit/analyze-embeddings.test.ts`
 - `gitnexus/test/unit/wiki-run-pipeline.test.ts`
 
-Decision: `Remap tests`.
+Decision: `Mapped to retained capabilities; no blanket restore`.
 
 The old tests are useful evidence of desired local behavior, but copying them
 directly would be misleading. Many refer to local Kuzu, old MCP handler, old wiki
 generator, and old host-integration surfaces that are no longer present in
 upstream. Port tests only after the target capability is either absorbed or
 reimplemented on upstream.
+
+Follow-up result: row 1 is now a regression-map meta row, not a source replay
+row. Local tests were not copied wholesale; they were either replaced by
+upstream-shaped focused suites or restored only when the invoked behavior still
+exists in the integration branch.
+
+Covered slices include language/framework parsing, wiki commands, embedding
+runtime/config, web build/runtime, web selection, CI governance, MCP backend,
+core ingestion/storage/graph, detect-changes/worktree handling, refresh-context,
+doctor diagnostics, PR governance, and hook/plugin runtime. Remaining broad
+full-suite noise is recorded as environment-sensitive or flaky where observed,
+not as a reason to restore old local test harness files.
 
 ### 2. Language Support and Framework Parsing
 
@@ -110,7 +122,7 @@ Representative local files:
 - `gitnexus/src/core/tree-sitter/language-registry.ts`
 - `gitnexus/scripts/ci/language-support-report.mjs`
 
-Decision: `Verify then reimplement gaps`.
+Decision: `Verified absorbed for covered surfaces; no replay now`.
 
 Upstream has a much broader ingestion tree and language-specific extractors under
 `gitnexus/src/core/ingestion/**`, so direct local replay is not appropriate. The
@@ -138,7 +150,7 @@ Representative local files:
 - `gitnexus/src/core/wiki/pages/overview-page.ts`
 - `gitnexus/test/unit/wiki-module-tree.test.ts`
 
-Decision: `Reimplement selectively`.
+Decision: `Verified current wiki behavior; no replay now`.
 
 Upstream still has wiki support under `gitnexus/src/core/wiki/**`, but the local
 full-generation, incremental update, module-tree, and page-generation pipeline is
@@ -235,13 +247,21 @@ Representative local files:
 - `gitnexus/src/cli/index-freshness.ts`
 - `gitnexus/src/cli/refresh-context.ts`
 
-Decision: `Reimplement selectively`.
+Decision: `Reimplemented standalone refresh-context; host setup absorbed/deferred`.
 
 The local branch had explicit multi-host setup and context refresh surfaces that
 are absent from the proposed replacement branch. Upstream has `setup.ts`,
 `status.ts`, MCP server, and hook assets, but not the same host-adapter split.
 If Codex/Claude/Cursor parity is required, define behavior tests first, then
 port only the missing behavior.
+
+Follow-up result: the required standalone context refresh surface was restored
+as `gitnexus refresh-context [path]` on top of the current upstream context
+refresh implementation. The old host-adapter split was not replayed.
+
+Verification is recorded in OpenSpec: focused red/green help and command tests
+cover `refresh-context [options] [path]`, `--skip-agents-md`, `--no-stats`, and
+`--host`; built CLI smoke confirms the command exits 0.
 
 ### 7. Embedding Runtime and Configuration
 
@@ -253,7 +273,7 @@ Representative local files:
 - `gitnexus/src/core/embeddings/ollama-client.ts`
 - `gitnexus/src/core/embeddings/runtime-config.ts`
 
-Decision: `Verify then reimplement config gaps`.
+Decision: `Reimplemented narrow config command gap`.
 
 Upstream has a broader embeddings directory with `config.ts`, `http-client.ts`,
 `hf-env.ts`, `server-mapping.ts`, and related modules. Local Ollama/config
@@ -280,12 +300,16 @@ Representative local files:
 - `gitnexus/vitest.integration.config.ts`
 - `gitnexus/vitest.integration.native.config.ts`
 
-Decision: `Remap tests/config`.
+Decision: `Verified current harness; remapped tests only`.
 
 The upstream unit suite passed with local environment controls
 `HOME=/tmp/gitnexus-lbdb-home` and `TMPDIR=/var/tmp`. Keep the current upstream
 test harness until a specific local regression test needs an upstream-shaped
 port.
+
+Follow-up result: the target capability rows now have focused upstream-shaped
+regression coverage. The old `global-setup`, integration-native config, and
+setup file layout is not replayed.
 
 ### 9. Core Ingestion and Resolution Pipeline
 
@@ -386,10 +410,16 @@ Representative local files:
 - `gitnexus-web/package.json`
 - `gitnexus-web/package-lock.json`
 
-Decision: `Absorb upstream`.
+Decision: `Verified upstream package surface; no replay now`.
 
 The upstream dependency graph built and tested. Restoring old local package
 locks would undercut the upstream integration.
+
+Follow-up result: keep upstream package surfaces. `gitnexus/package.json` is now
+upstream `1.6.5` with the broader upstream dependency/script set; the old local
+`check:repo-governance`, `test:integration:native`, and `test:all` script names
+are not restored directly. The PR governance script is restored at its current
+workflow path instead.
 
 ### 13. Web Ingestion and Selection Behavior
 
@@ -431,13 +461,20 @@ Representative local files:
 - `gitnexus/src/lib/path-comparison.ts`
 - `gitnexus/test/unit/detect-changes-path-comparison.test.ts`
 
-Decision: `Reimplement first`.
+Decision: `Reimplemented worktree path handling`.
 
 This is a blocker for governed development because `detect_changes` is the
 pre-commit scope gate in local rules. The final integration needed an upstream
 CLI fallback because the MCP tool expected Kuzu after LadybugDB analysis. A
 dedicated upstream-shaped fix should come before main cutover if local source
 capability continuity is mandatory.
+
+Follow-up result: completed in two upstream-shaped slices. `detect_changes`
+resolves path-like linked-worktree repo selectors by shared canonical git root
+after exact indexed-path matching, accepts `cwd` as an MCP client working
+directory hint, preserves explicit `worktree` precedence, and returns
+path-resolution metadata. Focused detect-changes/worktree tests and MCP-style
+runtime smoke passed.
 
 ### 15. Web UI Panels and Agent Graph UX
 
@@ -523,10 +560,32 @@ Representative local file:
 
 - `gitnexus-claude-plugin/hooks/gitnexus-hook.js`
 
-Decision: `Absorb upstream plus keep the minimal ENOENT override fix`.
+Decision: `Verified absorbed plus minimal fix`.
 
 The current `upstream-sync` branch already includes the minimal helper fix in
-`hook-db-lock-probe.cjs`. Hook unit tests passed.
+`hook-db-lock-probe.cjs`.
+
+Verification:
+
+- `HOME=/tmp/gitnexus-row18-home TMPDIR=/var/tmp npx vitest run
+  test/unit/hooks.test.ts --reporter=dot` passed: 1 file, 149 tests.
+- `HOME=/tmp/gitnexus-row18-home TMPDIR=/var/tmp npx vitest run
+  test/unit/cursor-hook.test.ts test/integration/hooks-e2e.test.ts
+  test/integration/antigravity-hook-e2e.test.ts --reporter=dot` passed: 3 files,
+  105 tests.
+- A combined 4-file hook run produced one known concurrent burst flake in
+  `Plugin: hook does not exceed MAX_INFLIGHT under simultaneous bursts`; the
+  same test passed when isolated.
+
+### 19. Miscellaneous Local Source Surface
+
+Representative local files: split across the capability rows above.
+
+Decision: `Closed by row split; no blanket replay`.
+
+The 31 miscellaneous source-ish files do not define a separate capability after
+row classification. They are governed by rows 1-18 and should not be replayed
+as a catch-all batch.
 
 ## Recommended Execution Order
 

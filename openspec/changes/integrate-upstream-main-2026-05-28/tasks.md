@@ -60,7 +60,7 @@
       retire, verify, or remap tests
 - [x] 7.3 Record that `origin/main` cutover is blocked when the required outcome
       is that all local source upgrades continue to be effective
-- [ ] 7.4 Replay required source capabilities as upstream-shaped behavior
+- [x] 7.4 Replay required source capabilities as upstream-shaped behavior
       changes
   - [x] 7.4.1 Replay detect-changes/worktree repo path handling: path-like
         `repo` parameters now prefer exact indexed paths, then resolve a single
@@ -82,7 +82,7 @@
         `.github/workflows/pr-governance.yml` invokes
         `gitnexus/scripts/ci/repository-governance-check.mjs`, so the script
         and its unit coverage must exist on `upstream-sync`.
-- [ ] 7.5 Re-map local regression tests after their target capabilities are
+- [x] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
         worktree `repo` parameter to an index registered under the main checkout.
@@ -101,7 +101,7 @@
   - [x] 7.5.7 Restore and run repository governance check coverage for PR-body,
         compatibility metadata, temporary-script metadata, and markdown
         entrypoint governance.
-- [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
+- [x] 7.6 Verify absorbed source capabilities before deciding whether to replay
       old local files
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
         routes, PHP namespaces, framework detection, tree-sitter language
@@ -134,6 +134,17 @@
         helper files and Kuzu adapters remain retired, while current
         scope-based ingestion, import resolution, LadybugDB, and repo-manager
         surfaces cover the retained behavior under focused regression coverage.
+  - [x] 7.6.10 Verify dependency/package surface continuity: keep upstream
+        `package.json` and lockfiles, avoid restoring old local package locks or
+        script names, and carry required governance behavior through current
+        workflow/script files.
+  - [x] 7.6.11 Verify hook/plugin runtime continuity: keep upstream plugin
+        runtime plus the minimal ENOENT override fix, with standalone hook,
+        cursor-hook, hooks-e2e, and antigravity-hook tests passing; record the
+        combined concurrent burst flake separately.
+  - [x] 7.6.12 Close the miscellaneous local source surface by row split: no
+        catch-all replay remains after rows 1-18 are classified, verified, or
+        replayed.
 
 ## 8. Final Cutover Guard
 
