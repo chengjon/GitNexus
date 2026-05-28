@@ -122,6 +122,9 @@
   - [x] 7.6.6 Verify CI/governance automation continuity: the preserved root
         `pr-governance.yml` workflow now has its invoked package-local script
         and unit tests restored.
+  - [x] 7.6.7 Verify web UI panel/agent graph UX continuity: current upstream
+        `CodeReferencesPanel` and `agent` surfaces are broader than local main
+        and targeted agent/selection tests pass, so no old UI files are replayed.
 
 ## 8. Final Cutover Guard
 
@@ -340,3 +343,12 @@
   test/unit/repository-governance-check.test.ts --reporter=dot` passed: 1 test
   file, 83 tests. A workflow-shaped `--mode pr-body` smoke also exited 0 and
   printed `Pull request governance body check passed.`
+- Web UI panels/agent graph UX was verified as absorbed/enhanced rather than
+  replayed. Static comparison found no local-only exported APIs, state variables,
+  memoized values, or callback surfaces in the local `CodeReferencesPanel.tsx`
+  or `agent.ts` that were absent from current `upstream-sync`; current upstream
+  adds file loading, node indexing, abort handling, and agent-history
+  serialization coverage. `HOME=/tmp/gitnexus-web-audit-home npm test --
+  test/unit/agent-abort.test.ts test/unit/agent-history.test.ts
+  test/unit/bug-fixes.test.ts test/unit/useSigma.selection.test.tsx
+  --reporter=dot` passed: 4 test files, 33 tests.

@@ -74,7 +74,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 12 | Dependency/package surface | 4 files: 4 upstream wins | Absorb upstream | Does not block; do not restore old package locks |
 | 13 | Web ingestion/selection behavior | 4 files: 4 absent | Selection verified with regression coverage; browser ingestion retired | Does not block: old browser ingestion worker is superseded; current Sigma selection behavior is tested |
 | 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
-| 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verify visual/UX gaps | Does not block unless local UI behavior is required |
+| 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verified absorbed/enhanced; no replay now | Does not block: current panel/agent surfaces have broader upstream code and targeted tests pass |
 | 16 | CI/governance automation | 2 files: 2 absent | Reimplemented missing PR governance workflow dependency | No longer blocks: `pr-governance.yml` now has the script and unit coverage it invokes |
 | 17 | Core graph/index/search pipeline | 2 files: 2 upstream wins | Absorb upstream | Does not block; upstream owns this layer |
 | 18 | Hook/plugin runtime | 1 file: 1 upstream wins plus local ENOENT override fix in `upstream-sync` | Absorb upstream plus keep minimal fix | Does not block after current tests pass |
@@ -409,10 +409,24 @@ Representative local files:
 - `gitnexus-web/src/components/CodeReferencesPanel.tsx`
 - `gitnexus-web/src/core/llm/agent.ts`
 
-Decision: `Verify visual/UX gaps`.
+Decision: `Verified absorbed/enhanced; no replay now`.
 
-Upstream versions win in the current branch. Do not replay local UI code unless
-browser-level review identifies a missing user-facing behavior.
+The current upstream-shaped `CodeReferencesPanel.tsx` and `agent.ts` are larger
+than the local `main` versions and add current file loading, node indexing,
+abort handling, and agent-history serialization coverage. Static comparison did
+not find local-only exported APIs, state variables, memoized values, or callback
+surfaces that would justify replaying the old files.
+
+Targeted verification on 2026-05-29:
+
+- `HOME=/tmp/gitnexus-web-audit-home npm test --
+  test/unit/agent-abort.test.ts test/unit/agent-history.test.ts
+  test/unit/bug-fixes.test.ts test/unit/useSigma.selection.test.tsx
+  --reporter=dot` passed: 4 test files, 33 tests.
+
+This does not replace a future browser-level UX review. It only establishes that
+the source capability continuity gate does not require replaying the old local
+panel or agent files.
 
 ### 16. CI and Governance Automation
 
