@@ -103,6 +103,17 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** any later uncovered gap must start from a focused failing fixture
   against the current upstream-shaped implementation
 
+#### Scenario: A wiki capability maps to the upstream wiki generator
+
+- **WHEN** a local wiki capability is covered by the current upstream wiki
+  command, generator, provider client, grouping, or rendering behavior
+- **THEN** GitNexus treats the capability as absorbed by the upstream wiki
+  implementation
+- **AND** the old local module-tree, page-generation, incremental-update, and
+  run-pipeline files are not replayed directly
+- **AND** any missing wiki behavior must be reintroduced as a focused product
+  capability on top of the current upstream wiki generator
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked

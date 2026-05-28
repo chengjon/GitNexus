@@ -145,6 +145,18 @@ full-generation, incremental update, module-tree, and page-generation pipeline i
 not present. If those are still product requirements, port them into upstream's
 current wiki client/query model instead of restoring the old file tree.
 
+Follow-up result: `Absorb upstream for current wiki command behavior`.
+
+The `upstream-sync` branch has a current upstream wiki implementation centered on
+`gitnexus/src/core/wiki/generator.ts`, `graph-queries.ts`, provider clients,
+HTML rendering, review mode, incremental update, and grouping snapshots. The old
+local module-tree/page-generation/run-pipeline files should not be replayed
+directly. Existing upstream-shaped tests verify the current command flags,
+grouping batching, LLM client, and Mermaid sanitizer behavior, and built CLI help
+exposes `--provider`, `--review`, `--model`, `--gist`, and `--api-key`. Treat
+future wiki gaps as product requests against the current generator API, not as a
+blanket restoration of the old local wiki module tree.
+
 ### 4. MCP Local Backend and Tools
 
 Representative local files:

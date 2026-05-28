@@ -84,6 +84,9 @@
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
         routes, PHP namespaces, framework detection, tree-sitter language
         availability, and Vue/PHP/Kotlin/Swift resolver behavior.
+  - [x] 7.6.2 Verify wiki generator coverage for current command flags,
+        grouping batching, LLM client behavior, Mermaid sanitization, and built
+        CLI help.
 
 ## 8. Final Cutover Guard
 
@@ -244,3 +247,10 @@
   test/integration/resolvers/swift.test.ts
   test/integration/resolvers/route-mapping.test.ts --reporter=dot` passed: 10
   test files, 649 tests.
+- Wiki generator was verified as absorbed for the current upstream command
+  behavior. `HOME=/tmp/gitnexus-lbdb-home npx vitest run
+  test/unit/wiki-flags.test.ts test/unit/wiki-grouping-batch.test.ts
+  test/unit/wiki-llm-client.test.ts test/unit/wiki-mermaid-sanitizer.test.ts
+  --reporter=dot` passed: 4 test files, 119 tests. Built CLI
+  `node dist/cli/index.js wiki --help` exited 0 and exposed `--provider`,
+  `--review`, `--model`, `--gist`, and `--api-key`.
