@@ -163,8 +163,13 @@ program
   .action(createLazyAction(() => import('./status.js'), 'statusCommand'));
 
 program
-  .command('doctor')
+  .command('doctor [path]')
   .description('Show runtime platform capabilities and embedding configuration')
+  .option('--host <name>', 'Check a specific host configuration')
+  .option('--repo <path>', 'Check a specific repository path')
+  .option('--gpu', 'Also include GPU readiness checks')
+  .option('--fix', 'Include safe fix guidance when available')
+  .option('--json', 'Print structured JSON output')
   .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
 
 program

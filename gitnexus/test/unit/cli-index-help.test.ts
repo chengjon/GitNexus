@@ -274,6 +274,18 @@ describe('CLI help surface', () => {
     expect(embeddingsResult.stdout).toContain('clear');
   });
 
+  it('doctor help exposes structured diagnostic flags', () => {
+    const result = runHelp('doctor');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('doctor [options] [path]');
+    expect(result.stdout).toContain('--json');
+    expect(result.stdout).toContain('--repo <path>');
+    expect(result.stdout).toContain('--host <name>');
+    expect(result.stdout).toContain('--gpu');
+    expect(result.stdout).toContain('--fix');
+  });
+
   it('localizes commander-generated option metadata labels', () => {
     const english = metadataHelp('en');
     const chinese = metadataHelp('zh-CN');

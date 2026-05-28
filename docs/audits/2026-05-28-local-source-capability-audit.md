@@ -70,7 +70,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 8 | Test/config harness | 7 files: 6 absent, 1 upstream wins | Remap tests/config only after target capability decisions | Does not block by itself; supports other blockers |
 | 9 | Core ingestion/resolution pipeline | 7 files: 4 absent, 3 upstream wins | Absorb upstream; reimplement only proven gaps | Direct replay is unsafe because upstream replaced this architecture |
 | 10 | Kuzu storage/index adapter | 6 files: 6 absent | Retire | Should not block; upstream has LadybugDB replacement |
-| 11 | CLI command/runtime surface | 5 files: 2 absent, 3 upstream wins | Verify then reimplement narrow missing behavior | Blocks only for missing local CLI behavior still required |
+| 11 | CLI command/runtime surface | 5 files: 2 absent, 3 upstream wins | Reimplemented narrow `doctor` diagnostics surface | No longer blocks for `doctor --json/--repo/--host`; continue verifying other CLI-only gaps separately |
 | 12 | Dependency/package surface | 4 files: 4 upstream wins | Absorb upstream | Does not block; do not restore old package locks |
 | 13 | Web ingestion/selection behavior | 4 files: 4 absent | Verify product need; reimplement if still required | Blocks only if local web import/selection behavior is required |
 | 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
@@ -314,11 +314,31 @@ Representative local files:
 - `gitnexus/src/cli/setup.ts`
 - `gitnexus/src/cli/doctor.ts`
 
-Decision: `Verify then reimplement narrow missing behavior`.
+Decision: `Reimplemented narrow doctor diagnostics surface`.
 
-Upstream owns the CLI command surface. Some local CLI helpers are absent, and
-some were replaced by upstream versions. Verify specific user-visible commands
-and messages before any port.
+Upstream owns the CLI command surface. `ai-context`, `setup`, and most analyze
+runtime behavior are already covered by upstream-shaped commands. The local
+`main` branch, however, exposed a richer `doctor [path]` surface with
+`--json`, `--repo`, `--host`, `--gpu`, and `--fix`; `upstream-sync` had regressed
+that to a plain text-only `doctor` command with no options.
+
+The required local operator-facing subset has been replayed without restoring
+the old 1000-line Kuzu-era doctor implementation:
+
+- `doctor [path]` accepts `--json`, `--repo <path>`, `--host <name>`, `--gpu`,
+  and `--fix`.
+- Structured JSON output includes `runtime`, `native-runtime`,
+  `language-support`, `capabilities`, `embeddings`, and optional `git-repo` /
+  `host-config` checks.
+- Text output keeps the current upstream runtime/capability/embedding summary.
+
+Verification on 2026-05-29:
+
+- Red/green focused tests for `doctor --help`, `runDoctor({ json, repo })`, and
+  host/native/language checks now pass.
+- `npm run build` under `gitnexus` exits 0.
+- Built CLI smoke for `doctor --help` and `doctor --json --repo <worktree>`
+  exits 0 and emits the expected structured checks.
 
 ### 12. Dependency and Package Surface
 
