@@ -239,6 +239,57 @@ function sameCanonicalPath(left: string, right: string): boolean {
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+type DetectChangesFallbackReason =
+  | 'different_repo'
+  | 'not_git_repo'
+  | 'repo_identity_unresolved'
+  | null;
+
+function createDetectChangesPathMetadata(
+  repoPath: string,
+  launchCwd: string,
+  diffCwd: string,
+  forceWorktreeResolution = false,
+): Record<string, any> {
+  const warnings: string[] = [];
+  const repoCanonical = getCanonicalRepoRoot(repoPath);
+  const launchGitRoot = getGitRoot(launchCwd);
+  const launchCanonical = launchGitRoot ? getCanonicalRepoRoot(launchCwd) : null;
+  const sameRepoIdentity =
+    !!repoCanonical && !!launchCanonical && sameCanonicalPath(repoCanonical, launchCanonical);
+  const pathResolution =
+    forceWorktreeResolution ||
+    (sameRepoIdentity && !!launchGitRoot && sameCanonicalPath(diffCwd, launchGitRoot))
+      ? 'cwd_worktree'
+      : 'registry_repo';
+
+  let fallbackReason: DetectChangesFallbackReason = null;
+  if (pathResolution === 'registry_repo') {
+    if (!repoCanonical) {
+      fallbackReason = 'repo_identity_unresolved';
+      warnings.push(
+        `Git identity could not be resolved for indexed repo path '${repoPath}'. Falling back to registry repo path.`,
+      );
+    } else if (!launchGitRoot && !sameCanonicalPath(repoPath, launchCwd)) {
+      fallbackReason = 'not_git_repo';
+    } else if (launchCanonical && !sameCanonicalPath(repoCanonical, launchCanonical)) {
+      fallbackReason = 'different_repo';
+      warnings.push(
+        `Git operations fell back to '${repoPath}' because process cwd '${launchCwd}' is inside a different git repository.`,
+      );
+    }
+  }
+
+  return {
+    git_repo_path: repoPath,
+    git_diff_path: diffCwd,
+    process_cwd: launchCwd,
+    path_resolution: pathResolution,
+    fallback_reason: fallbackReason,
+    warnings,
+  };
+}
+
 /**
  * Resolve the git diff cwd for detect_changes, auto-detecting linked worktrees.
  *
@@ -2366,6 +2417,7 @@ export class LocalBackend {
     params: {
       scope?: string;
       base_ref?: string;
+      cwd?: string;
       worktree?: string;
     },
   ): Promise<any> {
@@ -2394,6 +2446,11 @@ export class LocalBackend {
     }
 
     let diffOutput: string;
+    let pathMetadata: Record<string, any> = createDetectChangesPathMetadata(
+      repo.repoPath,
+      path.resolve(process.cwd()),
+      repo.repoPath,
+    );
     try {
       // Resolve the cwd for git diff.
       //
@@ -2405,14 +2462,17 @@ export class LocalBackend {
       // Resolution order (see resolveWorktreeCwd for details):
       //   1. params.worktree — explicit override, validated against the
       //      registered repo's canonical root.
-      //   2. Auto-detect — if the server's launch cwd (process.cwd()) is a
-      //      linked worktree of the same canonical repo, use its git root.
+      //   2. params.cwd or process.cwd() — local compatibility path for MCP
+      //      callers that pass their active worktree cwd.
       //   3. repo.repoPath — fallback (original behaviour, handled inside
       //      resolveWorktreeCwd when no worktree is detected).
       //
       // Start with the auto-detected value; override with the validated
       // explicit param when provided. This avoids a dead initial assignment.
-      let diffCwd = resolveWorktreeCwd(repo.repoPath, process.cwd());
+      const launchCwd = params.cwd ?? process.cwd();
+      const resolvedLaunchCwd = path.resolve(launchCwd);
+      let diffCwd = resolveWorktreeCwd(repo.repoPath, resolvedLaunchCwd);
+      let forceWorktreeMetadata = false;
       if (params.worktree) {
         if (!path.isAbsolute(params.worktree)) {
           return {
@@ -2433,7 +2493,14 @@ export class LocalBackend {
           };
         }
         diffCwd = providedResolved;
+        forceWorktreeMetadata = true;
       }
+      pathMetadata = createDetectChangesPathMetadata(
+        repo.repoPath,
+        resolvedLaunchCwd,
+        diffCwd,
+        forceWorktreeMetadata,
+      );
 
       // maxBuffer raised from Node's 1MB default to 256MB to avoid ENOBUFS on
       // repos with large unstaged/untracked diffs (e.g. unignored build folders).
@@ -2460,6 +2527,7 @@ export class LocalBackend {
         },
         changed_symbols: [],
         affected_processes: [],
+        metadata: pathMetadata,
       };
     }
 
@@ -2560,6 +2628,7 @@ export class LocalBackend {
       },
       changed_symbols: changedSymbols,
       affected_processes: Array.from(affectedProcesses.values()),
+      metadata: pathMetadata,
     };
   }
 

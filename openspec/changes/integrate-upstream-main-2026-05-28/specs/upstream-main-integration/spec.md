@@ -105,3 +105,14 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   fallback matches
 - **AND** multiple canonical-root fallback matches are treated as ambiguous
   rather than resolved by arbitrary registry order
+
+#### Scenario: Detect-changes receives a client cwd hint from MCP
+
+- **WHEN** an MCP client calls `detect_changes` with a `cwd` parameter
+- **THEN** GitNexus uses that directory as the linked-worktree auto-detection
+  input instead of relying only on the MCP server process cwd
+- **AND** the stricter explicit `worktree` parameter still overrides the cwd
+  hint after validating that it belongs to the same canonical git repository
+- **AND** the result includes path-resolution metadata describing the indexed
+  repo path, git diff path, client cwd, resolution mode, fallback reason, and
+  warnings
