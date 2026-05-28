@@ -91,6 +91,9 @@
         and configured `analyze --embeddings` node limits.
   - [x] 7.5.5 Add focused regression coverage for `doctor` help flags and
         structured JSON diagnostics.
+  - [x] 7.5.6 Add focused regression coverage for current `gitnexus-web`
+        Sigma selection behavior that replaced the old local selection-sync
+        test files.
 - [ ] 7.6 Verify absorbed source capabilities before deciding whether to replay
       old local files
   - [x] 7.6.1 Verify language/framework parsing coverage for Vue SFC, Laravel
@@ -106,6 +109,9 @@
         `gitnexus-web` package before deciding not to replay the old Vite
         helper, Mermaid loader, syntax highlighter helper, and empty browser
         shim files.
+  - [x] 7.6.5 Verify web ingestion/selection behavior: retire the old
+        browser-side ingestion worker/import processor, and keep the current
+        selection/highlighting behavior under regression coverage.
 
 ## 8. Final Cutover Guard
 
@@ -307,3 +313,10 @@
   smoke for `doctor --help` and `doctor --json --repo <worktree>` exited 0 and
   produced `runtime`, `native-runtime`, `capabilities`, `language-support`,
   `embeddings`, and `git-repo` checks.
+- Web ingestion/selection behavior was split by architecture. The old
+  browser-side ingestion worker/import processor was retired with the previous
+  local web ingestion architecture. Current Sigma selection behavior was
+  verified with `HOME=/tmp/gitnexus-web-audit-home npm test --
+  test/unit/useSigma.selection.test.tsx --reporter=dot`: 1 test file, 3 tests.
+  The full `gitnexus-web` unit suite also passed with 23 test files and 285
+  tests.

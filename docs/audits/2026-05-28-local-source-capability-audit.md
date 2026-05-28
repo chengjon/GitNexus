@@ -72,7 +72,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 10 | Kuzu storage/index adapter | 6 files: 6 absent | Retire | Should not block; upstream has LadybugDB replacement |
 | 11 | CLI command/runtime surface | 5 files: 2 absent, 3 upstream wins | Reimplemented narrow `doctor` diagnostics surface | No longer blocks for `doctor --json/--repo/--host`; continue verifying other CLI-only gaps separately |
 | 12 | Dependency/package surface | 4 files: 4 upstream wins | Absorb upstream | Does not block; do not restore old package locks |
-| 13 | Web ingestion/selection behavior | 4 files: 4 absent | Verify product need; reimplement if still required | Blocks only if local web import/selection behavior is required |
+| 13 | Web ingestion/selection behavior | 4 files: 4 absent | Selection verified with regression coverage; browser ingestion retired | Does not block: old browser ingestion worker is superseded; current Sigma selection behavior is tested |
 | 14 | Detect-changes/worktree path handling | 3 files: 3 absent | Reimplement first | Blocks; governance requires reliable worktree-aware staged scope gates |
 | 15 | Web UI panels/agent graph UX | 2 files: 2 upstream wins | Verify visual/UX gaps | Does not block unless local UI behavior is required |
 | 16 | CI/governance automation | 2 files: 2 absent | Reimplement or replace with root governance workflow | Blocks local release discipline only if these checks are expected in CI |
@@ -363,10 +363,28 @@ Representative local files:
 - `gitnexus-web/test/unit/GraphCanvas.selection-sync.test.tsx`
 - `gitnexus-web/test/unit/useSigma.behavior.test.tsx`
 
-Decision: `Verify product need; reimplement if still required`.
+Decision: `Selection verified with regression coverage; browser ingestion retired`.
 
-The files are absent in `upstream-sync`. Treat these as product behavior
-requests, not automatic replay material.
+The old browser-side ingestion worker and import processor belong to the retired
+local web ingestion architecture. They should not be replayed into
+`upstream-sync`, which now routes graph data through the current backend/server
+flow.
+
+The selection/highlighting behavior remains user-facing and is still present in
+the current `gitnexus-web/src/hooks/useSigma.ts` path. A focused regression test
+was added instead of restoring the old test files verbatim:
+
+- selecting a node nudges the Sigma camera to refresh cached edge rendering
+- connected edges are emphasized and unrelated edges are dimmed
+- `focusNode` uses the direct focus path after the first focus
+
+Verification on 2026-05-29:
+
+- `HOME=/tmp/gitnexus-web-audit-home npm test --
+  test/unit/useSigma.selection.test.tsx --reporter=dot` passed: 1 test file, 3
+  tests.
+- `HOME=/tmp/gitnexus-web-audit-home npm test -- --reporter=dot` under
+  `gitnexus-web` passed: 23 test files, 285 tests.
 
 ### 14. Detect-Changes and Worktree Path Handling
 
