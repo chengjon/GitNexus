@@ -228,6 +228,19 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   LadybugDB behavior, and repo-manager behavior before `origin/main` cutover is
   considered
 
+#### Scenario: Supporting source surfaces are closed without blanket replay
+
+- **WHEN** a maintainer reviews local package files, test harness files,
+  hook/plugin files, and miscellaneous source-ish files from the local branch
+- **THEN** GitNexus keeps the upstream `package.json` and lockfile surfaces
+  rather than restoring old local package locks or obsolete script names
+- **AND** old test harness files remain retired unless a specific retained
+  capability requires an upstream-shaped regression test
+- **AND** the hook/plugin runtime keeps the current upstream plugin shape plus
+  the minimal `hook-db-lock-probe.cjs` ENOENT override fix
+- **AND** miscellaneous files are closed through the explicit capability rows
+  rather than replayed as a catch-all batch
+
 #### Scenario: A maintainer refreshes AI host context without reindexing
 
 - **WHEN** a maintainer runs `gitnexus refresh-context [path]` inside or against
