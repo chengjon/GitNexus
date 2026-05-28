@@ -64,7 +64,7 @@ proposed replacement baseline. Each capability must be classified before cutover
 | 2 | Language support and framework parsing | 18 files: 16 absent, 2 upstream wins | Verify then reimplement gaps | Blocks if Vue SFC, Laravel/PHP metadata, Swift/Kotlin reporting, or language availability matrix is required |
 | 3 | Wiki generator | 17 files: 16 absent, 1 upstream wins | Reimplement selectively | Blocks if local full/incremental/module-tree wiki generation is required |
 | 4 | MCP local backend/tools | 17 files: 14 absent, 3 upstream wins | Reimplement on upstream local-backend/LadybugDB | Blocks; current MCP path has already shown Kuzu/Ladybug index mismatch risk |
-| 5 | Web build/runtime asset handling | 13 files: 11 absent, 2 upstream wins | Verify; mostly absorb or retire | Does not block unless local Vite/Mermaid/syntax asset behavior is required |
+| 5 | Web build/runtime asset handling | 13 files: 11 absent, 2 upstream wins | Verified absorbed/retired; no replay now | Does not block: current web build/tests pass; remaining chunk warnings are optimization debt, not missing behavior |
 | 6 | Host integration and context refresh | 12 files: 12 absent | Reimplement selectively | Blocks if Codex/Claude/Cursor host setup, freshness, and local context refresh behavior must survive |
 | 7 | Embedding runtime/configuration | 7 files: 5 absent, 2 upstream wins | Verify then reimplement config gaps | Blocks if local Ollama/config override behavior is required beyond upstream embedding support |
 | 8 | Test/config harness | 7 files: 6 absent, 1 upstream wins | Remap tests/config only after target capability decisions | Does not block by itself; supports other blockers |
@@ -190,11 +190,26 @@ Representative local files:
 - `gitnexus-web/src/lib/syntax-highlighter.ts`
 - `gitnexus-web/src/shims/empty-browser-module.js`
 
-Decision: `Verify; mostly absorb or retire`.
+Decision: `Verified absorbed/retired; no replay now`.
 
-The upstream web build passed during integration. Local web asset shims should
-not be restored unless a focused browser/build test proves the current upstream
-web still lacks a required behavior.
+The local `main` web asset work introduced Vite helper files for manual chunking
+and static copy, a lazy Mermaid loader, a Prism-light syntax highlighter helper,
+and an empty browser shim. `upstream-sync` no longer carries those exact helper
+files, but it has upgraded the web package around Vite 8, Mermaid 11.15, and the
+current Markdown/Mermaid components.
+
+Verification on 2026-05-29:
+
+- `npm run build` under `gitnexus-web` exited 0.
+- `npm test -- --reporter=dot` under `gitnexus-web` exited 0 with 22 test files
+  and 282 tests passing.
+
+The build still reports large chunk warnings and an ineffective dynamic import
+warning for `ProcessFlowModal`, so the old manual chunking work is not fully
+equivalent as a performance optimization. It is not a cutover blocker because
+the current web package builds and its unit suite passes without the retired
+helper files. Revisit this only if deployment size/performance becomes a
+release gate or a browser smoke test proves a runtime regression.
 
 ### 6. Host Integration and Context Refresh
 

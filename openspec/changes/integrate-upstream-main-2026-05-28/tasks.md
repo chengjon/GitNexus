@@ -96,6 +96,10 @@
   - [x] 7.6.3 Verify embedding runtime coverage for HTTP embedding, embedding
         config, pipeline, chunking, HF env, semantic search/model behavior, and
         persisted config commands.
+  - [x] 7.6.4 Verify web build/runtime asset handling for the current
+        `gitnexus-web` package before deciding not to replay the old Vite
+        helper, Mermaid loader, syntax highlighter helper, and empty browser
+        shim files.
 
 ## 8. Final Cutover Guard
 
@@ -279,3 +283,10 @@
 - Built CLI smoke for `config embeddings set/show/clear` passed with a temporary
   `GITNEXUS_HOME`: set wrote provider `ollama`, node limit `90000`, and batch
   size `8`; show printed effective config; clear removed only `embeddings`.
+- Web build/runtime asset handling was verified as absorbed/retired for cutover
+  purposes. `HOME=/tmp/gitnexus-web-audit-home npm run build` under
+  `gitnexus-web` exited 0. `HOME=/tmp/gitnexus-web-audit-home npm test --
+  --reporter=dot` under `gitnexus-web` exited 0 with 22 test files and 282
+  tests passing. The build still reports large chunk warnings and an ineffective
+  dynamic import warning for `ProcessFlowModal`; those remain optimization debt,
+  not a current blocker that justifies restoring the old Vite helper files.
