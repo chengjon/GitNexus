@@ -47,7 +47,7 @@
 
 ## 6. Cutover Guard
 
-- [ ] 6.1 Push only a staging branch first, such as
+- [x] 6.1 Push only a staging branch first, such as
       `origin/upstream-sync`
 - [ ] 6.2 Replace `origin/main` only after explicit approval and successful
       validation
@@ -113,3 +113,6 @@
   gitnexus/hooks/claude/hook-db-lock-probe.cjs
   gitnexus-claude-plugin/hooks/hook-db-lock-probe.cjs
   openspec/changes/integrate-upstream-main-2026-05-28`.
+- `origin/upstream-sync` was pushed and PR
+  https://github.com/chengjon/GitNexus/pull/8 was created as the staging review
+  gate. `origin/main` remains unchanged.
