@@ -49,11 +49,29 @@
 
 - [x] 6.1 Push only a staging branch first, such as
       `origin/upstream-sync`
-- [ ] 6.2 Replace `origin/main` only after explicit approval and successful
-      validation
+- [ ] 6.2 Replace `origin/main` only after explicit approval, successful
+      validation, and source capability continuity resolution when required
 - [ ] 6.3 Use `--force-with-lease` only for the final approved main replacement
 
-## 7. Final Verification Notes
+## 7. Second-Stage Source Capability Audit
+
+- [x] 7.1 Recalculate local source-ish files changed since the merge base
+- [x] 7.2 Classify each local source capability as absorbed, reimplement,
+      retire, verify, or remap tests
+- [x] 7.3 Record that `origin/main` cutover is blocked when the required outcome
+      is that all local source upgrades continue to be effective
+- [ ] 7.4 Replay required source capabilities as upstream-shaped behavior
+      changes
+- [ ] 7.5 Re-map local regression tests after their target capabilities are
+      absorbed or reimplemented
+
+## 8. Final Cutover Guard
+
+- [ ] 8.1 Replace `origin/main` only after explicit approval and successful
+      validation
+- [ ] 8.2 Use `--force-with-lease` only for the final approved main replacement
+
+## 9. Final Verification Notes
 
 - `openspec validate integrate-upstream-main-2026-05-28` returned
   `Change 'integrate-upstream-main-2026-05-28' is valid` before governance
@@ -116,3 +134,12 @@
 - `origin/upstream-sync` was pushed and PR
   https://github.com/chengjon/GitNexus/pull/8 was created as the staging review
   gate. `origin/main` remains unchanged.
+- User clarified the target outcome as: local source upgrades must continue to
+  be fully effective. That changes the cutover decision: the current
+  `upstream-sync` branch remains useful as a staging baseline, but `origin/main`
+  replacement is blocked until required local source capabilities are absorbed,
+  reimplemented, retired, or remapped.
+- `docs/audits/2026-05-28-local-source-capability-audit.md` records the
+  second-stage audit. It found 240 local source-ish changed files relative to
+  the merge base: 67 use upstream versions in `upstream-sync`, 173 are absent,
+  and 0 are preserved as local source content.

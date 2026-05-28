@@ -66,3 +66,30 @@ approve the cutover.
 - **WHEN** validation is complete and maintainers approve cutover
 - **THEN** the final replacement may use `--force-with-lease`
 - **AND** the command targets only the approved branch replacement
+
+### Requirement: GitNexus SHALL block mainline replacement when local source capability continuity is required but not yet proven
+
+GitNexus SHALL treat local source capability continuity as a separate acceptance
+gate from governance replay. If maintainers require local source upgrades to
+remain effective after upstream replacement, each local source capability must be
+classified as absorbed, reimplemented, retired, or remapped before replacing
+`origin/main`.
+
+#### Scenario: Maintainers require local source upgrades to remain effective
+
+- **WHEN** maintainers state that local source upgrades must continue to be
+  fully effective after the upstream integration
+- **THEN** `origin/main` replacement is blocked until the second-stage source
+  capability audit is complete
+- **AND** capabilities that remain required are replayed as behavior-level
+  upstream-shaped changes rather than copied as old files
+- **AND** capabilities tied to retired architecture are explicitly marked
+  retired or replaced
+
+#### Scenario: A source capability is tied to the retired Kuzu architecture
+
+- **WHEN** a local source capability depends on Kuzu-specific adapters or index
+  storage paths
+- **THEN** the Kuzu files are not replayed into the upstream branch
+- **AND** any still-required behavior is reimplemented against the current
+  LadybugDB architecture
