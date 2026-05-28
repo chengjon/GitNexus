@@ -1,135 +1,198 @@
-<!-- version: 1.14.0 -->
-<!-- Last updated: 2026-07-16 -->
+<!-- version: 1.2.0 -->
+<!-- local structured header adapted from upstream template -->
 
-Last reviewed: 2026-07-16
+Last reviewed: 2026-04-15
 
-**Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
+## Repository Development Rules
+
+This repository's top-level development governance lives in `DEVELOPMENT_RULES.md`.
+
+For any work involving migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, or backup files, `DEVELOPMENT_RULES.md` is mandatory and takes precedence over local convenience patterns.
+
+**Project:** GitNexus
+**Environment:** local development fork
+**Maintainer:** repository maintainers and current fork operators
 
 ## Scope
 
-| Boundary | Rule |
-|----------|------|
-| **Reads** | `gitnexus/`, `gitnexus-web/`, `eval/`, plugin packages, `.github/`, `.gitnexus/`, docs. |
-| **Writes** | Only paths required for the change; keep diffs minimal. Update lockfiles when deps change. |
-| **Executes** | `npm`, `npx`, `node` under `gitnexus/` and `gitnexus-web/`; `uv run` for Python under `eval/`; documented CI/dev workflows. |
-| **Off-limits** | Real `.env` / secrets, production credentials, unrelated repos, destructive git ops without confirmation. |
+| | |
+|--|--|
+| **Reads** | Repository paths needed for the task, including `gitnexus/`, `gitnexus-web/`, `eval/`, plugin packages, docs, and OpenSpec artifacts. |
+| **Writes** | Only files required for the requested change. Keep diffs minimal and preserve unrelated user modifications. |
+| **Executes** | `npm`, `npx`, `node`, `git`, `openspec`, and shell utilities used by the documented local workflows. |
+| **Off-limits** | Secrets, unrelated repositories, destructive history edits without explicit approval, and invented docs or configs that do not exist locally. |
 
 ## Model Configuration
 
-- **Primary:** Use a named model (e.g. Claude Sonnet 4.x). Avoid `Auto` or unversioned `latest` when reproducibility matters.
-- **Notes:** The GitNexus CLI indexer does not call an LLM.
+- Prefer explicit named model selections where the host supports them.
+- Do not rely on vague `latest` or `auto` assumptions when reproducibility matters.
+- The GitNexus CLI/indexer itself does not require an LLM. Optional AI flows depend on user-managed provider or host configuration.
 
-## Execution Sequence (complex tasks)
+## Execution Sequence For Complex Tasks
 
-For multi-step work, state up front:
-1. Which rules in this file and **[GUARDRAILS.md](GUARDRAILS.md)** apply (and any relevant Signs).
-2. Current **Scope** boundaries.
-3. Which **validation commands** you will run (`cd gitnexus && npm test`, `npx tsc --noEmit`).
+Before substantial multi-step work:
 
-On long threads, *"Remember: apply all AGENTS.md rules"* re-weights these instructions against context dilution.
+1. State which rules from this file, `DEVELOPMENT_RULES.md`, and the GitNexus block apply.
+2. State the current scope boundaries for reads, writes, and anything intentionally deferred.
+3. State which verification commands will prove the claimed result.
 
-## Claude Code hooks
+On long threads, restate the active scope before major edits so local governance and current-task rules do not get diluted.
 
-**PreToolUse** hooks can block tools (e.g. `git_commit`) until checks pass. Adapt to this repo: `cd gitnexus && npm test` before commit.
+Every non-trivial workline MUST also state a one-line `Line Scope` contract before implementation:
 
-## Context budget
+- `Line Scope: this line only delivers <target feature or target slice>; do not add unrelated governance, docs churn, refactors, naming cleanup, formatting-only edits, or side quests.`
+- Treat that line-scope statement as a hard boundary, not a soft preference. If new work falls outside it, split it into a later line instead of extending the current one.
 
-Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.md](CONTRIBUTING.md)**. If always-on rules grow, split into **`.cursor/rules/*.mdc`** (globs). **Cursor:** project-wide rules in `.cursor/index.mdc`. **Claude Code:** load `STANDARDS.md` only when needed.
+## Delivery Priority and Docs Governance
 
-## Reference docs
+- Day-to-day delivery priority is locked as: functional testing and iteration-to-release work first, historical document convergence second.
+- Historical document governance remains active, but only as low-intensity background maintenance. It MUST NOT displace core execution, module-boundary acceptance, critical-path coverage, or release validation work.
+- Default resource allocation after planning should favor:
+  - end-to-end execution self-test closure
+  - module-boundary acceptance and regression checks
+  - critical-path test coverage and missing use-case fill-in
+  - packaging, release-readiness, and post-change validation
+- The existing docs-governance workflow stays in force when a docs slice is needed: single-page slice, boundary/status note, Chinese audit, OpenSpec change, validate, staged risk detection, then commit.
+- Do not batch historical-doc cleanup as the main thread. Insert only one or two doc-governance slices after a completed feature iteration, code cleanup pass, or verification round.
+- Apply an explicit stop line for low-value historical material. Do not proactively chase:
+  - deeply nested legacy design drafts
+  - obsolete plans that are already abandoned and no longer consulted
+- Prioritize docs governance only for high-traffic or still-referenced historical documents that are easy to misread as active requirements, active gates, or current execution queues.
+- If feature delivery, testing closure, or release verification is still incomplete, prefer continuing that mainline work before opening another docs-only slice.
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)**, **[CONTRIBUTING.md](CONTRIBUTING.md)**, **[GUARDRAILS.md](GUARDRAILS.md)**
-- **Call & inheritance resolution (RFC #909 Ring 3):** See ARCHITECTURE.md § Scope-Resolution Pipeline. All languages resolve calls and inheritance through the scope-resolution pipeline (`Registry.lookup`, `preEmitInheritanceEdges`, `emitHeritageEdges`, `buildMro` → `MethodDispatchIndex`). **Shared code in `gitnexus/src/core/ingestion/` must not name languages** — plug language behavior in via `LanguageProvider` / `ScopeResolver` hooks. A language plugs in by implementing `ScopeResolver` (`scope-resolution/contract/scope-resolver.ts`) and registering it in `SCOPE_RESOLVERS`. (The legacy call-resolution DAG + `@heritage` capture path were removed in RING4-1 #942.)
-- **Cursor:** `.cursor/index.mdc` (always-on); `.cursor/rules/*.mdc` (glob-scoped). Legacy `.cursorrules` deprecated.
-- **GitNexus:** standard skills in `.claude/skills/gitnexus-*/`; MCP rules in `gitnexus:start` block below.
+## Workline Separation and Scope Lock
 
-## PR Swarm Review (cross-CLI)
+- Separate work into exactly one of these lanes per line and per commit:
+  - feature lane: capability addition, bug fix, or product iteration
+  - governance lane: docs, historical-boundary sync, audits, and technical-debt records
+  - refactor lane: structural cleanup without mixing in product behavior changes
+- Do not mix feature, governance, and refactor intent in a single commit unless the extra change is strictly required to make the primary lane work.
+- Keep each slice minimal and single-directional:
+  - do not cross modules unless the target behavior genuinely spans them
+  - do not cross responsibility domains for convenience
+  - do not "fix nearby issues" or "clean up while here"
+  - do not bundle naming or formatting convergence unless it is required for the target change
+- Before committing, use staged `gitnexus_detect_changes({scope: "staged", repo: "GitNexus", cwd: "/opt/claude/GitNexus"})` as the scope gate. If it surfaces low-relevance files or cross-domain spillover, trim the slice before continuing.
 
-To run a production-readiness review of a GitNexus pull request from **any** AI CLI, follow
-the canonical, CLI-neutral spec **[`pr-swarm-review/orchestration.md`](pr-swarm-review/orchestration.md)**
-(seven read-only review personas under `pr-swarm-review/personas/`). It defines two
-execution modes with the same output contract: **Swarm mode** (parallel subagents, e.g.
-Claude Code) and **Solo mode** (one agent runs all lanes sequentially — Codex, Gemini,
-Cursor, Copilot, or any agent reading this file). Per-CLI entrypoints are thin wrappers
-listed in [`pr-swarm-review/README.md`](pr-swarm-review/README.md); edit review logic only
-in the canonical files, never in the wrappers. The review is read-only — it never edits,
-commits, or posts.
+## Functional Completion Standard
 
-## Engineering planning & execution (`/gitnexus-plan` · `/gitnexus-work` · `/gitnexus-review` · `/gitnexus-lfg`)
+- Feature work is not complete when code compiles or the local edit looks finished. A feature line is complete only after all required closure steps are done.
+- Every feature delivery MUST close the loop with all of the following:
+  - capability self-check through the actual CLI, runtime, or user-facing execution path touched by the change
+  - guard coverage added or updated through unit tests, feature tests, or focused verification scripts appropriate to the changed behavior
+  - repository-level anti-regression coverage when the change affects a shared or release-critical path
+  - fact registration in the canonical docs when the change alters behavior, boundaries, enablement conditions, or known limits
+- No guard test plus no execution-path verification means the work is still a draft, not a finished delivery.
+- Each completed iteration should leave behind regression assets, not only changed implementation files.
 
-Four canonical, CLI-neutral skill specs under `.claude/skills/` (Claude Code invokes
-them as slash commands; Codex or any other agent reading this file should read the
-named SKILL.md and follow it directly — user-level Codex prompts are documented in the
-plan/work/lfg skill READMEs):
+## Source of Truth and Session Alignment
 
-- **`gitnexus-plan/SKILL.md`** — deep, implementation-ready plan for a code change:
-  GitNexus graph intelligence for navigation, statement-level PDG slices for behavioral
-  constraints, targeted source reads for verification. Output lands in `docs/plans/`
-  with a reusable implementation context pack (section 11). Planning-only — it never
-  edits code (index freshness refreshes via `analyze --index-only` are the one
-  permitted state change). Interactive runs ask up front how deep to go
-  (quick / standard / deep); Deepen mode strengthens an existing plan in place.
-- **`gitnexus-work/SKILL.md`** — executes a gitnexus-plan as verified atomic commits:
-  drift-checks the plan's evidence pin against HEAD, `impact` before every symbol
-  edit, tests from the plan's scenarios, `detect_changes` before every commit.
-- **`gitnexus-review/SKILL.md`** — read-only GitNexus review of a PR URL/number,
-  branch or commit range, or local staged/unstaged/untracked changes. It pins exact
-  SHAs, aligns the graph and checkout, runs a PDG-backed taint pass on trust-boundary
-  diffs, scales to per-domain expert lenses from the graph's clusters (dispatched as
-  parallel swarm lanes — `ci-personas/` — when the CI review agent runs it), and
-  reports evidence-backed findings.
-- **`gitnexus-lfg/SKILL.md`** — pipeline orchestrator: plan (depth asked up front) →
-  blocking user gate (proceed or stop) → work → `gitnexus-review`.
+- `OpenSpec` is the first source of truth for architecture, capability contracts, and accepted change intent.
+- Current repository entrypoint docs such as `README.md`, `docs/README.md`, and other actively maintained operator-facing docs describe the present local operating state when they are kept current in the same change.
+- Historical audits, design notes, and legacy plans are records, not execution authority, unless a current source explicitly points back to them.
+- Do not invent hidden rules, hidden compatibility promises, or private simplifications inside one session. If a limitation, temporary compromise, or cross-module rule matters, record it in `OpenSpec` or another current repository source-of-truth document added or updated in the same line.
+- When switching to a new workline or resuming with fresh context, re-read:
+  - the current baseline source of truth for that area
+  - the active line scope
+  - the known local limitations or temporary constraints documented for that area
 
-The family ships with the npm package (`gitnexus/skills/`, installed to editor targets
-by `gitnexus setup`) and the Claude Code plugin; review also has a standalone Cursor
-mirror. `gitnexus/test/unit/shipped-skills-sync.test.ts` guards the copies. Token savings of the workflow are measurable with
-`eval/workflow_bench/` (real headless CLI runs, free-model routing supported — see its README).
+## Ownership and Cross-Domain Changes
+
+- Treat directory and module boundaries as ownership boundaries even when the code is technically editable from one session.
+- Before modifying files outside the obvious target area, confirm whether the change is:
+  - a small compatibility adjustment required by the primary line
+  - or a separate responsibility-domain change that should be queued independently
+- Cross-domain edits that are unavoidable for the target line MUST be called out explicitly in the user update and commit scope.
+- If a change would materially invade another active line, split it into a follow-up instead of quietly absorbing it into the current patch.
+- When parallel lines are active, prefer branch isolation that matches the lane:
+  - `feat/*` for feature lines
+  - `chore/docs/*` for governance lines
+  - dedicated refactor branches for structural cleanup
+- `main` should remain the integration branch for verified, converged work rather than a place to interleave unrelated active lines.
+
+## Context Budget
+
+- Keep the repository grounded in current local source-of-truth docs instead of generic playbooks.
+- This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`, `GUARDRAILS.md`, `CONTRIBUTING.md`, or `TESTING.md`. Do not cite them as existing references unless they are added in the same change.
+- If future work introduces `.cursor/` rule files or other host-specific overlays, document them explicitly before treating them as always-on instructions.
+
+## Reference Documentation
+
+- `DEVELOPMENT_RULES.md` first for repository-wide governance and merge blockers
+- `README.md` next for the primary product surface and supported host/setup guidance
+- `docs/README.md` for documentation navigation across quick starts, audits, and historical records
+- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations after the main README framing
+- `docs/audits/README.md` and `openspec/changes/` for status verification, active repo-hygiene records, and convergence history
+- the `gitnexus:start` ... `gitnexus:end` block below for GitNexus-specific MCP, index, and impact-analysis rules
 
 ## Changelog
 
 | Date | Version | Change |
 |------|---------|--------|
-| 2026-07-20 | 1.14.0 | `gitnexus-review` gains a coordinated swarm: six `ci-personas/` lanes the CI review agent dispatches as subagents (via the `Agent` tool), with a bounded critic gate and sidechain-excluded evidence. |
-| 2026-07-16 | 1.13.0 | `gitnexus-plan` asks plan depth up front (quick/standard/deep) in interactive runs; `gitnexus-lfg` gate slimmed to proceed/stop (Deepen stays as the route-back mechanism). |
-| 2026-07-16 | 1.12.0 | Renamed `gitnexus-pr-review` to `gitnexus-review`; added PR URL/number, branch/range, and local-change targets plus install migration (setup warns on a legacy `gitnexus-pr-review` dir and leaves it in place; uninstall removes it). |
-| 2026-07-11 | 1.11.0 | Skill family shipped via npm skills/ + plugin (sync-guarded); added eval/workflow_bench token-savings benchmark. |
-| 2026-07-11 | 1.10.0 | Added `gitnexus-work` (plan executor) and `gitnexus-lfg` (plan → deepen/work gate → review pipeline) skills; section renamed to Engineering planning & execution. |
-| 2026-07-11 | 1.9.0 | Added Engineering planning (`/gitnexus-plan`) section; registered the `gitnexus-plan` skill (`.claude/skills/gitnexus-plan/`). |
-| 2026-05-22 | 1.8.0 | Kotlin added to `MIGRATED_LANGUAGES` (registry-primary call resolution by default). Closes #1756 (companion-vs-instance dispatch) and #1757 (lambda scopes); refs #1746. RFC §6.4 corpus criterion waived (corpus-mode wiring is #927-scope); fixture criterion met. |
-| 2026-04-23 | 1.7.0 | TypeScript added to `MIGRATED_LANGUAGES` (registry-primary call resolution by default). |
-| 2026-04-20 | 1.6.0 | Added scope-resolution pipeline pointer (RFC #909 Ring 3); Python migrated to registry-primary. |
-| 2026-04-19 | 1.5.0 | Cross-repo impact (#794): `impact`/`query`/`context` accept `repo: "@<group>"` + `service`. Removed `group_query`/`group_contracts`/`group_status` MCP tools; added `gitnexus://group/{name}/contracts` and `gitnexus://group/{name}/status` resources. |
-| 2026-04-16 | 1.4.0 | Fixed: web UI description, pre-commit behavior, MCP tools (7->16), added gitnexus-shared, removed stale vite-plugin-wasm gotcha. |
-| 2026-04-13 | 1.3.0 | Updated GitNexus index stats after DAG refactor. |
-| 2026-03-24 | 1.2.0 | Fixed gitnexus:start block duplication. |
-| 2026-03-23 | 1.1.0 | Updated agent instructions, references, Cursor layout. |
-| 2026-03-22 | 1.0.0 | Initial structured header and changelog. |
-
----
+| 2026-04-15 | 1.2.0 | Added line-scope contracts, workline separation, functional completion closure rules, source-of-truth alignment, and cross-domain ownership boundaries for day-to-day development. |
+| 2026-04-15 | 1.1.0 | Added delivery-priority rules that keep feature/test/release work ahead of historical-doc convergence, while retaining the existing low-intensity docs governance workflow. |
+| 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **GitNexus** (20319 symbols, 54304 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus.
 
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+Run `gitnexus status` for current index stats and freshness.
+
+Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `gitnexus analyze` in terminal first.
+
+> If GitNexus behaves differently across machines or CI, run `gitnexus doctor --json` to inspect `native-runtime`, `language-support`, and host configuration checks.
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`. In multi-repo MCP sessions, use `gitnexus_detect_changes({scope: "staged", repo: "GitNexus"})`. If the server cwd may not match the active worktree, also pass `cwd`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/GitNexus/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main", repo: "GitNexus"})` — see what your branch changed in multi-repo MCP sessions
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all", repo: "GitNexus"})` to verify only expected files changed in multi-repo MCP sessions.
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit changes without running `detect_changes()` to check affected scope.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged", repo: "GitNexus"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
 
 ## Resources
 
@@ -140,57 +203,124 @@ This project is indexed by GitNexus as **GitNexus** (20319 symbols, 54304 relati
 | `gitnexus://repo/GitNexus/processes` | All execution flows |
 | `gitnexus://repo/GitNexus/process/{name}` | Step-by-step execution trace |
 
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope, with `repo: "GitNexus"` whenever multiple repos are indexed
+4. All d=1 (WILL BREAK) dependents were updated
+
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+gitnexus analyze
+```
+
+If you have modified the local GitNexus source code under `/opt/claude/GitNexus/gitnexus/src`, rebuild first so the CLI picks up the updated `dist` files:
+
+```bash
+cd /opt/claude/GitNexus/gitnexus
+npm run build
+gitnexus analyze
+```
+
+Use plain `gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+
+Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
+
+Use `gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.
+
+This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
+
+During `gitnexus analyze`, GitNexus automatically detects and stops local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI or editor sessions open.
+
+Use `gitnexus doctor --json` when you need to verify whether optional grammars such as Kotlin / Swift are actually available in the current environment.
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+gitnexus analyze --embeddings
+```
+
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
+
+If embedding generation is enabled, these environment variables control the provider and runtime behavior:
+
+```bash
+# Raise the CLI safety limit for large repos.
+# Start with 64 on a local Ollama GPU setup; use 32 as a conservative fallback.
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000
+GITNEXUS_EMBEDDING_BATCH_SIZE=64
+
+# Use a Hugging Face mirror / custom endpoint
+HF_ENDPOINT=https://hf-mirror.com
+# or
+GITNEXUS_HF_REMOTE_HOST=https://hf-mirror.com
+
+# Persist downloaded model files
+GITNEXUS_HF_CACHE_DIR=/path/to/hf-cache
+
+# Use a predownloaded local Hugging Face model only
+GITNEXUS_HF_LOCAL_MODEL_PATH=/path/to/local-models
+GITNEXUS_HF_LOCAL_ONLY=1
+
+# Use Ollama instead of Hugging Face for both indexing and query embeddings
+GITNEXUS_EMBEDDING_PROVIDER=ollama
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+```
+
+Recommended Ollama example:
+
+```bash
+GITNEXUS_EMBEDDING_PROVIDER=ollama \
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
+GITNEXUS_EMBEDDING_BATCH_SIZE=64 \
+gitnexus analyze --embeddings
+```
+
+Use `--force` only for intentional full rebuilds or corrupted indexes.
+
+The same settings can also be stored in `~/.gitnexus/config.json`:
+
+```json
+{
+  "embeddings": {
+    "provider": "ollama",
+    "ollamaBaseUrl": "http://localhost:11434",
+    "ollamaModel": "qwen3-embedding:0.6b",
+    "nodeLimit": 90000,
+    "batchSize": 64
+  }
+}
+```
+
+Priority is: environment variables > `~/.gitnexus/config.json` > built-in defaults.
+
+You can inspect or update this without editing JSON manually:
+
+```bash
+gitnexus config embeddings show
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 64
+gitnexus config embeddings clear
+```
+
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
+
 ## CLI
 
 | Task | Read this skill file |
 |------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
-
-## Repo reference
-
-### Packages
-
-| Package | Path | Purpose |
-|---------|------|---------|
-| **CLI/Core** | `gitnexus/` | TypeScript CLI, indexing pipeline, MCP server. Published to npm. |
-| **Web UI** | `gitnexus-web/` | React/Vite thin client. All queries via `gitnexus serve` HTTP API. |
-| **Shared** | `gitnexus-shared/` | Shared TypeScript types and constants. |
-| Claude Plugin | `gitnexus-claude-plugin/` | Static config for Claude marketplace. |
-| Cursor Integration | `gitnexus-cursor-integration/` | Static config for Cursor editor. |
-| Eval | `eval/` | Python evaluation harness (Docker + LLM API keys). |
-
-### Running services
-
-```bash
-cd gitnexus && npm run dev                 # CLI: tsx watch mode
-cd gitnexus-web && npm run dev             # Web UI: Vite on port 5173
-npx gitnexus serve                         # HTTP API on port 4747 (from any indexed repo)
-```
-
-### Testing
-
-**CLI / Core (`gitnexus/`)**
-- `npm test` — full vitest suite (~2000 tests)
-- `npm run test:unit` — unit tests only
-- `npm run test:integration` — integration (~1850 tests). LadybugDB file-locking tests may fail in containers (known env issue).
-- `npx tsc --noEmit` — typecheck
-
-**Web UI (`gitnexus-web/`)**
-- `npm test` — vitest (~200 tests)
-- `npm run test:e2e` — Playwright (7 spec files; requires `gitnexus serve` + `npm run dev`)
-- `npx tsc -b --noEmit` — typecheck
-
-**Pre-commit hook** (`.husky/pre-commit`): formatting (prettier via lint-staged) + typecheck for staged packages. Tests do **not** run in pre-commit — CI only.
-
-### Gotchas
-
-- `npm install` in `gitnexus/` triggers `prepare` (builds via `tsc`) and `postinstall` (materializes the vendored grammars into `node_modules/`, then prefers a committed prebuild per platform-arch and only source-builds when none matches). A C/C++ toolchain (`python3`, `make`, `g++`) is needed only for that source-build fallback.
-- The vendored grammars `tree-sitter-{c,dart,proto,swift,kotlin}` are handled uniformly: c is required; dart/proto/swift/kotlin are optional and skippable via `GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1`. Install warnings appear only when no prebuild matches the platform-arch and no toolchain is present, and are non-fatal — only that language's parsing is unavailable.
-- ESLint configured via `eslint.config.mjs` (TS, React Hooks, unused-imports). No `npm run lint` script; use `npx eslint .`. Prettier runs via lint-staged. CI checks both in `ci-quality.yml`.

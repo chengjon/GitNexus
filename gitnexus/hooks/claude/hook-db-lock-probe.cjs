@@ -81,8 +81,8 @@ function debugLog(msg) {
 function resolveHookBinary(tool) {
   const envKey = tool === 'lsof' ? 'GITNEXUS_HOOK_LSOF_PATH' : 'GITNEXUS_HOOK_PS_PATH';
   const fromEnv = process.env[envKey];
-  if (fromEnv && String(fromEnv).trim() && fs.existsSync(String(fromEnv))) {
-    return String(fromEnv);
+  if (fromEnv && String(fromEnv).trim()) {
+    return String(fromEnv).trim();
   }
   const candidates =
     tool === 'lsof'
