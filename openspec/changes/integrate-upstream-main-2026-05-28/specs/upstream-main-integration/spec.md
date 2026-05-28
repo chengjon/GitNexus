@@ -153,6 +153,17 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** direct `focusNode` calls continue to use the direct focus path rather
   than replaying the retired browser-ingestion worker architecture
 
+#### Scenario: A web user reviews code references or agent output
+
+- **WHEN** current `gitnexus-web` renders code-reference panels or streams agent
+  output
+- **THEN** GitNexus uses the current upstream `CodeReferencesPanel` and `agent`
+  implementations rather than replaying the old local files
+- **AND** abort handling, agent-history serialization, file-content mapping, and
+  selection/highlight independence remain covered by targeted regression tests
+- **AND** any future visual polish request must be treated as a product/UI line,
+  not as an automatic source replay requirement
+
 #### Scenario: The PR governance workflow runs
 
 - **WHEN** GitHub Actions runs `.github/workflows/pr-governance.yml`
