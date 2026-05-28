@@ -109,8 +109,49 @@ describe('detect_changes worktree support — structural', () => {
 // resolveWorktreeCwd is extracted from detectChanges specifically so tests can
 // pass any launchCwd instead of being stuck with the fixed process.cwd().
 
-import { resolveWorktreeCwd } from '../../src/mcp/local/local-backend.js';
+import { LocalBackend, resolveWorktreeCwd } from '../../src/mcp/local/local-backend.js';
 import { getCanonicalRepoRoot } from '../../src/storage/git.js';
+
+describe('LocalBackend repo resolution — worktree paths', () => {
+  it('resolves an absolute linked-worktree repo param to the indexed main checkout', () => {
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-rwc-param-'));
+    try {
+      execSync('git init -q', { cwd: repoDir, stdio: 'ignore' });
+      execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'ignore' });
+      execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'ignore' });
+      writeFileSync(path.join(repoDir, 'x.ts'), 'export const x = 1;\n');
+      execSync('git add x.ts', { cwd: repoDir, stdio: 'ignore' });
+      execSync('git commit -q -m "initial"', { cwd: repoDir, stdio: 'ignore' });
+
+      const worktreeDir = path.join(repoDir, 'wt-param');
+      execSync(`git worktree add -q -b wt-param "${worktreeDir}"`, {
+        cwd: repoDir,
+        stdio: 'ignore',
+      });
+
+      const backend = new LocalBackend() as any;
+      const handle = {
+        id: 'demo',
+        name: 'demo',
+        repoPath: repoDir,
+        storagePath: path.join(repoDir, '.gitnexus'),
+        lbugPath: path.join(repoDir, '.gitnexus', 'lbug'),
+        indexedAt: '2026-05-28T00:00:00.000Z',
+        lastCommit: 'HEAD',
+      };
+      backend.repos.set(handle.id, handle);
+
+      expect(backend.resolveRepoFromCache(worktreeDir)).toBe(handle);
+    } finally {
+      try {
+        execSync('git worktree remove -f wt-param', { cwd: repoDir, stdio: 'ignore' });
+      } catch {
+        // ignore cleanup failure
+      }
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('resolveWorktreeCwd — auto-detection helper', () => {
   it('returns repoPath unchanged when launchCwd is the same git root', () => {

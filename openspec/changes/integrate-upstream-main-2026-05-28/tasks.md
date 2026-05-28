@@ -62,8 +62,13 @@
       is that all local source upgrades continue to be effective
 - [ ] 7.4 Replay required source capabilities as upstream-shaped behavior
       changes
+  - [x] 7.4.1 Replay detect-changes/worktree repo path handling: path-like
+        `repo` parameters now prefer exact indexed paths, then resolve a single
+        linked worktree match by shared canonical git root.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
+  - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
+        worktree `repo` parameter to an index registered under the main checkout.
 
 ## 8. Final Cutover Guard
 
@@ -143,3 +148,33 @@
   second-stage audit. It found 240 local source-ish changed files relative to
   the merge base: 67 use upstream versions in `upstream-sync`, 173 are absent,
   and 0 are preserved as local source content.
+- First required source replay slice completed for detect-changes/worktree path
+  handling. `gitnexus/src/mcp/local/local-backend.ts` now preserves exact path
+  precedence and adds a canonical-root fallback only for path-like `repo`
+  parameters; ambiguous canonical-root matches fail with the existing registry
+  ambiguity error instead of choosing an arbitrary index.
+- Regression coverage added in `gitnexus/test/unit/detect-changes-worktree.test.ts`
+  for resolving an absolute linked-worktree `repo` parameter to an indexed main
+  checkout.
+- Pre-edit impact analysis via
+  `env HOME=/tmp/gitnexus-lbdb-home node gitnexus/dist/cli/index.js impact
+  resolveRepoFromCache --repo GitNexus --include-tests --summary-only` returned
+  `risk=CRITICAL`, `impactedCount=31`, direct caller count 1, 10 affected
+  processes, and 5 affected modules; scope was therefore limited to the
+  path-like repo-param resolver branch.
+- Focused TDD red/green: the new worktree repo-param test failed with
+  `expected null to be handle` before the implementation and passed after the
+  canonical-root fallback.
+- `HOME=/tmp/gitnexus-lbdb-home npx vitest run
+  test/unit/detect-changes-worktree.test.ts` passed: 24 tests.
+- `HOME=/tmp/gitnexus-lbdb-home npm run build` passed after the detect-changes
+  path replay.
+- Built CLI smoke passed with
+  `HOME=/tmp/gitnexus-lbdb-home node gitnexus/dist/cli/index.js detect-changes
+  --scope unstaged --repo GitNexus`: 2 changed files, 12 changed symbols, 4
+  affected processes, `risk level: medium`.
+- Full unit-suite recheck with default `/tmp` reached 295/298 passing files and
+  6548 passing tests, but failed in existing environment-sensitive tests:
+  hook concurrent burst accounting, `/tmp` being treated as a git worktree in
+  `git.test.ts`, and sibling-clone-drift non-git cwd mocking. The targeted
+  detect-changes/worktree suite and build passed.

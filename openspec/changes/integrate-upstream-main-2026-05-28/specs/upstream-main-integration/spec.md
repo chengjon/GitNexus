@@ -93,3 +93,15 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **THEN** the Kuzu files are not replayed into the upstream branch
 - **AND** any still-required behavior is reimplemented against the current
   LadybugDB architecture
+
+#### Scenario: Detect-changes receives a linked worktree path as the repo selector
+
+- **WHEN** a caller passes a path-like `repo` parameter that points at a linked
+  worktree while the registry contains the same repository indexed at its main
+  checkout
+- **THEN** GitNexus resolves the repository by shared canonical git root after
+  exact indexed-path matching fails
+- **AND** exact path matches continue to take precedence over canonical-root
+  fallback matches
+- **AND** multiple canonical-root fallback matches are treated as ambiguous
+  rather than resolved by arbitrary registry order
