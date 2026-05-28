@@ -49,6 +49,22 @@ describe('detect_changes worktree support — structural', () => {
     expect(backendSrc).toMatch(/worktree\?:\s*string/);
   });
 
+  it('detect_changes keeps the local cwd compatibility parameter', () => {
+    expect(toolsSrc).toMatch(/cwd/);
+    expect(backendSrc).toMatch(/cwd\?:\s*string/);
+    expect(backendSrc).toMatch(/const launchCwd\s*=\s*params\.cwd\s*\?\?\s*process\.cwd\(\)/);
+    expect(backendSrc).toMatch(/const resolvedLaunchCwd\s*=\s*path\.resolve\(launchCwd\)/);
+    expect(backendSrc).toMatch(/resolveWorktreeCwd\(repo\.repoPath,\s*resolvedLaunchCwd\)/);
+  });
+
+  it('detect_changes returns path-resolution metadata for MCP callers', () => {
+    expect(backendSrc).toMatch(/let pathMetadata/);
+    expect(backendSrc).toMatch(/git_repo_path/);
+    expect(backendSrc).toMatch(/git_diff_path/);
+    expect(backendSrc).toMatch(/path_resolution/);
+    expect(backendSrc).toMatch(/fallback_reason/);
+  });
+
   it('uses diffCwd as the cwd for execFileSync (not hard-coded repo.repoPath)', () => {
     expect(backendSrc).toMatch(/cwd:\s*diffCwd/);
   });
@@ -93,8 +109,10 @@ describe('detect_changes worktree support — structural', () => {
     expect(backendSrc).toMatch(/resolveWorktreeCwd/);
     // The helper must be exported so tests can call it directly.
     expect(backendSrc).toMatch(/export function resolveWorktreeCwd/);
-    // detectChanges passes process.cwd() to the helper.
-    expect(backendSrc).toMatch(/resolveWorktreeCwd\(repo\.repoPath,\s*process\.cwd\(\)\)/);
+    // detectChanges passes the resolved cwd hint to the helper; without params.cwd,
+    // that hint falls back to process.cwd().
+    expect(backendSrc).toMatch(/const launchCwd\s*=\s*params\.cwd\s*\?\?\s*process\.cwd\(\)/);
+    expect(backendSrc).toMatch(/resolveWorktreeCwd\(repo\.repoPath,\s*resolvedLaunchCwd\)/);
   });
 
   it('git worktree support is documented in the tool description', () => {

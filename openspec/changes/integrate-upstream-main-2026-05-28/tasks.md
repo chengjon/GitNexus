@@ -65,10 +65,15 @@
   - [x] 7.4.1 Replay detect-changes/worktree repo path handling: path-like
         `repo` parameters now prefer exact indexed paths, then resolve a single
         linked worktree match by shared canonical git root.
+  - [x] 7.4.2 Replay MCP `detect_changes` cwd compatibility: `cwd` remains a
+        supported client working-directory hint, while the upstream `worktree`
+        override remains the stricter explicit path.
 - [ ] 7.5 Re-map local regression tests after their target capabilities are
       absorbed or reimplemented
   - [x] 7.5.1 Add focused regression coverage for resolving an absolute linked
         worktree `repo` parameter to an index registered under the main checkout.
+  - [x] 7.5.2 Add focused regression coverage for the `cwd` compatibility
+        parameter and returned path-resolution metadata.
 
 ## 8. Final Cutover Guard
 
@@ -178,3 +183,28 @@
   hook concurrent burst accounting, `/tmp` being treated as a git worktree in
   `git.test.ts`, and sibling-clone-drift non-git cwd mocking. The targeted
   detect-changes/worktree suite and build passed.
+- Second MCP detect-changes replay slice completed for `cwd` compatibility and
+  path-resolution metadata. `detect_changes` now accepts `cwd?: string`,
+  resolves it before linked-worktree auto-detection, preserves explicit
+  `worktree` override precedence, and returns `metadata.git_repo_path`,
+  `metadata.git_diff_path`, `metadata.process_cwd`,
+  `metadata.path_resolution`, `metadata.fallback_reason`, and
+  `metadata.warnings`.
+- Pre-edit impact analysis for this slice returned `detectChanges:
+  risk=CRITICAL, impacted=20, direct=1, processes=7, modules=2` and
+  `resolveWorktreeCwd: risk=LOW, impacted=1, direct=1, processes=0,
+  modules=0`; scope was therefore limited to `detect_changes` cwd compatibility
+  and metadata.
+- Focused red/green: new structural tests for `cwd` compatibility and
+  path-resolution metadata failed before the implementation and passed after
+  the `detect_changes` schema/backend changes.
+- `HOME=/tmp/gitnexus-lbdb-home npx vitest run
+  test/unit/detect-changes-worktree.test.ts` passed: 26 tests.
+- `HOME=/tmp/gitnexus-lbdb-home npm run build` passed after the MCP
+  detect-changes cwd replay.
+- MCP-style runtime smoke passed with `LocalBackend.callTool('detect_changes',
+  {repo: 'GitNexus', scope: 'unstaged', cwd:
+  '/opt/claude/GitNexus/.worktrees/upstream-sync'})` using
+  `GITNEXUS_HOME=/tmp/gitnexus-lbdb-home/.gitnexus`: 3 changed files,
+  14 changed symbols, `risk_level=low`, `path_resolution=cwd_worktree`,
+  `fallback_reason=null`.
