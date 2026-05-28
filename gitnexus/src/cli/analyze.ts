@@ -35,6 +35,7 @@ import fs from 'fs/promises';
 import { cliError } from './cli-message.js';
 import { formatElapsed } from './format-elapsed.js';
 import { isHfDownloadFailure } from '../core/embeddings/hf-env.js';
+import { resolveEmbeddingNodeLimit } from '../core/embeddings/config.js';
 
 // Capture stderr.write at module load BEFORE anything (LadybugDB native
 // init, progress bar, console redirection) can monkey-patch it. The
@@ -701,6 +702,9 @@ const analyzeCommandImpl = async (inputPath?: string, options?: AnalyzeOptions):
     embeddingsNodeLimit = parsed;
   }
   const embeddingsEnabled = !!options?.embeddings;
+  if (embeddingsEnabled) {
+    embeddingsNodeLimit = resolveEmbeddingNodeLimit(embeddingsNodeLimit);
+  }
 
   const setPositiveEnv = (
     optionName: string,

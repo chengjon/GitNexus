@@ -106,6 +106,13 @@ export const en = {
   'help.command.analyze.description': 'Index a repository (full analysis)',
   'help.command.refreshContext.description':
     'Refresh AGENTS.md / CLAUDE.md context files and repo skills',
+  'help.command.config.description': 'Manage GitNexus CLI configuration',
+  'help.command.config.embeddings.description': 'Manage embedding runtime configuration',
+  'help.command.config.embeddings.show.description':
+    'Show stored and effective embedding configuration',
+  'help.command.config.embeddings.set.description':
+    'Persist embedding configuration to ~/.gitnexus/config.json',
+  'help.command.config.embeddings.clear.description': 'Clear persisted embedding configuration',
   'help.command.index.description':
     'Register an existing .gitnexus/ folder into the global registry (no re-analysis needed)',
   'help.command.serve.description': 'Start local HTTP server for web UI connection',
@@ -165,6 +172,19 @@ export const en = {
   'help.option.refreshContext.noStats':
     'Omit volatile file/symbol counts from AGENTS.md and CLAUDE.md',
   'help.option.refreshContext.skipSkills': 'Skip installing standard GitNexus skill files',
+  'help.option.config.embeddings.provider': 'Embedding provider: huggingface, ollama, or http',
+  'help.option.config.embeddings.url': 'OpenAI-compatible /v1 embedding base URL',
+  'help.option.config.embeddings.model': 'OpenAI-compatible embedding model name',
+  'help.option.config.embeddings.apiKey': 'Embedding endpoint API key',
+  'help.option.config.embeddings.dims': 'Expected embedding dimensions',
+  'help.option.config.embeddings.ollamaBaseUrl': 'Ollama base URL',
+  'help.option.config.embeddings.ollamaModel': 'Ollama embedding model name',
+  'help.option.config.embeddings.nodeLimit':
+    'Analyze --embeddings node safety cap; 0 disables the cap',
+  'help.option.config.embeddings.batchSize': 'Embedding node batch size',
+  'help.option.config.embeddings.subBatchSize': 'Embedding text sub-batch size',
+  'help.option.config.embeddings.threads': 'Local ONNX CPU thread limit',
+  'help.option.config.embeddings.device': 'Embedding device: auto, dml, cuda, cpu, or wasm',
   'help.option.skipGit':
     'Treat the provided path/cwd as the index root and skip parent git-root discovery',
   'help.option.analyze.name':

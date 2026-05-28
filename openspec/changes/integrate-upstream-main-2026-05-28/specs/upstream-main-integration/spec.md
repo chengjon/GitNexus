@@ -114,6 +114,22 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** any missing wiki behavior must be reintroduced as a focused product
   capability on top of the current upstream wiki generator
 
+#### Scenario: A maintainer persists embedding runtime configuration
+
+- **WHEN** a maintainer runs `gitnexus config embeddings set` with provider,
+  Ollama, HTTP, node-limit, or batching settings
+- **THEN** GitNexus stores those settings under the `embeddings` key in
+  `~/.gitnexus/config.json`
+- **AND** `gitnexus config embeddings show` reports both stored and effective
+  embedding settings
+- **AND** `gitnexus config embeddings clear` removes only the persisted
+  embedding settings without deleting unrelated CLI config
+- **AND** environment variables continue to take precedence over persisted
+  settings
+- **AND** persisted Ollama settings activate the current OpenAI-compatible HTTP
+  embedding path, while persisted node-limit settings feed bare
+  `analyze --embeddings`
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked

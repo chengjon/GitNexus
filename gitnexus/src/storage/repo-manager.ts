@@ -937,6 +937,20 @@ export interface CLIConfig {
   cursorModel?: string;
   claudeModel?: string;
   codexModel?: string;
+  embeddings?: {
+    provider?: 'huggingface' | 'ollama' | 'http';
+    embeddingUrl?: string;
+    embeddingModel?: string;
+    embeddingApiKey?: string;
+    embeddingDims?: number;
+    ollamaBaseUrl?: string;
+    ollamaModel?: string;
+    nodeLimit?: number;
+    batchSize?: number;
+    subBatchSize?: number;
+    threads?: number;
+    device?: 'auto' | 'dml' | 'cuda' | 'cpu' | 'wasm';
+  };
   /** Azure api-version query param (e.g. '2024-10-21'). Only used when provider is 'azure'. */
   apiVersion?: string;
   /** Set true when the deployment is a reasoning model (o1, o3, o4-mini). Auto-detected for OpenAI; must be set for Azure deployments. */

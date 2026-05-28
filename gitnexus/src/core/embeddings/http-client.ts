@@ -12,6 +12,7 @@
  */
 
 import { CircuitOpenError, ResilientFetchExhaustedError, resilientFetch } from 'gitnexus-shared';
+import { loadStoredEmbeddingConfig } from './config.js';
 
 const HTTP_TIMEOUT_MS = 30_000;
 const HTTP_MAX_RETRIES = 2;
@@ -33,11 +34,23 @@ interface HttpConfig {
  * Not cached — env vars are read fresh so late configuration takes effect.
  */
 const readConfig = (): HttpConfig | null => {
-  const baseUrl = process.env.GITNEXUS_EMBEDDING_URL;
-  const model = process.env.GITNEXUS_EMBEDDING_MODEL;
+  const stored = loadStoredEmbeddingConfig();
+  const provider = process.env.GITNEXUS_EMBEDDING_PROVIDER ?? stored.provider;
+  let baseUrl = process.env.GITNEXUS_EMBEDDING_URL ?? stored.embeddingUrl;
+  let model = process.env.GITNEXUS_EMBEDDING_MODEL ?? stored.embeddingModel;
+
+  if ((!baseUrl || !model) && provider === 'ollama') {
+    const ollamaBase =
+      process.env.GITNEXUS_OLLAMA_BASE_URL ?? stored.ollamaBaseUrl ?? 'http://localhost:11434';
+    baseUrl = `${ollamaBase.replace(/\/+$/, '')}/v1`;
+    model = process.env.GITNEXUS_OLLAMA_MODEL ?? stored.ollamaModel ?? 'qwen3-embedding';
+  }
+
   if (!baseUrl || !model) return null;
 
-  const rawDims = process.env.GITNEXUS_EMBEDDING_DIMS;
+  const rawDims =
+    process.env.GITNEXUS_EMBEDDING_DIMS ??
+    (stored.embeddingDims === undefined ? undefined : String(stored.embeddingDims));
   let dimensions: number | undefined;
   if (rawDims !== undefined) {
     if (!/^\d+$/.test(rawDims)) {
@@ -53,7 +66,7 @@ const readConfig = (): HttpConfig | null => {
   return {
     baseUrl: baseUrl.replace(/\/+$/, ''),
     model,
-    apiKey: process.env.GITNEXUS_EMBEDDING_API_KEY ?? 'unused',
+    apiKey: process.env.GITNEXUS_EMBEDDING_API_KEY ?? stored.embeddingApiKey ?? 'unused',
     dimensions,
   };
 };

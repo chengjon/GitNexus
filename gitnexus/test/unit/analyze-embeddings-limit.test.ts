@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach } from 'vitest';
+
 const runFullAnalysisMock = vi.fn();
+let tmpHome: string | null = null;
 
 vi.mock('../../src/core/run-analyze.js', () => ({
   runFullAnalysis: runFullAnalysisMock,
@@ -13,6 +19,9 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
 vi.mock('../../src/storage/repo-manager.js', () => ({
   getStoragePaths: vi.fn(() => ({ storagePath: '.gitnexus', lbugPath: '.gitnexus/lbug' })),
   getGlobalRegistryPath: vi.fn(() => 'registry.json'),
+  getGlobalConfigPath: vi.fn(() =>
+    path.join(process.env.HOME || process.env.USERPROFILE || '', '.gitnexus', 'config.json'),
+  ),
   RegistryNameCollisionError: class RegistryNameCollisionError extends Error {},
   AnalysisNotFinalizedError: class AnalysisNotFinalizedError extends Error {},
   assertAnalysisFinalized: vi.fn(async () => undefined),
@@ -39,6 +48,13 @@ describe('analyzeCommand --embeddings [limit] parsing', () => {
     });
     process.exitCode = undefined;
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim();
+  });
+
+  afterEach(async () => {
+    if (tmpHome) {
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      tmpHome = null;
+    }
   });
 
   it.each(['abc', '-1', '1.5', 'NaN', 'Infinity'])(
@@ -73,6 +89,25 @@ describe('analyzeCommand --embeddings [limit] parsing', () => {
     const opts = runFullAnalysisMock.mock.calls[0][1];
     expect(opts.embeddings).toBe(true);
     expect(opts.embeddingsNodeLimit).toBeUndefined();
+  });
+
+  it('bare --embeddings uses configured node limit when one is saved', async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-embedding-node-limit-'));
+    process.env.HOME = tmpHome;
+    process.env.GITNEXUS_HOME = path.join(tmpHome, '.gitnexus');
+    await fs.mkdir(path.join(tmpHome, '.gitnexus'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpHome, '.gitnexus', 'config.json'),
+      JSON.stringify({ embeddings: { nodeLimit: 90000 } }),
+      'utf-8',
+    );
+    const { analyzeCommand } = await import('../../src/cli/analyze.js');
+
+    await analyzeCommand(undefined, { embeddings: true });
+
+    const opts = runFullAnalysisMock.mock.calls[0][1];
+    expect(opts.embeddings).toBe(true);
+    expect(opts.embeddingsNodeLimit).toBe(90000);
   });
 
   it('--embeddings 0 forwards 0 (cap disabled downstream)', async () => {

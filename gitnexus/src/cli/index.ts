@@ -99,6 +99,38 @@ program
   .option('--skip-skills', 'Skip installing standard GitNexus skill files')
   .action(createLazyAction(() => import('./refresh-context.js'), 'refreshContextCommand'));
 
+const configCommand = program.command('config').description('Manage GitNexus CLI configuration');
+const embeddingsConfigCommand = configCommand
+  .command('embeddings')
+  .description('Manage embedding runtime configuration');
+
+embeddingsConfigCommand
+  .command('show')
+  .description('Show stored and effective embedding configuration')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigShowCommand'));
+
+embeddingsConfigCommand
+  .command('set')
+  .description('Persist embedding configuration to ~/.gitnexus/config.json')
+  .option('--provider <provider>', 'Embedding provider: huggingface, ollama, or http')
+  .option('--embedding-url <url>', 'OpenAI-compatible /v1 embedding base URL')
+  .option('--embedding-model <model>', 'OpenAI-compatible embedding model name')
+  .option('--embedding-api-key <key>', 'Embedding endpoint API key')
+  .option('--embedding-dims <n>', 'Expected embedding dimensions')
+  .option('--ollama-base-url <url>', 'Ollama base URL')
+  .option('--ollama-model <model>', 'Ollama embedding model name')
+  .option('--node-limit <n>', 'Analyze --embeddings node safety cap; 0 disables the cap')
+  .option('--batch-size <n>', 'Embedding node batch size')
+  .option('--sub-batch-size <n>', 'Embedding text sub-batch size')
+  .option('--threads <n>', 'Local ONNX CPU thread limit')
+  .option('--device <device>', 'Embedding device: auto, dml, cuda, cpu, or wasm')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigSetCommand'));
+
+embeddingsConfigCommand
+  .command('clear')
+  .description('Clear persisted embedding configuration')
+  .action(createLazyAction(() => import('./config.js'), 'embeddingsConfigClearCommand'));
+
 program
   .command('index [path...]')
   .description(
