@@ -142,6 +142,17 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** the human-readable `gitnexus doctor` output continues to show the
   current upstream runtime, capability, and embedding summary
 
+#### Scenario: A web user selects a graph node
+
+- **WHEN** a graph node becomes selected in the current `gitnexus-web`
+  Sigma-based graph view
+- **THEN** GitNexus refreshes Sigma edge rendering through the current camera
+  nudge path
+- **AND** edges connected to the selected node are emphasized while unrelated
+  edges are visually de-emphasized
+- **AND** direct `focusNode` calls continue to use the direct focus path rather
+  than replaying the retired browser-ingestion worker architecture
+
 #### Scenario: Detect-changes receives a linked worktree path as the repo selector
 
 - **WHEN** a caller passes a path-like `repo` parameter that points at a linked
