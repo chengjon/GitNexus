@@ -19,7 +19,7 @@ description: "Use when the user wants to know what will break if they change som
 ```
 1. gitnexus_impact({target: "X", direction: "upstream"})  → What depends on this
 2. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
-3. gitnexus_detect_changes()                               → Map current git changes to affected flows
+3. gitnexus_detect_changes({scope: "staged", repo: "RepoName", cwd?: "/path/to/worktree"}) → Map current git changes to affected flows and verify analysis path
 4. Assess risk and report to user
 ```
 
@@ -33,6 +33,10 @@ description: "Use when the user wants to know what will break if they change som
 - [ ] Check high-confidence (>0.8) dependencies
 - [ ] READ processes to check affected execution flows
 - [ ] gitnexus_detect_changes() for pre-commit check
+- [ ] If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`
+- [ ] If working in a git worktree or MCP server cwd may differ, also pass `cwd`
+- [ ] Check `git_diff_path`, `process_cwd`, `path_resolution`, and `fallback_reason`
+- [ ] Treat `path_resolution = registry_repo` as a fallback that needs explanation
 - [ ] Assess risk level and report to user
 ```
 
@@ -76,11 +80,45 @@ gitnexus_impact({
 **gitnexus_detect_changes** — git-diff based impact analysis:
 
 ```
-gitnexus_detect_changes({scope: "staged"})
+gitnexus_detect_changes({
+  scope: "staged",
+  repo: "RepoName",
+  cwd: "/path/to/repo/.worktrees/feature-branch"
+})
 
 → Changed: 5 symbols in 3 files
 → Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
 → Risk: MEDIUM
+→ git_repo_path: /path/to/repo
+→ git_diff_path: /path/to/repo/.worktrees/feature-branch
+→ process_cwd: /path/to/repo/.worktrees/feature-branch
+→ path_resolution: cwd_worktree | registry_repo
+→ fallback_reason: null | different_repo | not_git_repo | repo_identity_unresolved
+```
+
+Multi-repo / worktree / MCP server note:
+
+```
+If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`.
+
+gitnexus_detect_changes({
+  scope: "staged",
+  repo: "RepoName",
+  cwd: "/path/to/repo/.worktrees/feature-branch"
+})
+```
+
+Use `repo` when the MCP server exposes more than one indexed repo. Use `cwd`
+when the MCP server `process.cwd()` may not match the active worktree.
+
+Path verification note:
+
+```
+- `git_diff_path` tells you which path actually ran `git diff`
+- `process_cwd` tells you which cwd participated in repo/worktree identity resolution
+- `path_resolution = cwd_worktree` means the tool followed the effective worktree path
+- `path_resolution = registry_repo` means it fell back to the indexed repo path
+- `fallback_reason` explains why fallback happened; `null` means no fallback
 ```
 
 ## Example: "What breaks if I change validateUser?"

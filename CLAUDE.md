@@ -1,72 +1,99 @@
-<!-- version: 1.3.0 -->
-<!--
-  Metadata: version, last reviewed, scope, model policy, reference docs, changelog.
-  Last updated: 2026-03-22
--->
+<!-- version: 1.0.0 -->
+<!-- local Claude Code header adapted from upstream template -->
 
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-06
 
-**Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
+## Repository Development Rules
 
-Follow **AGENTS.md** for the canonical rules; this file adds Claude Code–specific deltas. Cursor-specific notes live only in `AGENTS.md`.
+This repository's top-level development governance lives in `DEVELOPMENT_RULES.md`.
+
+For any work involving migrations, duplicate implementations, compatibility layers, deletions, metric claims, temporary entry points, or backup files, `DEVELOPMENT_RULES.md` is mandatory and takes precedence over local convenience patterns.
+
+If the repository change becomes a PR, also follow `.github/PULL_REQUEST_TEMPLATE.md`
+and fill the lightweight governance fields: `Line Scope`, one `Workline Lane`,
+`Current Source of Truth`, and the `Validation` closure notes.
+
+**Project:** GitNexus
+**Environment:** local development fork
+**Maintainer:** repository maintainers and current fork operators
+
+Follow `AGENTS.md` for the canonical repository-wide rules. This file only adds Claude Code-specific framing on top of the shared policy.
 
 ## Scope
 
-See the **Scope** table in [AGENTS.md](AGENTS.md) for read/write/execute/off-limits boundaries. Cursor-specific workflow notes also live only in AGENTS.md.
+Use the scope table in `AGENTS.md` as the authoritative read/write/execute boundary definition.
 
 ## Model Configuration
 
-- **Primary:** Pin per **Claude Code** / Anthropic org policy (explicit model id). Do not rely on an unversioned `latest` alias for governed workflows.
-- **Fallback:** As configured in Claude Code (organization default or user override).
-- **Notes:** The GitNexus CLI analyzer does not call an LLM.
+- Prefer an explicit model id per Claude Code or organization policy.
+- Do not assume an unversioned `latest` alias is acceptable for governed workflows.
+- The GitNexus CLI/indexer itself does not require an LLM.
 
-## Execution Sequence (complex tasks)
+## Execution Sequence For Complex Tasks
 
-Same discipline as [AGENTS.md](AGENTS.md): before large multi-step work, state which **AGENTS.md** / **GUARDRAILS.md** rules apply, current **Scope**, and planned validation commands (`npm test`, `tsc`, etc.). When pausing, summarize progress in the chat or a **local** scratch file (do not add `HANDOFF.md` to the repo), then `/clear` and resume with that summary.
+Before substantial multi-step work:
 
-## Claude Code hooks
+1. State which rules from `AGENTS.md`, `DEVELOPMENT_RULES.md`, and the GitNexus block apply.
+2. State the current write scope and what is intentionally deferred.
+3. State the exact verification commands you will run before claiming completion.
 
-Prefer **PreToolUse** hooks for hard gates (e.g. tests before `git_commit`). Adapt hook commands to `gitnexus/` npm scripts.
+## Claude Code Notes
 
-## Context budget
-
-If always-on instructions grow, load deep conventions via conditional reads (e.g. *“When writing new code, read STANDARDS.md”*) instead of pasting long blocks here. In Cursor, prefer `.cursor/index.mdc` plus optional `.cursor/rules/*.mdc` globs (see [AGENTS.md](AGENTS.md) § Context budget).
+- Treat hook-based enforcement as real only when you can point to actual configured hooks in the local environment.
+- Prefer explicit verification and scoped diffs over assumptions about hidden automation.
+- When the thread gets long, restate the active scope and the planned verification commands before major edits.
 
 ## Reference Documentation
 
-- **This repository:** [AGENTS.md](AGENTS.md) (Cursor + monorepo notes), [ARCHITECTURE.md](ARCHITECTURE.md), [CONTRIBUTING.md](CONTRIBUTING.md), [GUARDRAILS.md](GUARDRAILS.md).
-- **Call-resolution DAG:** See ARCHITECTURE.md § Call-Resolution DAG. Shared pipeline code in `gitnexus/src/core/ingestion/` must not name languages — use `LanguageProvider` hooks instead (see AGENTS.md).
-- **GitNexus:** `.claude/skills/gitnexus/`; MCP and indexed-repo rules live only in [AGENTS.md](AGENTS.md) (`gitnexus:start` … `gitnexus:end`). See **GitNexus rules** below.
+- `AGENTS.md` for the canonical shared policy
+- `DEVELOPMENT_RULES.md` for repository-wide governance
+- `README.md` for supported host/setup guidance
+- `docs/ai-cli-local-quick-start.md` for local CLI and host expectations
+- `docs/audits/` and `openspec/changes/` for active repo-hygiene and convergence records
+
+This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`, `GUARDRAILS.md`, `CONTRIBUTING.md`, or `TESTING.md`. Do not cite them as existing local references unless they are added in the same change.
 
 ## Changelog
 
 | Date | Version | Change |
 |------|---------|--------|
-| 2026-04-13 | 1.3.0 | Updated GitNexus index stats after DAG refactor. |
-| 2026-03-24 | 1.2.0 | Removed duplicated gitnexus:start block and scope table; replaced with pointers to AGENTS.md. |
-| 2026-03-23 | 1.1.0 | Updated agent instructions to match AGENTS.md. |
-| 2026-03-22 | 1.0.0 | Added structured header and changelog. |
-
----
-
-## GitNexus rules
-
-See the `<!-- gitnexus:start --> … <!-- gitnexus:end -->` block in **[AGENTS.md](AGENTS.md)** for the canonical MCP tools, impact analysis rules, and index instructions.
+| 2026-04-16 | 1.1.0 | Added a direct PR-governance reminder pointing Claude Code users to the lightweight PR template fields. |
+| 2026-04-06 | 1.0.0 | Added a local structured Claude header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **GitNexus** (26675 symbols, 35395 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+Run `gitnexus status` for current index stats and freshness.
+
+Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `gitnexus analyze` in terminal first.
+
+> If GitNexus behaves differently across machines or CI, run `gitnexus doctor --json` to inspect `native-runtime`, `language-support`, and host configuration checks.
 
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`. In multi-repo MCP sessions, use `gitnexus_detect_changes({scope: "staged", repo: "GitNexus"})`. If the server cwd may not match the active worktree, also pass `cwd`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/GitNexus/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main", repo: "GitNexus"})` — see what your branch changed in multi-repo MCP sessions
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all", repo: "GitNexus"})` to verify only expected files changed in multi-repo MCP sessions.
 
 ## Never Do
 
@@ -74,6 +101,25 @@ This project is indexed by GitNexus as **GitNexus** (26675 symbols, 35395 relati
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged", repo: "GitNexus"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
 
 ## Resources
 
@@ -83,6 +129,115 @@ This project is indexed by GitNexus as **GitNexus** (26675 symbols, 35395 relati
 | `gitnexus://repo/GitNexus/clusters` | All functional areas |
 | `gitnexus://repo/GitNexus/processes` | All execution flows |
 | `gitnexus://repo/GitNexus/process/{name}` | Step-by-step execution trace |
+
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope, with `repo: "GitNexus"` whenever multiple repos are indexed
+4. All d=1 (WILL BREAK) dependents were updated
+
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+gitnexus analyze
+```
+
+If you have modified the local GitNexus source code under `/opt/claude/GitNexus/gitnexus/src`, rebuild first so the CLI picks up the updated `dist` files:
+
+```bash
+cd /opt/claude/GitNexus/gitnexus
+npm run build
+gitnexus analyze
+```
+
+Use plain `gitnexus analyze` when you want the fastest refresh and exact symbol, file, or keyword search is enough.
+
+Graph tools, BM25/FTS search, impact analysis, and context lookups still work without embeddings.
+
+Use `gitnexus analyze --embeddings` when natural-language, concept, or fuzzy code search matters.
+
+This enables hybrid retrieval (`BM25 + semantic + RRF`) but takes longer and requires an embedding provider such as Ollama or Hugging Face.
+
+During `gitnexus analyze`, GitNexus automatically detects and stops local `gitnexus mcp` processes that are holding the target repo's `.gitnexus/kuzu` file open. This avoids the common KuzuDB lock conflict when you have multiple CLI or editor sessions open.
+
+Use `gitnexus doctor --json` when you need to verify whether optional grammars such as Kotlin / Swift are actually available in the current environment.
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+gitnexus analyze --embeddings
+```
+
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
+
+If embedding generation is enabled, these environment variables control the provider and runtime behavior:
+
+```bash
+# Raise the CLI safety limit for large repos.
+# Start with 64 on a local Ollama GPU setup; use 32 as a conservative fallback.
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000
+GITNEXUS_EMBEDDING_BATCH_SIZE=64
+
+# Use a Hugging Face mirror / custom endpoint
+HF_ENDPOINT=https://hf-mirror.com
+# or
+GITNEXUS_HF_REMOTE_HOST=https://hf-mirror.com
+
+# Persist downloaded model files
+GITNEXUS_HF_CACHE_DIR=/path/to/hf-cache
+
+# Use a predownloaded local Hugging Face model only
+GITNEXUS_HF_LOCAL_MODEL_PATH=/path/to/local-models
+GITNEXUS_HF_LOCAL_ONLY=1
+
+# Use Ollama instead of Hugging Face for both indexing and query embeddings
+GITNEXUS_EMBEDDING_PROVIDER=ollama
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+```
+
+Recommended Ollama example:
+
+```bash
+GITNEXUS_EMBEDDING_PROVIDER=ollama \
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
+GITNEXUS_EMBEDDING_BATCH_SIZE=64 \
+gitnexus analyze --embeddings
+```
+
+Use `--force` only for intentional full rebuilds or corrupted indexes.
+
+The same settings can also be stored in `~/.gitnexus/config.json`:
+
+```json
+{
+  "embeddings": {
+    "provider": "ollama",
+    "ollamaBaseUrl": "http://localhost:11434",
+    "ollamaModel": "qwen3-embedding:0.6b",
+    "nodeLimit": 90000,
+    "batchSize": 64
+  }
+}
+```
+
+Priority is: environment variables > `~/.gitnexus/config.json` > built-in defaults.
+
+You can inspect or update this without editing JSON manually:
+
+```bash
+gitnexus config embeddings show
+gitnexus config embeddings set --provider ollama --ollama-base-url http://localhost:11434 --ollama-model qwen3-embedding:0.6b --node-limit 90000 --batch-size 64
+gitnexus config embeddings clear
+```
+
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
 
 ## CLI
 
@@ -94,25 +249,5 @@ This project is indexed by GitNexus as **GitNexus** (26675 symbols, 35395 relati
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Ingestion area (239 symbols) | `.claude/skills/generated/ingestion/SKILL.md` |
-| Work in the Extractors area (135 symbols) | `.claude/skills/generated/extractors/SKILL.md` |
-| Work in the Components area (112 symbols) | `.claude/skills/generated/components/SKILL.md` |
-| Work in the Lbug area (96 symbols) | `.claude/skills/generated/lbug/SKILL.md` |
-| Work in the Group area (94 symbols) | `.claude/skills/generated/group/SKILL.md` |
-| Work in the Cli area (92 symbols) | `.claude/skills/generated/cli/SKILL.md` |
-| Work in the Configs area (92 symbols) | `.claude/skills/generated/configs/SKILL.md` |
-| Work in the Type-extractors area (90 symbols) | `.claude/skills/generated/type-extractors/SKILL.md` |
-| Work in the Hooks area (88 symbols) | `.claude/skills/generated/hooks/SKILL.md` |
-| Work in the Unit area (80 symbols) | `.claude/skills/generated/unit/SKILL.md` |
-| Work in the Cpp area (73 symbols) | `.claude/skills/generated/cpp/SKILL.md` |
-| Work in the Scope-resolution area (72 symbols) | `.claude/skills/generated/scope-resolution/SKILL.md` |
-| Work in the Server area (66 symbols) | `.claude/skills/generated/server/SKILL.md` |
-| Work in the Local area (61 symbols) | `.claude/skills/generated/local/SKILL.md` |
-| Work in the Wiki area (60 symbols) | `.claude/skills/generated/wiki/SKILL.md` |
-| Work in the Workers area (57 symbols) | `.claude/skills/generated/workers/SKILL.md` |
-| Work in the Embeddings area (56 symbols) | `.claude/skills/generated/embeddings/SKILL.md` |
-| Work in the Typescript area (53 symbols) | `.claude/skills/generated/typescript/SKILL.md` |
-| Work in the Storage area (51 symbols) | `.claude/skills/generated/storage/SKILL.md` |
-| Work in the Php area (48 symbols) | `.claude/skills/generated/php/SKILL.md` |
 
 <!-- gitnexus:end -->

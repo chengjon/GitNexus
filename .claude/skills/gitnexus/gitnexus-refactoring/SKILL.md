@@ -30,9 +30,13 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 
 ```
 - [ ] gitnexus_rename({symbol_name: "oldName", new_name: "newName", dry_run: true}) — preview all edits
-- [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
+- [ ] Review graph edits (high confidence) and text_search edits (review carefully)
 - [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
 - [ ] gitnexus_detect_changes() — verify only expected files changed
+- [ ] If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`
+- [ ] In worktrees, also pass `cwd` explicitly if the MCP server may be running elsewhere
+- [ ] Check `git_diff_path`, `process_cwd`, `path_resolution`, and `fallback_reason`
+- [ ] Treat `path_resolution = registry_repo` as a fallback that needs explanation
 - [ ] Run tests for affected processes
 ```
 
@@ -66,7 +70,7 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 ```
 gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
 → 12 edits across 8 files
-→ 10 graph edits (high confidence), 2 ast_search edits (review)
+→ 10 graph edits (high confidence), 2 text_search edits (review)
 → Changes: [{file_path, edits: [{line, old_text, new_text, confidence}]}]
 ```
 
@@ -81,10 +85,40 @@ gitnexus_impact({target: "validateUser", direction: "upstream"})
 **gitnexus_detect_changes** — verify your changes after refactoring:
 
 ```
-gitnexus_detect_changes({scope: "all"})
+gitnexus_detect_changes({scope: "all", repo: "RepoName"})
 → Changed: 8 files, 12 symbols
 → Affected processes: LoginFlow, TokenRefresh
 → Risk: MEDIUM
+→ git_repo_path: /path/to/repo
+→ git_diff_path: /path/to/repo/.worktrees/refactor-branch
+→ process_cwd: /path/to/repo/.worktrees/refactor-branch
+→ path_resolution: cwd_worktree | registry_repo
+→ fallback_reason: null | different_repo | not_git_repo | repo_identity_unresolved
+```
+
+Multi-repo / worktree example:
+
+```
+If multiple repos are indexed, pass `repo` explicitly to `gitnexus_detect_changes`.
+
+gitnexus_detect_changes({
+  scope: "all",
+  repo: "RepoName",
+  cwd: "/path/to/repo/.worktrees/refactor-branch"
+})
+```
+
+Use `repo` when the MCP server exposes more than one indexed repo. Use `cwd`
+when the MCP server `process.cwd()` may not match the active worktree.
+
+Path verification note:
+
+```
+- `git_diff_path` tells you which path actually ran `git diff`
+- `process_cwd` tells you which cwd participated in repo/worktree identity resolution
+- `path_resolution = cwd_worktree` means the tool followed the effective worktree path
+- `path_resolution = registry_repo` means it fell back to the indexed repo path
+- `fallback_reason` explains why fallback happened; `null` means no fallback
 ```
 
 **gitnexus_cypher** — custom reference queries:
@@ -107,15 +141,15 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
 
 ```
 1. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
-   → 12 edits: 10 graph (safe), 2 ast_search (review)
+   → 12 edits: 10 graph (safe), 2 text_search (review)
    → Files: validator.ts, login.ts, middleware.ts, config.json...
 
-2. Review ast_search edits (config.json: dynamic reference!)
+2. Review text_search edits (config.json: dynamic reference!)
 
 3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
    → Applied 12 edits across 8 files
 
-4. gitnexus_detect_changes({scope: "all"})
+4. gitnexus_detect_changes({scope: "all", repo: "RepoName", cwd: "/path/to/repo/.worktrees/refactor-branch"})
    → Affected: LoginFlow, TokenRefresh
    → Risk: MEDIUM — run tests for these flows
 ```
