@@ -560,6 +560,210 @@ Approximate commit distribution by observed theme:
 | CLI / doctor / setup | structured diagnostics, host config checks, refresh-context, embedding config commands |
 | CI / deps / security | dependency updates, deterministic installs, Docker/build fixes, server/API hardening |
 
+## Feedback To Collect For Maintainers
+
+The update exposed several areas where operator and user feedback would help
+GitNexus developers improve the product. Use this section as a review worksheet
+for project maintainers and downstream users.
+
+### 1. Migration And Graph Store Recovery
+
+Questions:
+
+- Did users understand that `.gitnexus/kuzu` is retired and `.gitnexus/lbug` is
+  now the graph-store success criterion?
+- How often did projects have `.gitnexus/meta.json` but no `.gitnexus/lbug`?
+- Did `gitnexus analyze` now recover that state without needing manual cleanup?
+- Were the messages clear enough when metadata existed but the graph store was
+  missing?
+- Did any project require deleting `.gitnexus/lbug*` sidecars before rebuild?
+
+Useful evidence:
+
+- target project path
+- `gitnexus status` output before and after recovery
+- whether `.gitnexus/meta.json`, `.gitnexus/lbug`, and old `.gitnexus/kuzu`
+  existed
+- exact `gitnexus analyze` command used
+- tail of the analyze log when recovery failed or stalled
+
+### 2. Analyze Runtime, Worker Behavior, And Parser Stalls
+
+Questions:
+
+- Which repositories still make `gitnexus analyze` appear stuck or silent?
+- Did bounded workers, `--worker-timeout`, and `--max-file-size` make recovery
+  easier to reason about?
+- Were native worker abort messages actionable for a local source checkout?
+- Which generated, bundled, or demo assets should GitNexus ignore by default or
+  flag more clearly?
+- Should GitNexus print periodic progress while a long parser job is running, so
+  operators can distinguish a slow parse from a hang?
+
+Useful evidence:
+
+- command line and runtime flags
+- elapsed time before interrupting
+- CPU and memory state if available
+- log lines mentioning worker timeout, split, quarantine, or native abort
+- file paths surfaced in `exhausted`, `excludePaths`, or quarantine messages
+
+### 3. External Project Boundary And Operator Safety
+
+Questions:
+
+- Is the boundary between GitNexus recovery and target-project modification
+  clear enough?
+- Should GitNexus provide a dry-run suggestion for `.gitnexusignore` rules
+  instead of requiring the operator to edit target projects?
+- Would a generated recovery report be safer than directly modifying external
+  project files?
+- Should docs or CLI warnings explicitly say that `commit`, `fetch`, `push`, and
+  `.gitnexusignore` edits are outside recovery scope unless approved?
+
+Useful evidence:
+
+- where operators felt forced to edit target-project files
+- proposed `.gitnexusignore` entries that solved parser stalls
+- whether project owners accepted or rejected those entries
+- examples where GitNexus recovery work accidentally mixed with project git
+  state changes
+
+### 4. MCP Host And Transport Behavior
+
+Questions:
+
+- When MCP tools report `Transport closed`, do users know to restart the host
+  MCP client rather than spawning another shell process?
+- Do users need clearer diagnostics to tell apart a healthy local CLI from a
+  broken MCP stdio channel?
+- Should `gitnexus doctor --json` include a stronger host-specific MCP
+  reconnect hint?
+- Are global-registry and multi-repo MCP semantics clear when many repos are
+  indexed?
+
+Useful evidence:
+
+- host name and version: Codex, Claude Code, Cursor, OpenCode, Antigravity, or
+  other
+- `gitnexus status` result from the same repository
+- MCP error text and whether reconnect fixed it
+- number of `gitnexus mcp` processes and their cwd values
+
+### 5. Local Source Deployment Versus NPM Install
+
+Questions:
+
+- Are local-source operators clear that they should update by merging upstream
+  and running `npm run build`, not by switching to `npm install -g
+  gitnexus@latest`?
+- Do any CLI recovery messages still imply npm global reinstall as the primary
+  path?
+- Should GitNexus detect that the executable resolves to a local source checkout
+  and tailor recovery guidance automatically?
+- Are MCP config snippets clear enough for local absolute-path usage?
+
+Useful evidence:
+
+- `which gitnexus`
+- `readlink -f $(which gitnexus)`
+- `gitnexus --version`
+- MCP host config command and resolved command path
+- whether `dist/cli/index.js` was rebuilt after source updates
+
+### 6. Optional Grammars And Language Coverage
+
+Questions:
+
+- Which optional grammars were unavailable in real operator environments?
+- Did unavailable grammar warnings create confusion or actionable remediation?
+- Which languages or frameworks produced materially better impact analysis after
+  the update?
+- Which language-specific paths still underperform or create false positives?
+
+Useful evidence:
+
+- `gitnexus doctor --json` language-support section
+- project language mix
+- examples of missed or newly discovered call edges
+- false-positive or false-negative cases in `impact`, `query`, or
+  `detect_changes`
+
+### 7. API Route, Shape, And Cross-Repo Contract Tools
+
+Questions:
+
+- Did `route_map`, `shape_check`, `api_impact`, and group contract tools return
+  understandable results?
+- Which frameworks still need better route or consumer extraction?
+- Did response-shape mismatch reports match real application behavior?
+- Are group manifests and contract matching easy enough for multi-repo teams to
+  adopt?
+
+Useful evidence:
+
+- route path and handler file
+- consumer file and property access
+- expected response shape vs reported shape
+- group config, contract registry output, and unmatched contracts
+- framework details: FastAPI, Next.js, Spring, Kotlin Spring, Java Spring,
+  httpx, fetch, or other
+
+### 8. Embeddings, Search, And Wiki
+
+Questions:
+
+- Are users aware that embeddings are optional and may be dropped by analyze
+  without `--embeddings`?
+- Are persisted embedding settings under `~/.gitnexus/config.json` discoverable?
+- Did Ollama, Hugging Face, or OpenAI-compatible embedding paths work in the
+  local environment?
+- Did wiki generation timeout/retry/lang flags solve large-repo failures?
+- Are BM25-only results good enough for routine operator work, or do users rely
+  on semantic search?
+
+Useful evidence:
+
+- `stats.embeddings` from `.gitnexus/meta.json`
+- `gitnexus config embeddings show`
+- embedding provider, model, endpoint, batch size, and node limit
+- wiki command and timeout/retry/lang flags
+- example query where BM25-only and semantic search differ materially
+
+### 9. Web UI And Visualization
+
+Questions:
+
+- Did Tree View and Circles View improve navigation over the Sigma graph alone?
+- Are selected-node edge emphasis and code-reference panels accurate enough for
+  real review work?
+- Does the Nexus AI agent stop behavior match user expectations?
+- Are local backend and Docker deployment settings clear?
+
+Useful evidence:
+
+- browser and host environment
+- repository size and file count
+- screenshot or route where visualization was confusing
+- local backend URL and `GITNEXUS_BACKEND_URL` usage
+- agent prompt, stop action timing, and observed result
+
+### 10. Prioritized Maintainer Questions
+
+If maintainers can answer only a small set of questions first, prioritize these:
+
+1. Which external projects still fail or stall after the `.gitnexus/lbug`
+   recovery fix?
+2. Which exact files trigger worker timeout, quarantine, or native abort?
+3. Which CLI/MCP messages still direct local-source operators toward the wrong
+   update channel?
+4. Which MCP host most often reports transport or stale-index confusion?
+5. Which language/framework extractors produce the highest-value new signal, and
+   which still miss important edges?
+6. Which API route or response-shape reports are wrong enough to block adoption?
+7. Which actions should GitNexus automate, and which should remain explicit
+   operator-approved changes in the target project?
+
 ## What To Watch Next
 
 1. Keep `docs/ai-cli-local-quick-start.md` as the local operational truth for
