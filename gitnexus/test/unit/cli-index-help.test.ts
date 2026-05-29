@@ -51,6 +51,7 @@ const allHelpCommands = [
   ['impact'],
   ['cypher'],
   ['detect-changes'],
+  ['verify-staged'],
   ['eval-server'],
   ['group'],
   ['group', 'create'],
@@ -216,6 +217,16 @@ describe('CLI help surface', () => {
     expect(result.stdout).toContain('--scope <scope>');
     expect(result.stdout).toContain('--base-ref <ref>');
     expect(result.stdout).toContain('--repo <name>');
+  });
+
+  it('verify-staged help exposes agent-safe scope flags', () => {
+    const result = runHelp('verify-staged');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gitnexus verify-staged|verify_staged [options]');
+    expect(result.stdout).toContain('--cwd <path>');
+    expect(result.stdout).toContain('--worktree <path>');
+    expect(result.stdout).toContain('--json');
   });
 
   it('wiki help shows provider, review, and verbose flags', () => {

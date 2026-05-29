@@ -140,6 +140,79 @@ describe('direct CLI tool commands', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('verifyStagedCommand runs staged detect_changes with cwd and emits bounded JSON', async () => {
+    const symbols = Array.from({ length: 17 }, (_, i) => ({
+      type: 'Function',
+      name: `fn${i}`,
+      filePath: `src/file${i}.ts`,
+    }));
+    callToolMock.mockResolvedValue({
+      summary: {
+        changed_files: 4,
+        changed_count: 17,
+        affected_count: 0,
+        risk_level: 'low',
+      },
+      changed_symbols: symbols,
+      affected_processes: [],
+      metadata: {
+        selected_repo: 'GitNexus',
+        git_repo_path: '/repo/GitNexus',
+        git_diff_path: '/repo/GitNexus/.worktrees/feature',
+        process_cwd: '/repo/GitNexus/.worktrees/feature',
+        indexed_commit: 'abc1234',
+        current_commit: 'abc1234',
+        stale: false,
+      },
+    });
+    const { verifyStagedCommand } = await import('../../src/cli/tool.js');
+
+    await verifyStagedCommand({
+      repo: 'GitNexus',
+      cwd: '/repo/GitNexus/.worktrees/feature',
+      json: true,
+    });
+
+    expect(callToolMock).toHaveBeenCalledWith('detect_changes', {
+      scope: 'staged',
+      base_ref: undefined,
+      repo: 'GitNexus',
+      cwd: '/repo/GitNexus/.worktrees/feature',
+      worktree: undefined,
+    });
+    const payload = JSON.parse(writeSyncMock.mock.calls[0][1]);
+    expect(payload.command).toBe('verify-staged');
+    expect(payload.ok).toBe(true);
+    expect(payload.status).toBe('review');
+    expect(payload.summary.changed_files).toBe(4);
+    expect(payload.changed_symbols).toHaveLength(15);
+    expect(payload.truncated.changed_symbols).toBe(2);
+    expect(payload.metadata.git_diff_path).toBe('/repo/GitNexus/.worktrees/feature');
+    expect(payload.next_action).toContain('Review listed changes');
+    expect(payload.suggested_command).toContain('gitnexus detect-changes --scope staged');
+  });
+
+  it('verifyStagedCommand returns structured JSON failure with retry command', async () => {
+    callToolMock.mockRejectedValue(new Error('Repository "missing" not found'));
+    const { verifyStagedCommand } = await import('../../src/cli/tool.js');
+
+    await verifyStagedCommand({
+      repo: 'missing',
+      cwd: '/repo/worktree',
+      json: true,
+    });
+
+    const payload = JSON.parse(writeSyncMock.mock.calls[0][1]);
+    expect(payload.command).toBe('verify-staged');
+    expect(payload.ok).toBe(false);
+    expect(payload.status).toBe('blocked');
+    expect(payload.error).toContain('Repository "missing" not found');
+    expect(payload.suggested_command).toBe(
+      'gitnexus detect-changes --scope staged --repo missing --cwd /repo/worktree',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('truncates changed_symbols list beyond 15 and shows overflow count', async () => {
     const symbols = Array.from({ length: 17 }, (_, i) => ({
       type: 'function',

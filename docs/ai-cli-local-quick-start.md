@@ -248,6 +248,16 @@ gitnexus detect-changes --scope staged --repo target-repo --cwd /path/to/worktre
 gitnexus detect-changes --scope staged --repo target-repo --worktree /path/to/worktree
 ```
 
+For agent closeout gates, prefer the bounded staged wrapper:
+
+```bash
+gitnexus verify-staged --repo target-repo --cwd /path/to/worktree --json
+```
+
+`verify-staged` always runs staged `detect_changes`, preserves the same `cwd` and
+`worktree` hints, caps large symbol/process lists for agent output, and includes a
+`suggested_command` retry command when the check is blocked.
+
 Use `--cwd` when the command is launched from a host process whose cwd may not
 match the agent's active worktree. Use `--worktree` when the operator already
 knows the exact linked worktree to diff.

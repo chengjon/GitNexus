@@ -138,6 +138,7 @@ export const zhCN = {
   'help.command.impact.description': '影响面分析：修改符号会影响什么',
   'help.command.cypher.description': '对知识图谱执行原始 Cypher 查询',
   'help.command.detectChanges.description': '将 git diff hunk 映射到已索引符号和受影响执行流程',
+  'help.command.verifyStaged.description': '使用 detect_changes 执行面向 agent 的 staged 范围验证',
   'help.command.evalServer.description': '启动轻量 HTTP 服务器，用于评测期间的快速工具调用',
   'help.command.group.description': '管理仓库组，用于跨索引影响分析',
   'help.command.group.create.description': '使用模板 group.yaml 创建新仓库组',

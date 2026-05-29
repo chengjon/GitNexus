@@ -58,6 +58,77 @@ function output(data: any): void {
   }
 }
 
+function quoteCommandArg(value: string): string {
+  return /^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function stagedDetectCommand(options?: { repo?: string; cwd?: string; worktree?: string }): string {
+  const parts = ['gitnexus', 'detect-changes', '--scope', 'staged'];
+  if (options?.repo) parts.push('--repo', quoteCommandArg(options.repo));
+  if (options?.cwd) parts.push('--cwd', quoteCommandArg(options.cwd));
+  if (options?.worktree) parts.push('--worktree', quoteCommandArg(options.worktree));
+  return parts.join(' ');
+}
+
+function nextActionForVerifyStaged(payload: any): string {
+  const metadata = payload?.metadata ?? {};
+  const summary = payload?.summary ?? {};
+  const changedFiles = Number(summary.changed_files ?? 0);
+  const changedSymbols = Number(summary.changed_count ?? 0);
+  const risk = String(summary.risk_level ?? '').toLowerCase();
+
+  if (metadata.stale) return 'Refresh the GitNexus index before relying on this result.';
+  if (changedFiles === 0 && changedSymbols === 0) return 'No staged changes detected.';
+  if (changedFiles > 0 && changedSymbols === 0) {
+    return 'Review changed files manually; no indexed symbols matched changed hunks.';
+  }
+  if (risk === 'high' || risk === 'critical') return 'Review affected processes before commit.';
+  return 'Review listed changes before commit.';
+}
+
+function normalizeVerifyStagedResult(result: any, options?: { repo?: string; cwd?: string; worktree?: string }) {
+  const summary = result?.summary ?? {};
+  const changedSymbols = Array.isArray(result?.changed_symbols) ? result.changed_symbols : [];
+  const affectedProcesses = Array.isArray(result?.affected_processes) ? result.affected_processes : [];
+  const metadata = result?.metadata ?? {};
+  const status =
+    metadata.stale === true
+      ? 'stale'
+      : (summary.changed_files ?? 0) === 0 && (summary.changed_count ?? 0) === 0
+        ? 'clean'
+        : 'review';
+
+  return {
+    command: 'verify-staged',
+    ok: true,
+    status,
+    summary,
+    metadata,
+    changed_symbols: changedSymbols.slice(0, 15),
+    affected_processes: affectedProcesses.slice(0, 10),
+    truncated: {
+      changed_symbols: Math.max(0, changedSymbols.length - 15),
+      affected_processes: Math.max(0, affectedProcesses.length - 10),
+    },
+    next_action: nextActionForVerifyStaged(result),
+    suggested_command: stagedDetectCommand(options),
+  };
+}
+
+function normalizeVerifyStagedError(
+  err: unknown,
+  options?: { repo?: string; cwd?: string; worktree?: string },
+) {
+  return {
+    command: 'verify-staged',
+    ok: false,
+    status: 'blocked',
+    error: err instanceof Error ? err.message : String(err),
+    next_action: 'Fix the error, then retry staged verification.',
+    suggested_command: stagedDetectCommand(options),
+  };
+}
+
 export async function queryCommand(
   queryText: string,
   options?: {
@@ -197,5 +268,36 @@ export async function detectChangesCommand(options?: {
   } catch (err) {
     process.exitCode = 1;
     output(formatDetectChangesResult({ error: err instanceof Error ? err.message : String(err) }));
+  }
+}
+
+export async function verifyStagedCommand(options?: {
+  repo?: string;
+  cwd?: string;
+  worktree?: string;
+  json?: boolean;
+}): Promise<void> {
+  const backend = await getBackend();
+  const callParams = {
+    scope: 'staged',
+    base_ref: undefined,
+    repo: options?.repo,
+    cwd: options?.cwd,
+    worktree: options?.worktree,
+  };
+
+  try {
+    const result = await backend.callTool('detect_changes', callParams);
+    if (result && typeof result === 'object' && 'error' in result && (result as any).error) {
+      process.exitCode = 1;
+      const errorPayload = normalizeVerifyStagedError((result as any).error, options);
+      output(options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }));
+      return;
+    }
+    output(options?.json ? normalizeVerifyStagedResult(result, options) : formatDetectChangesResult(result));
+  } catch (err) {
+    process.exitCode = 1;
+    const errorPayload = normalizeVerifyStagedError(err, options);
+    output(options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }));
   }
 }
