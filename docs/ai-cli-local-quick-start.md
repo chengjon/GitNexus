@@ -267,6 +267,13 @@ After rebuilding local GitNexus source, restart MCP clients so they load the new
 `dist/cli/index.js`. During local-source recovery, do not switch MCP back to
 `npx -y gitnexus@latest`.
 
+If an active agent session reports the GitNexus MCP transport as closed, treat
+that as a host/client connection state. Verify the local CLI with
+`gitnexus status` or `node /opt/claude/GitNexus/gitnexus/dist/cli/index.js status`,
+then restart or reconnect the MCP client from the host. Starting a detached
+`gitnexus mcp` process in a shell does not attach it to an already-closed stdio
+tool channel.
+
 ## Host Expectations
 
 This section intentionally lists only the primary maintained CLI pair for this
