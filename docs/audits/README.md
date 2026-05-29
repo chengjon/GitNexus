@@ -22,6 +22,9 @@ Documentation navigation entrypoint:
   Operator-facing summary of the 2026-05-29 upstream refresh, including new
   capabilities, architecture changes, LadybugDB migration effects, MCP
   behavior, and local-source deployment boundaries.
+- [2026-05-29-upstream-update-feedback-form.md](/opt/claude/GitNexus/docs/audits/2026-05-29-upstream-update-feedback-form.md)
+  Fillable maintainer feedback form for reviewing the 2026-05-29 upstream
+  update and collecting actionable operator/user feedback.
 - [2026-04-12-omx-stale-ralph-cancel-implementation.md](/opt/claude/GitNexus/docs/audits/2026-04-12-omx-stale-ralph-cancel-implementation.md)
   Historical local implementation and verification record for `omx cancel ralph --stale`,
   including the later root-fallback edge case where terminal scoped Ralph state
