@@ -32,6 +32,7 @@ describe('config embeddings commands', () => {
       provider: 'ollama',
       ollamaBaseUrl: 'http://localhost:11434',
       ollamaModel: 'qwen3-embedding:0.6b',
+      embeddingDims: '1024',
       nodeLimit: '90000',
       batchSize: '8',
     });
@@ -42,6 +43,7 @@ describe('config embeddings commands', () => {
         provider: 'ollama',
         ollamaBaseUrl: 'http://localhost:11434',
         ollamaModel: 'qwen3-embedding:0.6b',
+        embeddingDims: 1024,
         nodeLimit: 90000,
         batchSize: 8,
       },
@@ -74,6 +76,7 @@ describe('config embeddings commands', () => {
       provider: 'ollama',
       ollamaBaseUrl: 'http://localhost:11434',
       ollamaModel: 'qwen3-embedding:0.6b',
+      embeddingDims: '1024',
       batchSize: '8',
     });
     logSpy.mockClear();
@@ -85,6 +88,7 @@ describe('config embeddings commands', () => {
     expect(output).toContain('Effective embeddings config');
     expect(output).toContain('ollama');
     expect(output).toContain('qwen3-embedding:0.6b');
+    expect(output).toContain('"embeddingDims": 1024');
   });
 
   it('set command rejects unsupported provider values', async () => {

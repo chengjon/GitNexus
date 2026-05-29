@@ -134,6 +134,7 @@ Every non-trivial workline MUST also state a one-line `Line Scope` contract befo
 | 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
+<!-- gitnexus:keep -->
 # GitNexus — Code Intelligence
 
 This project is indexed by GitNexus.
