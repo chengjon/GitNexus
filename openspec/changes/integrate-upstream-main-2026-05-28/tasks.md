@@ -145,6 +145,18 @@
   - [x] 7.6.12 Close the miscellaneous local source surface by row split: no
         catch-all replay remains after rows 1-18 are classified, verified, or
         replayed.
+- [x] 7.7 Refresh against latest fetched `upstream/main` after second-stage
+      audit closure
+  - [x] 7.7.1 Fetch `origin` and `upstream`, confirm `upstream/main` advanced
+        from `50715e3894567d435153b059b123513b766ee87e` to
+        `b565c7c9905d4465997346bc489106611f8fa979`.
+  - [x] 7.7.2 Merge the three new upstream commits into `upstream-sync` without
+        replacing `origin/main`.
+  - [x] 7.7.3 Validate the upstream refresh with focused FastAPI, C++ ADL,
+        impact, parse-cache, and MCP LocalBackend regression suites.
+  - [x] 7.7.4 Record that `upstream/main...origin/upstream-sync` is `0 18`, so
+        the staging branch contains the latest fetched upstream main plus local
+        integration commits.
 
 ## 8. Final Cutover Guard
 
@@ -166,6 +178,24 @@
   `path_resolution=cwd_worktree`, `fallback_reason=null`.
 - Interpretation: the staged replay is documentation/OpenSpec/governance
   dominated and does not affect indexed execution flows.
+- Latest upstream refresh after second-stage audit: fetched `upstream/main` at
+  `b565c7c9905d4465997346bc489106611f8fa979` and merged it into
+  `upstream-sync` as `e5ef91f9bfb2d2e7814e6e77ab24a919c6fca228`.
+- The refresh added upstream FastAPI cross-file `include_router(prefix=...)`
+  route resolution, C++ ADL function-type entities, and per-symbol `processes`
+  fields on impact byDepth items. `origin/main` was not replaced.
+- Root-cause note: `test/integration/fastapi-prefix-pipeline.test.ts` initially
+  failed before rebuild because the Vitest worker path fell back to stale
+  `dist/core/ingestion/workers/parse-worker.js`. After `npm run build`, the
+  same test passed.
+- Upstream refresh validation passed: `HOME=/tmp/gitnexus-refresh-home npm run
+  build`; FastAPI router unit tests 2 files / 86 tests; FastAPI pipeline 1 file
+  / 5 tests; C++/callTool/impact/parse-cache focused suite 5 files / 367 tests;
+  MCP LocalBackend suite 5 files / 94 tests.
+- Compare-scope gate for the upstream refresh against prior
+  `origin/upstream-sync` reported 32 files, 102 symbols, 31 affected processes,
+  `risk level: critical`; this is expected because upstream touched core
+  ingestion, MCP, and impact paths and is covered by the focused suites above.
 - During unit validation, `test/unit/hooks.test.ts` exposed an upstream hook
   helper defect: explicit missing `GITNEXUS_HOOK_LSOF_PATH` values were ignored
   and the helper fell back to `/usr/bin/lsof`; in this sandbox that host binary

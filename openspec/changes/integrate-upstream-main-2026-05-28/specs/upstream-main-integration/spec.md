@@ -17,6 +17,18 @@ current `upstream/main`, rather than directly merging or rebasing the dirty loca
 - **AND** the branch records the current upstream, origin, local, and merge-base
   refs in the OpenSpec change record
 
+#### Scenario: Upstream advances during the integration review
+
+- **WHEN** `upstream/main` advances after second-stage source capability audit
+  closure but before final `origin/main` cutover approval
+- **THEN** GitNexus fetches the latest upstream ref and merges it into the
+  isolated `upstream-sync` staging branch
+- **AND** the refresh does not replace `origin/main` or run `--force-with-lease`
+- **AND** any touched core ingestion, MCP, impact, or parser behavior is covered
+  by focused regression suites before the branch is treated as cutover-ready
+- **AND** OpenSpec records the refreshed upstream ref, refreshed staging ref,
+  validation commands, and any expected high-risk scope-gate result
+
 ### Requirement: GitNexus SHALL preserve local governance while treating upstream source architecture as authoritative for first-pass integration
 
 GitNexus SHALL replay local governance and documentation records onto the

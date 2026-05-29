@@ -1,16 +1,22 @@
 # Local Source Capability Audit Before Upstream Main Cutover
 
 Date: 2026-05-28
+Latest refresh: 2026-05-29
 
 ## Verdict
 
-Do not replace `origin/main` with `upstream-sync` if the required outcome is
-"all local source upgrades continue to be effective."
+Do not replace `origin/main` with `upstream-sync` without an explicit final
+cutover approval and `--force-with-lease` authorization.
 
-The current `upstream-sync` branch is a good first-pass upstream architecture
-baseline with local governance replayed, but it is not a full source-capability
-replay. It preserves the governance layer and intentionally keeps upstream
-source architecture authoritative.
+The second-stage capability audit has reduced the original source-continuity
+blocker: all 19 local source capability rows now have an explicit retained,
+replayed, absorbed, retired, or deferred-product decision. The branch preserves
+the governance layer, keeps upstream source architecture authoritative, and
+replays only the local source capabilities that remained required on the current
+upstream shape.
+
+Final cutover remains intentionally blocked only at the explicit approval step:
+`origin/main` has not been replaced, and `--force-with-lease` has not been run.
 
 ## Evidence Baseline
 
@@ -21,6 +27,22 @@ Refs used for this audit:
 - current `origin/main`: `b18af7575f857490e073b24ca8943f007b47022a`
 - `upstream/main`: `50715e3894567d435153b059b123513b766ee87e`
 - proposed `upstream-sync`: `de10e0a64c06126d17cc5447485d42c148c8dd9a`
+
+Latest upstream refresh after the capability audit:
+
+- refreshed `upstream/main`: `b565c7c9905d4465997346bc489106611f8fa979`
+- refreshed `origin/upstream-sync`: `e5ef91f9bfb2d2e7814e6e77ab24a919c6fca228`
+- refreshed `origin/main`: `b18af7575f857490e073b24ca8943f007b47022a`
+- `upstream/main...origin/upstream-sync`: `0 18`, so the staging branch
+  contains the latest fetched upstream main plus local integration commits
+- `origin/main...origin/upstream-sync`: `209 818`, so the final operation is
+  still a replacement-style cutover, not a normal merge
+
+The latest upstream refresh added three upstream commits after the audit:
+FastAPI cross-file `include_router(prefix=...)` route resolution, C++ ADL
+function-type entities, and per-symbol `processes` fields on impact byDepth
+items. The refresh was merged into `upstream-sync` as `e5ef91f9` and validated
+with focused FastAPI, C++, impact, parse-cache, and MCP LocalBackend suites.
 
 From merge base to local `main`, the local branch changed 1108 files. For those
 local changed files, `upstream-sync` currently has:
@@ -596,21 +618,27 @@ as a catch-all batch.
 3. Completed: audit `MCP local backend/tools` against upstream
    `local-backend.ts` and `lbug-adapter.ts`; keep behavior on the upstream
    backend shape instead of replaying the old split files.
-4. Verify `Host integration and context refresh` behavior for Codex, Claude
-   Code, Cursor, and generic stdio.
-5. Run focused fixtures for language/framework parsing before porting local Vue,
-   Laravel, PHP, Swift/Kotlin reporting behavior.
-6. Decide whether full/incremental/module-tree wiki generation is still a
-   product requirement. If yes, reimplement on upstream wiki query/client
-   surfaces.
-7. Re-map tests only after their target capability has a current upstream-shaped
-   implementation.
+4. Completed: verify `Host integration and context refresh`; restore only the
+   required standalone `refresh-context` command and defer broader host-adapter
+   parity to future behavior tests.
+5. Completed: run focused fixtures for language/framework parsing; keep current
+   upstream-shaped Vue, Laravel/PHP, Kotlin, Swift, framework, and tree-sitter
+   behavior instead of replaying old local files.
+6. Completed: keep the current upstream wiki generator behavior; treat future
+   full/incremental/module-tree gaps as product requests against the current API.
+7. Completed: re-map tests only after their target capability has a current
+   upstream-shaped implementation.
+8. Completed: refresh against latest fetched `upstream/main`
+   (`b565c7c9905d4465997346bc489106611f8fa979`) and merge it into
+   `upstream-sync` as `e5ef91f9bfb2d2e7814e6e77ab24a919c6fca228`.
 
 ## Cutover Decision
 
 With the user's stated goal that local source upgrades continue to be fully
-effective, the current `upstream-sync` branch is not ready to replace
-`origin/main`.
+effective, the current `upstream-sync` branch has completed the required
+second-stage source capability audit and latest-upstream refresh.
 
-The branch remains useful as a staging baseline and review artifact. The next
-work should be capability-by-capability replay, not force-push cutover.
+The branch remains a staging baseline and review artifact until the maintainer
+explicitly approves the final replacement. The only remaining cutover work is
+the guarded `origin/main` replacement itself, performed only after final
+validation and using `--force-with-lease`.
