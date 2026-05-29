@@ -8,6 +8,7 @@ const {
   resolveCSharpImportMock,
   resolveCSharpNamespaceDirMock,
   loadCSharpProjectConfigMock,
+  extractNamedBindingsMock,
   loadParserMock,
   loadLanguageMock,
   isLanguageAvailableMock,
@@ -19,6 +20,7 @@ const {
   resolveCSharpImportMock: vi.fn(() => []),
   resolveCSharpNamespaceDirMock: vi.fn(() => null),
   loadCSharpProjectConfigMock: vi.fn(async () => []),
+  extractNamedBindingsMock: vi.fn(() => undefined),
   loadParserMock: vi.fn(),
   loadLanguageMock: vi.fn(async () => undefined),
   isLanguageAvailableMock: vi.fn(() => true),
@@ -63,7 +65,7 @@ vi.mock('../../src/core/ingestion/utils.js', () => ({
 }));
 
 vi.mock('../../src/core/ingestion/named-binding-extraction.js', () => ({
-  extractNamedBindings: vi.fn(() => undefined),
+  extractNamedBindings: extractNamedBindingsMock,
 }));
 
 vi.mock('../../src/core/ingestion/vue-sfc.js', () => ({
@@ -110,6 +112,8 @@ describe('import-processor indexed suffix resolution', () => {
     resolveCSharpNamespaceDirMock.mockClear();
     loadCSharpProjectConfigMock.mockClear();
     loadCSharpProjectConfigMock.mockResolvedValue([]);
+    extractNamedBindingsMock.mockClear();
+    extractNamedBindingsMock.mockReturnValue(undefined);
     queryMatches.length = 0;
     parseMock.mockClear();
     loadParserMock.mockResolvedValue({
@@ -172,6 +176,37 @@ describe('import-processor indexed suffix resolution', () => {
     expect(resolveImportPathMock).toHaveBeenCalledTimes(1);
     expect(resolveImportPathMock.mock.calls[0][8]).toBe(prebuiltCtx.suffixIndex);
     expect(importMap.get('src/pages/Home.tsx')).toEqual(new Set(['src/Feature/Auth/LoginForm.tsx']));
+  });
+
+  it('records named bindings during processImports when AST extraction returns bindings', async () => {
+    queryMatches.push({
+      captures: [
+        { name: 'import', node: { text: "import { LoginForm } from '@/Feature/Auth/LoginForm'" } },
+        { name: 'import.source', node: { text: "'@/Feature/Auth/LoginForm'" } },
+      ],
+    });
+    extractNamedBindingsMock.mockReturnValue([{ local: 'LoginForm', exported: 'LoginForm' }]);
+
+    const importMap = createImportMap();
+    const namedImportMap = createNamedImportMap();
+
+    await processImports(
+      createKnowledgeGraph(),
+      [{ path: 'src/pages/Home.tsx', content: "import { LoginForm } from '@/Feature/Auth/LoginForm'" }],
+      createASTCache(),
+      importMap,
+      undefined,
+      '/tmp/repo',
+      ['src/pages/Home.tsx', 'src/Feature/Auth/LoginForm.tsx'],
+      undefined,
+      namedImportMap,
+    );
+
+    expect(extractNamedBindingsMock).toHaveBeenCalledTimes(1);
+    expect(namedImportMap.get('src/pages/Home.tsx')?.get('LoginForm')).toEqual({
+      sourcePath: 'src/Feature/Auth/LoginForm.tsx',
+      exportedName: 'LoginForm',
+    });
   });
 
   it('builds a suffix index when processImportsFromExtracted is called without a prebuilt context', async () => {
