@@ -11,6 +11,7 @@
 
 // Import from shared package (single source of truth) — used in DDL templates below
 import { NODE_TABLES, REL_TABLE_NAME, REL_TYPES, EMBEDDING_TABLE_NAME } from 'gitnexus-shared';
+import { loadStoredEmbeddingConfig } from '../embeddings/config.js';
 // Re-export so downstream consumers keep the same import path
 export { NODE_TABLES, REL_TABLE_NAME, REL_TYPES, EMBEDDING_TABLE_NAME };
 export type { NodeTableName, RelType } from 'gitnexus-shared';
@@ -443,10 +444,14 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
 // ============================================================================
 
 /** Embedding vector dimensions. Default 384 (snowflake-arctic-embed-xs). */
-const _rawDims = parseInt(process.env.GITNEXUS_EMBEDDING_DIMS ?? '384', 10);
+const _storedEmbeddingDims = loadStoredEmbeddingConfig().embeddingDims;
+const _rawEmbeddingDims =
+  process.env.GITNEXUS_EMBEDDING_DIMS ??
+  (_storedEmbeddingDims === undefined ? '384' : String(_storedEmbeddingDims));
+const _rawDims = parseInt(_rawEmbeddingDims, 10);
 if (Number.isNaN(_rawDims) || _rawDims <= 0) {
   throw new Error(
-    `GITNEXUS_EMBEDDING_DIMS must be a positive integer, got "${process.env.GITNEXUS_EMBEDDING_DIMS}"`,
+    `GITNEXUS_EMBEDDING_DIMS must be a positive integer, got "${_rawEmbeddingDims}"`,
   );
 }
 export const EMBEDDING_DIMS = _rawDims;

@@ -399,6 +399,33 @@ describe('HTTP embedding backend', () => {
       const { EMBEDDING_DIMS } = await import('../../src/core/lbug/schema.js');
       expect(EMBEDDING_DIMS).toBe(1024);
     });
+
+    it('reads dimensions from stored embeddings config when environment variable is unset', async () => {
+      const configDir = process.env.GITNEXUS_HOME as string;
+      await fs.mkdir(configDir, { recursive: true });
+      await fs.writeFile(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ embeddings: { embeddingDims: 1024 } }),
+        'utf-8',
+      );
+
+      const { EMBEDDING_DIMS } = await import('../../src/core/lbug/schema.js');
+      expect(EMBEDDING_DIMS).toBe(1024);
+    });
+
+    it('prefers GITNEXUS_EMBEDDING_DIMS over stored embeddings config', async () => {
+      const configDir = process.env.GITNEXUS_HOME as string;
+      await fs.mkdir(configDir, { recursive: true });
+      await fs.writeFile(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ embeddings: { embeddingDims: 1024 } }),
+        'utf-8',
+      );
+      process.env.GITNEXUS_EMBEDDING_DIMS = '512';
+
+      const { EMBEDDING_DIMS } = await import('../../src/core/lbug/schema.js');
+      expect(EMBEDDING_DIMS).toBe(512);
+    });
   });
 
   describe('timeout and network error handling', () => {

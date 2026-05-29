@@ -286,6 +286,43 @@ Old content here.
     }
   });
 
+  it('preserves existing skill files when gitnexus:keep is present', async () => {
+    const keepDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-ai-ctx-skill-keep-'));
+    const keepStorage = path.join(keepDir, '.gitnexus');
+    const skillPath = path.join(
+      keepDir,
+      '.claude',
+      'skills',
+      'gitnexus',
+      'gitnexus-cli',
+      'SKILL.md',
+    );
+    await fs.mkdir(path.dirname(skillPath), { recursive: true });
+    await fs.mkdir(keepStorage, { recursive: true });
+    const customSkill = `---
+name: gitnexus-cli
+description: Custom local CLI skill
+---
+
+<!-- gitnexus:keep -->
+
+# Custom CLI Skill
+
+Local instructions that must survive analyze.
+`;
+
+    try {
+      await fs.writeFile(skillPath, customSkill, 'utf-8');
+      const stats = { nodes: 50, edges: 100, processes: 5 };
+
+      await generateAIContextFiles(keepDir, keepStorage, 'TestProject', stats);
+
+      await expect(fs.readFile(skillPath, 'utf-8')).resolves.toBe(customSkill);
+    } finally {
+      await fs.rm(keepDir, { recursive: true, force: true });
+    }
+  });
+
   it('writes nothing when both skipAgentsMd and skipSkills are true (--index-only, #742)', async () => {
     // Regression guard for #742. analyzeCommand() resolves --index-only
     // into BOTH skipAgentsMd=true and skipSkills=true. This test pins

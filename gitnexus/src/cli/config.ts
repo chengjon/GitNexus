@@ -4,7 +4,7 @@ import {
   resolveEmbeddingConfig,
   resolveEmbeddingNodeLimit,
 } from '../core/embeddings/config.js';
-import { isHttpMode } from '../core/embeddings/http-client.js';
+import { getHttpDimensions, isHttpMode } from '../core/embeddings/http-client.js';
 import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingConfig } from '../core/embeddings/types.js';
 
 export interface EmbeddingsConfigSetOptions {
@@ -75,6 +75,7 @@ export async function embeddingsConfigShowCommand(
   printJson({
     provider: stored.provider ?? 'huggingface',
     httpMode: isHttpMode(),
+    embeddingDims: getHttpDimensions() ?? DEFAULT_EMBEDDING_CONFIG.dimensions,
     nodeLimit: resolveEmbeddingNodeLimit(undefined) ?? 'default',
     batchSize: effective.batchSize,
     subBatchSize: effective.subBatchSize,

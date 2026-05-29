@@ -61,6 +61,7 @@ This repository currently does **not** ship root `ARCHITECTURE.md`, `RUNBOOK.md`
 | 2026-04-06 | 1.0.0 | Added a local structured Claude header adapted from upstream, but rewritten to point only at real local sources. |
 
 <!-- gitnexus:start -->
+<!-- gitnexus:keep -->
 # GitNexus — Code Intelligence
 
 This project is indexed by GitNexus.

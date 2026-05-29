@@ -33,6 +33,7 @@ export interface AIContextOptions {
 
 const GITNEXUS_START_MARKER = '<!-- gitnexus:start -->';
 const GITNEXUS_END_MARKER = '<!-- gitnexus:end -->';
+const GITNEXUS_KEEP_MARKER = '<!-- gitnexus:keep -->';
 
 /**
  * Find the index of a section marker that occupies its own line.
@@ -239,7 +240,7 @@ async function upsertGitNexusSection(
     // Note: the keep-marker check operates on `existingSection` (the substring
     // between valid section markers identified by findSectionMarkerIndex), so
     // a keep marker in user prose OUTSIDE the GitNexus block has no effect.
-    if (existingSection.includes('<!-- gitnexus:keep -->')) {
+    if (existingSection.includes(GITNEXUS_KEEP_MARKER)) {
       // Build the new stats line from the caller-provided values directly.
       // We do NOT re-extract from `content` because:
       //   (a) first-bold extraction is fragile if the template evolves
@@ -361,6 +362,16 @@ ${skill.description}
 
 Use GitNexus tools to accomplish this task.
 `;
+      }
+
+      try {
+        const existingSkillContent = await fs.readFile(skillPath, 'utf-8');
+        if (existingSkillContent.includes(GITNEXUS_KEEP_MARKER)) {
+          installedSkills.push(skill.name);
+          continue;
+        }
+      } catch {
+        // File does not exist yet; install the packaged skill below.
       }
 
       await fs.writeFile(skillPath, skillContent, 'utf-8');
