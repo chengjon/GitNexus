@@ -152,6 +152,16 @@ gitnexus analyze --force --index-only --drop-embeddings --workers 0
 gitnexus status
 ```
 
+When operating on an external project, keep the recovery boundary narrow:
+
+- Running `gitnexus analyze`, `gitnexus status`, and process checks is recovery
+  work.
+- Editing target-project files, including `.gitnexusignore`, `.gitignore`,
+  `AGENTS.md`, or host-specific context files, requires explicit project-owner
+  approval.
+- Committing, amending, fetching, pushing, or otherwise changing the target
+  project's git state is out of scope unless explicitly requested.
+
 Do not use `--repair-fts` when `.gitnexus/lbug` is missing; FTS repair requires
 an existing graph store. Do not use `gitnexus index` to rebuild a missing graph
 store; `index` only registers an index that already exists.
@@ -167,6 +177,11 @@ gitnexus analyze --force --index-only --drop-embeddings \
   --worker-timeout 20 \
   --max-file-size 256
 ```
+
+If generated or bundled assets still stall parsing after bounded-worker
+recovery, a GitNexus-only `.gitnexusignore` entry may be the right long-term
+project fix. Add or commit that file only after explicit approval for the target
+project.
 
 If a native worker abort message appears, keep using the same GitNexus install
 channel. For this local-source deployment, update by pulling or merging the
