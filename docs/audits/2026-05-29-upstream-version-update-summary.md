@@ -566,6 +566,9 @@ The update exposed several areas where operator and user feedback would help
 GitNexus developers improve the product. Use this section as a review worksheet
 for project maintainers and downstream users.
 
+For a fillable response template, use:
+[2026-05-29-upstream-update-feedback-form.md](/opt/claude/GitNexus/docs/audits/2026-05-29-upstream-update-feedback-form.md).
+
 ### 1. Migration And Graph Store Recovery
 
 Questions:
