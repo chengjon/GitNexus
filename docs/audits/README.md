@@ -25,6 +25,12 @@ Documentation navigation entrypoint:
 - [2026-05-29-upstream-update-feedback-form.md](/opt/claude/GitNexus/docs/audits/2026-05-29-upstream-update-feedback-form.md)
   Fillable maintainer feedback form for reviewing the 2026-05-29 upstream
   update and collecting actionable operator/user feedback.
+- [2026-05-29-mystocks-agent-gitnexus-feedback-triage.md](/opt/claude/GitNexus/docs/audits/2026-05-29-mystocks-agent-gitnexus-feedback-triage.md)
+  Maintainer-facing triage of MyStocks agent feedback after the 2026-05-29
+  upstream update, including prioritized worktree, MCP, alias, and analyze UX
+  follow-ups.
+- [2026-05-29-mystocks-agent-gitnexus-feedback.md](/opt/claude/GitNexus/docs/audits/2026-05-29-mystocks-agent-gitnexus-feedback.md)
+  Raw MyStocks agent feedback used as the source record for the triage above.
 - [2026-04-12-omx-stale-ralph-cancel-implementation.md](/opt/claude/GitNexus/docs/audits/2026-04-12-omx-stale-ralph-cancel-implementation.md)
   Historical local implementation and verification record for `omx cancel ralph --stale`,
   including the later root-fallback edge case where terminal scoped Ralph state
