@@ -145,6 +145,8 @@ export const en = {
   'help.command.cypher.description': 'Execute raw Cypher query against the knowledge graph',
   'help.command.detectChanges.description':
     'Map git diff hunks to indexed symbols and affected execution flows',
+  'help.command.verifyStaged.description':
+    'Agent-safe staged scope verification using detect_changes',
   'help.command.evalServer.description':
     'Start lightweight HTTP server for fast tool calls during evaluation',
   'help.command.group.description': 'Manage repository groups for cross-index impact analysis',

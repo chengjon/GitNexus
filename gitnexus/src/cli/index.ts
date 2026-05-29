@@ -292,6 +292,16 @@ program
   .option('--worktree <path>', 'Explicit linked worktree path for git diff')
   .action(createLbugLazyAction(() => import('./tool.js'), 'detectChangesCommand'));
 
+program
+  .command('verify-staged')
+  .alias('verify_staged')
+  .description('Agent-safe staged scope verification using detect_changes')
+  .option('-r, --repo <name>', 'Target repository')
+  .option('--cwd <path>', 'Working directory hint for linked worktree detection')
+  .option('--worktree <path>', 'Explicit linked worktree path for git diff')
+  .option('--json', 'Emit bounded JSON output for agents')
+  .action(createLbugLazyAction(() => import('./tool.js'), 'verifyStagedCommand'));
+
 // ─── Eval Server (persistent daemon for SWE-bench) ─────────────────
 
 program
