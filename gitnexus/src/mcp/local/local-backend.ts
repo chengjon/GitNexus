@@ -25,6 +25,7 @@ import {
   parseDiffHunks,
   getCanonicalRepoRoot,
   getGitRoot,
+  getCurrentCommit,
   type FileDiff,
 } from '../../storage/git.js';
 import { realpathSync } from 'fs';
@@ -287,6 +288,29 @@ function createDetectChangesPathMetadata(
     path_resolution: pathResolution,
     fallback_reason: fallbackReason,
     warnings,
+  };
+}
+
+function createDetectChangesMetadata(
+  repo: RepoHandle,
+  pathMetadata: Record<string, any>,
+  diffCwd: string,
+): Record<string, any> {
+  const currentCommit = getCurrentCommit(diffCwd) ?? getCurrentCommit(repo.repoPath) ?? null;
+  const indexedCommit = repo.lastCommit || null;
+  const stale = !!indexedCommit && !!currentCommit && indexedCommit !== currentCommit;
+  return {
+    ...pathMetadata,
+    selected_repo: repo.name,
+    selected_repo_id: repo.id,
+    repo_path: repo.repoPath,
+    storage_path: repo.storagePath,
+    index_path: repo.lbugPath,
+    indexed_commit: indexedCommit,
+    current_commit: currentCommit,
+    stale,
+    stale_reason: stale ? 'current_commit_differs_from_indexed_commit' : null,
+    stale_severity: stale ? 'warning' : 'none',
   };
 }
 
@@ -579,15 +603,27 @@ export class LocalBackend {
       const key = h.name.toLowerCase();
       nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
     }
-    const labels = [...this.repos.values()].map((h) =>
+    const handles = [...this.repos.values()];
+    const labels = handles.map((h) =>
       (nameCounts.get(h.name.toLowerCase()) ?? 0) > 1 ? `${h.name} (${h.repoPath})` : h.name,
     );
+    const shownLabels = labels.slice(0, 8);
+    const countNote =
+      labels.length > shownLabels.length
+        ? ` (showing ${shownLabels.length} of ${labels.length})`
+        : '';
+    const cwdPick = this.pickRepoHandleForCwd(handles);
 
     if (repoParam) {
-      throw new Error(`Repository "${repoParam}" not found. Available: ${labels.join(', ')}`);
+      const cwdHint = cwdPick ? ` Nearest by cwd: ${cwdPick.name} (${cwdPick.repoPath}).` : '';
+      throw new Error(
+        `Repository "${repoParam}" not found. Available${countNote}: ${shownLabels.join(', ')}.` +
+          cwdHint +
+          ' Run: gitnexus list --all',
+      );
     }
     throw new Error(
-      `Multiple repositories indexed. Specify which one with the "repo" parameter. Available: ${labels.join(', ')}`,
+      `Multiple repositories indexed. Specify which one with the "repo" parameter. Available${countNote}: ${shownLabels.join(', ')}. Run: gitnexus list --all`,
     );
   }
 
@@ -2451,6 +2487,7 @@ export class LocalBackend {
       path.resolve(process.cwd()),
       repo.repoPath,
     );
+    pathMetadata = createDetectChangesMetadata(repo, pathMetadata, repo.repoPath);
     try {
       // Resolve the cwd for git diff.
       //
@@ -2501,6 +2538,7 @@ export class LocalBackend {
         diffCwd,
         forceWorktreeMetadata,
       );
+      pathMetadata = createDetectChangesMetadata(repo, pathMetadata, diffCwd);
 
       // maxBuffer raised from Node's 1MB default to 256MB to avoid ENOBUFS on
       // repos with large unstaged/untracked diffs (e.g. unignored build folders).
@@ -2520,6 +2558,7 @@ export class LocalBackend {
     if (fileDiffs.length === 0) {
       return {
         summary: {
+          changed_files: 0,
           changed_count: 0,
           affected_count: 0,
           risk_level: 'none',

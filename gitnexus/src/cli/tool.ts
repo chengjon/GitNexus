@@ -181,12 +181,21 @@ export async function detectChangesCommand(options?: {
   scope?: string;
   baseRef?: string;
   repo?: string;
+  cwd?: string;
+  worktree?: string;
 }): Promise<void> {
   const backend = await getBackend();
-  const result = await backend.callTool('detect_changes', {
-    scope: options?.scope || 'unstaged',
-    base_ref: options?.baseRef,
-    repo: options?.repo,
-  });
-  output(formatDetectChangesResult(result));
+  try {
+    const result = await backend.callTool('detect_changes', {
+      scope: options?.scope || 'unstaged',
+      base_ref: options?.baseRef,
+      repo: options?.repo,
+      cwd: options?.cwd,
+      worktree: options?.worktree,
+    });
+    output(formatDetectChangesResult(result));
+  } catch (err) {
+    process.exitCode = 1;
+    output(formatDetectChangesResult({ error: err instanceof Error ? err.message : String(err) }));
+  }
 }

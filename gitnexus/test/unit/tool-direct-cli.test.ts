@@ -19,6 +19,7 @@ describe('direct CLI tool commands', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     vi.stubEnv('GITNEXUS_LANG', 'en');
+    process.exitCode = undefined;
     vi.resetModules();
     initMock.mockReset();
     callToolMock.mockReset();
@@ -51,6 +52,28 @@ describe('direct CLI tool commands', () => {
     expect(writeSyncMock).toHaveBeenCalledWith(1, expect.stringContaining('Risk level: low'));
   });
 
+  it('dispatches detect_changes with cwd and worktree hints', async () => {
+    callToolMock.mockResolvedValue({
+      summary: { changed_files: 0, changed_count: 0, affected_count: 0, risk_level: 'none' },
+    });
+    const { detectChangesCommand } = await import('../../src/cli/tool.js');
+
+    await detectChangesCommand({
+      scope: 'staged',
+      repo: 'gitnexus',
+      cwd: '/tmp/worktrees/feature',
+      worktree: '/tmp/worktrees/feature',
+    });
+
+    expect(callToolMock).toHaveBeenCalledWith('detect_changes', {
+      scope: 'staged',
+      base_ref: undefined,
+      repo: 'gitnexus',
+      cwd: '/tmp/worktrees/feature',
+      worktree: '/tmp/worktrees/feature',
+    });
+  });
+
   it('prints "No changes detected." when changed_count is 0', async () => {
     callToolMock.mockResolvedValue({
       summary: { changed_files: 0, changed_count: 0, affected_count: 0, risk_level: 'low' },
@@ -62,6 +85,35 @@ describe('direct CLI tool commands', () => {
     expect(writeSyncMock).toHaveBeenCalledWith(1, expect.stringContaining('No changes detected.'));
   });
 
+  it('prints changed files even when no indexed symbols match', async () => {
+    callToolMock.mockResolvedValue({
+      summary: { changed_files: 3, changed_count: 0, affected_count: 0, risk_level: 'low' },
+      changed_symbols: [],
+      affected_processes: [],
+      metadata: {
+        selected_repo: 'GitNexus',
+        git_repo_path: '/repo/GitNexus',
+        git_diff_path: '/repo/GitNexus/.worktrees/docs',
+        process_cwd: '/repo/GitNexus/.worktrees/docs',
+        indexed_commit: 'abc1234',
+        current_commit: 'def5678',
+        stale: true,
+        stale_severity: 'warning',
+      },
+    });
+    const { detectChangesCommand } = await import('../../src/cli/tool.js');
+
+    await detectChangesCommand({});
+
+    const output: string = writeSyncMock.mock.calls[0][1];
+    expect(output).toContain('Repository: GitNexus');
+    expect(output).toContain('Git diff path: /repo/GitNexus/.worktrees/docs');
+    expect(output).toContain('Index status: stale');
+    expect(output).toContain('Changes: 3 files, 0 symbols');
+    expect(output).toContain('No indexed symbols matched changed hunks.');
+    expect(output).not.toBe('No changes detected.');
+  });
+
   it('prints error message when result contains an error', async () => {
     callToolMock.mockResolvedValue({ error: 'index is stale' });
     const { detectChangesCommand } = await import('../../src/cli/tool.js');
@@ -69,6 +121,23 @@ describe('direct CLI tool commands', () => {
     await detectChangesCommand({});
 
     expect(writeSyncMock).toHaveBeenCalledWith(1, expect.stringContaining('Error: index is stale'));
+  });
+
+  it('prints a clean error message when detect_changes throws', async () => {
+    callToolMock.mockRejectedValue(
+      new Error(
+        'Repository "missing-project" not found. Available (showing 8 of 58): GitNexus. Nearest by cwd: GitNexus (/repo). Run: gitnexus list --all',
+      ),
+    );
+    const { detectChangesCommand } = await import('../../src/cli/tool.js');
+
+    await detectChangesCommand({});
+
+    const output: string = writeSyncMock.mock.calls[0][1];
+    expect(output).toContain('Error: Repository "missing-project" not found.');
+    expect(output).toContain('Nearest by cwd: GitNexus');
+    expect(output).not.toContain('throw new Error');
+    expect(process.exitCode).toBe(1);
   });
 
   it('truncates changed_symbols list beyond 15 and shows overflow count', async () => {

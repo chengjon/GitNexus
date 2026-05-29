@@ -1214,6 +1214,30 @@ describe('LocalBackend.resolveRepo', () => {
     expect(exact.repoPath).toBe(dirA);
   });
 
+  it('keeps unknown-repo diagnostics bounded and suggests cwd-related resolution', async () => {
+    const entries = Array.from({ length: 12 }, (_, i) => {
+      const dir = mkdtempSync(path.join(os.tmpdir(), `gnx-large-${i}-`));
+      duplicateFixtureDirs.push(dir);
+      const storagePath = path.join(dir, '.gitnexus');
+      mkdirSync(path.join(storagePath, 'lbug'), { recursive: true });
+      writeFileSync(path.join(storagePath, 'meta.json'), '{}');
+      return {
+        ...MOCK_REPO_ENTRY,
+        name: `project-${i}`,
+        path: dir,
+        storagePath,
+      };
+    });
+    (listRegisteredRepos as any).mockResolvedValue(entries);
+    (getGitRoot as any).mockReturnValue(entries[7].path);
+    await backend.init();
+
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Repository "missing-project" not found/);
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Nearest by cwd: project-7/);
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/showing 8 of 12/);
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Run: gitnexus list --all/);
+  });
+
   it('resolves repo case-insensitively', async () => {
     setupSingleRepo();
     await backend.init();

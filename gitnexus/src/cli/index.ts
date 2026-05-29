@@ -288,6 +288,8 @@ program
   .option('-s, --scope <scope>', 'What to analyze: unstaged, staged, all, or compare', 'unstaged')
   .option('-b, --base-ref <ref>', 'Branch/commit for compare scope (e.g. main)')
   .option('-r, --repo <name>', 'Target repository')
+  .option('--cwd <path>', 'Working directory hint for linked worktree detection')
+  .option('--worktree <path>', 'Explicit linked worktree path for git diff')
   .action(createLbugLazyAction(() => import('./tool.js'), 'detectChangesCommand'));
 
 // ─── Eval Server (persistent daemon for SWE-bench) ─────────────────

@@ -136,6 +136,8 @@ const OPTION_DESCRIPTION_KEYS = {
   'detect-changes|-s, --scope <scope>': 'help.option.detectChanges.scope',
   'detect-changes|-b, --base-ref <ref>': 'help.option.detectChanges.baseRef',
   'detect-changes|-r, --repo <name>': 'help.option.repo.target',
+  'detect-changes|--cwd <path>': 'help.option.detectChanges.cwd',
+  'detect-changes|--worktree <path>': 'help.option.detectChanges.worktree',
   'eval-server|-p, --port <port>': 'help.option.port',
   'eval-server|--host <host>': 'help.option.evalServer.host',
   'eval-server|--idle-timeout <seconds>': 'help.option.evalServer.idleTimeout',
