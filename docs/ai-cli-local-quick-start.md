@@ -241,6 +241,22 @@ If the active worktree does not match the MCP server cwd, also pass `cwd`:
 gitnexus_detect_changes({ scope: "staged", repo: "target-repo", cwd: "/path/to/worktree" })
 ```
 
+The direct CLI now supports the same linked-worktree hints:
+
+```bash
+gitnexus detect-changes --scope staged --repo target-repo --cwd /path/to/worktree
+gitnexus detect-changes --scope staged --repo target-repo --worktree /path/to/worktree
+```
+
+Use `--cwd` when the command is launched from a host process whose cwd may not
+match the agent's active worktree. Use `--worktree` when the operator already
+knows the exact linked worktree to diff.
+
+`detect-changes` output includes index context before the risk summary: selected
+repo, repo path, git diff path, process cwd, indexed/current commit, and stale
+status. If files changed but no indexed symbols match those hunks, the CLI now
+reports the changed file count instead of printing `No changes detected.`
+
 Codex is more likely to need the explicit worktree hint. For Claude Code, add `cwd` when `detect_changes` metadata shows the server cwd does not match the active worktree.
 
 ## Related Entry Points

@@ -65,6 +65,15 @@ describe('detect_changes worktree support — structural', () => {
     expect(backendSrc).toMatch(/fallback_reason/);
   });
 
+  it('detect_changes metadata includes repo selection and index freshness fields', () => {
+    expect(backendSrc).toMatch(/selected_repo/);
+    expect(backendSrc).toMatch(/selected_repo_id/);
+    expect(backendSrc).toMatch(/storage_path/);
+    expect(backendSrc).toMatch(/indexed_commit/);
+    expect(backendSrc).toMatch(/current_commit/);
+    expect(backendSrc).toMatch(/stale_severity/);
+  });
+
   it('uses diffCwd as the cwd for execFileSync (not hard-coded repo.repoPath)', () => {
     expect(backendSrc).toMatch(/cwd:\s*diffCwd/);
   });
