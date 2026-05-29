@@ -5,8 +5,9 @@ Latest refresh: 2026-05-29
 
 ## Verdict
 
-Do not replace `origin/main` with `upstream-sync` without an explicit final
-cutover approval and `--force-with-lease` authorization.
+`origin/main` replacement has completed after explicit final cutover approval,
+remote backup creation, final validation, and guarded `--force-with-lease`
+authorization.
 
 The second-stage capability audit has reduced the original source-continuity
 blocker: all 19 local source capability rows now have an explicit retained,
@@ -15,12 +16,15 @@ the governance layer, keeps upstream source architecture authoritative, and
 replays only the local source capabilities that remained required on the current
 upstream shape.
 
-Final cutover remains intentionally blocked only at the explicit approval step:
-`origin/main` has not been replaced, and `--force-with-lease` has not been run.
+Final cutover was executed on 2026-05-29. The old `origin/main` ref
+`b18af7575f857490e073b24ca8943f007b47022a` was preserved as remote branch
+`backup/main-before-upstream-sync-20260529-092439-b18af757`, and the new
+`origin/main` ref matches `origin/upstream-sync` at
+`82ef213c8a4a44d2e9a26190281d093829a0f4f0`.
 
 ## Evidence Baseline
 
-Refs used for this audit:
+Refs used for the pre-cutover audit:
 
 - merge base: `3dbe08fab6a340018e85d5377651e31e0773ca58`
 - local `main`: `2a22063c37462df3fc8a6551c9395ffa8f2d4837`
@@ -43,6 +47,18 @@ FastAPI cross-file `include_router(prefix=...)` route resolution, C++ ADL
 function-type entities, and per-symbol `processes` fields on impact byDepth
 items. The refresh was merged into `upstream-sync` as `e5ef91f9` and validated
 with focused FastAPI, C++, impact, parse-cache, and MCP LocalBackend suites.
+
+Post-cutover verification on 2026-05-29:
+
+- backup branch:
+  `origin/backup/main-before-upstream-sync-20260529-092439-b18af757` at
+  `b18af7575f857490e073b24ca8943f007b47022a`
+- current `origin/main`:
+  `82ef213c8a4a44d2e9a26190281d093829a0f4f0`
+- current `origin/upstream-sync`:
+  `82ef213c8a4a44d2e9a26190281d093829a0f4f0`
+- `origin/main...origin/upstream-sync`: `0 0`
+- `upstream/main...origin/main`: `0 19`
 
 From merge base to local `main`, the local branch changed 1108 files. For those
 local changed files, `upstream-sync` currently has:
@@ -611,8 +627,8 @@ as a catch-all batch.
 
 ## Recommended Execution Order
 
-1. Block `origin/main` cutover until source continuity requirements are reduced
-   to explicit capability acceptance criteria.
+1. Completed: block `origin/main` cutover until source continuity requirements
+   are reduced to explicit capability acceptance criteria.
 2. Start with `Detect-changes/worktree path handling`, because local governance
    depends on it and current MCP/CLI behavior diverges after LadybugDB analysis.
 3. Completed: audit `MCP local backend/tools` against upstream
@@ -631,14 +647,20 @@ as a catch-all batch.
 8. Completed: refresh against latest fetched `upstream/main`
    (`b565c7c9905d4465997346bc489106611f8fa979`) and merge it into
    `upstream-sync` as `e5ef91f9bfb2d2e7814e6e77ab24a919c6fca228`.
+9. Completed: preserve the old `origin/main` as
+   `backup/main-before-upstream-sync-20260529-092439-b18af757`, run final
+   validation, and replace `origin/main` with `upstream-sync` using the approved
+   `--force-with-lease` operation.
 
 ## Cutover Decision
 
 With the user's stated goal that local source upgrades continue to be fully
-effective, the current `upstream-sync` branch has completed the required
-second-stage source capability audit and latest-upstream refresh.
+effective, the current `upstream-sync` branch completed the required
+second-stage source capability audit and latest-upstream refresh before
+replacement.
 
-The branch remains a staging baseline and review artifact until the maintainer
-explicitly approves the final replacement. The only remaining cutover work is
-the guarded `origin/main` replacement itself, performed only after final
-validation and using `--force-with-lease`.
+The maintainer approved final replacement on 2026-05-29. After final validation,
+the guarded `--force-with-lease` operation replaced `origin/main` with
+`upstream-sync`; post-push verification showed both remote refs at
+`82ef213c8a4a44d2e9a26190281d093829a0f4f0`, with the old mainline retained on
+the backup branch named above.

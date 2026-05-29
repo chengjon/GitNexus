@@ -76,7 +76,8 @@ approve the cutover.
 #### Scenario: Maintainers approve final mainline replacement
 
 - **WHEN** validation is complete and maintainers approve cutover
-- **THEN** the final replacement may use `--force-with-lease`
+- **THEN** the pre-cutover `origin/main` ref is preserved as a backup branch
+- **AND** the final replacement may use `--force-with-lease`
 - **AND** the command targets only the approved branch replacement
 
 ### Requirement: GitNexus SHALL block mainline replacement when local source capability continuity is required but not yet proven

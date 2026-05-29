@@ -57,6 +57,7 @@ that upstream has structurally replaced.
 
 - Affected branch:
   - `upstream-sync`
+  - `origin/main` after explicit final cutover approval
 - Affected governance paths:
   - `openspec/**`
   - `AGENTS.md`
@@ -72,8 +73,10 @@ that upstream has structurally replaced.
     `gitnexus/hooks/claude/hook-db-lock-probe.cjs` and
     `gitnexus-claude-plugin/hooks/hook-db-lock-probe.cjs`
 - Non-goals:
-  - no direct push to `origin/main` in this change
-  - no forced replacement of local history in this change
+  - no direct push to `origin/main` before staging review, final validation, and
+    explicit cutover approval
+  - no unguarded forced replacement of local history; final replacement requires
+    a backup ref and `--force-with-lease`
   - no blanket replay of the 67 local source-code-only files in this change
   - no hidden compatibility promise for local source features that are not
     revalidated on the upstream architecture

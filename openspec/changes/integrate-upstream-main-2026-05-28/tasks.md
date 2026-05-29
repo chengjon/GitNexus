@@ -49,9 +49,9 @@
 
 - [x] 6.1 Push only a staging branch first, such as
       `origin/upstream-sync`
-- [ ] 6.2 Replace `origin/main` only after explicit approval, successful
+- [x] 6.2 Replace `origin/main` only after explicit approval, successful
       validation, and source capability continuity resolution when required
-- [ ] 6.3 Use `--force-with-lease` only for the final approved main replacement
+- [x] 6.3 Use `--force-with-lease` only for the final approved main replacement
 
 ## 7. Second-Stage Source Capability Audit
 
@@ -160,9 +160,9 @@
 
 ## 8. Final Cutover Guard
 
-- [ ] 8.1 Replace `origin/main` only after explicit approval and successful
+- [x] 8.1 Replace `origin/main` only after explicit approval and successful
       validation
-- [ ] 8.2 Use `--force-with-lease` only for the final approved main replacement
+- [x] 8.2 Use `--force-with-lease` only for the final approved main replacement
 
 ## 9. Final Verification Notes
 
@@ -244,7 +244,7 @@
   openspec/changes/integrate-upstream-main-2026-05-28`.
 - `origin/upstream-sync` was pushed and PR
   https://github.com/chengjon/GitNexus/pull/8 was created as the staging review
-  gate. `origin/main` remains unchanged.
+  gate before final cutover approval.
 - User clarified the target outcome as: local source upgrades must continue to
   be fully effective. That changes the cutover decision: the current
   `upstream-sync` branch remains useful as a staging baseline, but `origin/main`
@@ -254,6 +254,20 @@
   second-stage audit. It found 240 local source-ish changed files relative to
   the merge base: 67 use upstream versions in `upstream-sync`, 173 are absent,
   and 0 are preserved as local source content.
+- Final cutover was approved on 2026-05-29 after the source capability audit
+  and latest-upstream refresh were complete. Before replacement, the old
+  `origin/main` ref `b18af7575f857490e073b24ca8943f007b47022a` was preserved
+  as remote branch
+  `backup/main-before-upstream-sync-20260529-092439-b18af757`.
+- Final preflight passed before replacement:
+  `openspec validate integrate-upstream-main-2026-05-28 --strict` and
+  `env HOME=/tmp/gitnexus-cutover-home npm run build` from `gitnexus/`.
+- The final replacement used the precise guarded command
+  `git push --force-with-lease=refs/heads/main:b18af7575f857490e073b24ca8943f007b47022a origin upstream-sync:main`.
+  Post-push verification showed `origin/main` and `origin/upstream-sync` both
+  at `82ef213c8a4a44d2e9a26190281d093829a0f4f0`, the backup branch still at
+  `b18af7575f857490e073b24ca8943f007b47022a`, and
+  `upstream/main...origin/main` at `0 19`.
 - First required source replay slice completed for detect-changes/worktree path
   handling. `gitnexus/src/mcp/local/local-backend.ts` now preserves exact path
   precedence and adds a canonical-root fallback only for path-like `repo`
