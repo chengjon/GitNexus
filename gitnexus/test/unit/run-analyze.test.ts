@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   deriveEmbeddingMode,
   deriveEmbeddingCap,
@@ -11,6 +11,15 @@ import { getStoragePaths, saveMeta, type RepoMeta } from '../../src/storage/repo
 import { createTempDir } from '../helpers/test-db.js';
 
 describe('run-analyze module', () => {
+  afterEach(() => {
+    vi.doUnmock('../../src/core/ingestion/pipeline.js');
+    vi.doUnmock('../../src/core/lbug/lbug-adapter.js');
+    vi.doUnmock('../../src/core/search/fts-indexes.js');
+    vi.doUnmock('../../src/cli/ai-context.js');
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
   it('exports runFullAnalysis as a function', async () => {
     const mod = await import('../../src/core/run-analyze.js');
     expect(typeof mod.runFullAnalysis).toBe('function');
@@ -34,13 +43,14 @@ describe('run-analyze module', () => {
         cwd: tmpRepo.dbPath,
         encoding: 'utf-8',
       }).trim();
-      const { storagePath } = getStoragePaths(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
       const meta: RepoMeta = {
         repoPath: tmpRepo.dbPath,
         lastCommit: currentCommit,
         indexedAt: new Date().toISOString(),
       };
       await saveMeta(storagePath, meta);
+      await fs.writeFile(lbugPath, 'existing graph store');
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(
@@ -56,6 +66,84 @@ describe('run-analyze module', () => {
         fs.readFile(path.join(tmpRepo.dbPath, '.gitnexus', '.gitignore'), 'utf-8'),
       ).resolves.toBe('*\n');
     } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('rebuilds when metadata is current but the LadybugDB graph store is missing', async () => {
+    const tmpRepo = await createTempDir('gitnexus-run-analyze-missing-lbug-');
+    const tmpHome = await createTempDir('gitnexus-run-analyze-missing-lbug-home-');
+    const savedHome = process.env.GITNEXUS_HOME;
+    const loadGraphToLbug = vi.fn(async () => undefined);
+    try {
+      process.env.GITNEXUS_HOME = tmpHome.dbPath;
+      execSync('git init', { cwd: tmpRepo.dbPath, stdio: 'pipe' });
+      execSync('git -c user.name=test -c user.email=test@test commit --allow-empty -m init', {
+        cwd: tmpRepo.dbPath,
+        stdio: 'pipe',
+      });
+      const currentCommit = execSync('git rev-parse HEAD', {
+        cwd: tmpRepo.dbPath,
+        encoding: 'utf-8',
+      }).trim();
+      const { storagePath } = getStoragePaths(tmpRepo.dbPath);
+      const meta: RepoMeta = {
+        repoPath: tmpRepo.dbPath,
+        lastCommit: currentCommit,
+        indexedAt: new Date().toISOString(),
+        stats: { files: 1, nodes: 1, edges: 0, communities: 0, processes: 0, embeddings: 0 },
+      };
+      await saveMeta(storagePath, meta);
+
+      vi.doMock('../../src/core/ingestion/pipeline.js', () => ({
+        runPipelineFromRepo: vi.fn(async (repoPath: string) => ({
+          repoPath,
+          graph: { forEachNode: () => undefined },
+          totalFileCount: 0,
+          communityResult: { stats: { totalCommunities: 0 }, communities: [] },
+          processResult: { stats: { totalProcesses: 0 } },
+        })),
+      }));
+      vi.doMock('../../src/core/lbug/lbug-adapter.js', () => ({
+        initLbug: vi.fn(async () => undefined),
+        loadGraphToLbug,
+        getLbugStats: vi.fn(async () => ({
+          nodes: 0,
+          edges: 0,
+          communities: 0,
+          processes: 0,
+        })),
+        executeQuery: vi.fn(async () => [{ cnt: 0 }]),
+        executeWithReusedStatement: vi.fn(async () => []),
+        closeLbug: vi.fn(async () => undefined),
+        loadCachedEmbeddings: vi.fn(async () => ({ embeddingNodeIds: new Set(), embeddings: [] })),
+        deleteNodesForFile: vi.fn(async () => undefined),
+        deleteAllCommunitiesAndProcesses: vi.fn(async () => undefined),
+        queryImporters: vi.fn(async () => []),
+      }));
+      vi.doMock('../../src/core/search/fts-indexes.js', () => ({
+        createSearchFTSIndexes: vi.fn(async () => undefined),
+        verifySearchFTSIndexes: vi.fn(async () => []),
+      }));
+      vi.doMock('../../src/cli/ai-context.js', () => ({
+        generateAIContextFiles: vi.fn(async () => undefined),
+      }));
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        {
+          onProgress: () => {},
+        },
+      );
+
+      expect(result.alreadyUpToDate).not.toBe(true);
+      expect(loadGraphToLbug).toHaveBeenCalledTimes(1);
+    } finally {
+      if (savedHome === undefined) delete process.env.GITNEXUS_HOME;
+      else process.env.GITNEXUS_HOME = savedHome;
+      await tmpHome.cleanup();
       await tmpRepo.cleanup();
     }
   });

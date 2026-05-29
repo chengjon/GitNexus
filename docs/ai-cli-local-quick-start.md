@@ -62,28 +62,34 @@ node /opt/claude/GitNexus/gitnexus/dist/cli/index.js --version
 
 ## Per-Project Workflow
 
-In the target repository root:
+For routine index refreshes, use index-only mode in the target repository root:
 
 ```bash
 cd /opt/claude/GitNexus/gitnexus
 npm run build   # Required after local GitNexus source changes
 cd /path/to/target-repo
-gitnexus analyze
+gitnexus analyze --index-only
 ```
 
-If you did not change the local GitNexus source code, skip the rebuild and just run `gitnexus analyze` in the target repo root.
+If you did not change the local GitNexus source code, skip the rebuild and just
+run `gitnexus analyze --index-only` in the target repo root.
 
-Expected output after `gitnexus analyze`:
+Expected output after `gitnexus analyze --index-only`:
 
 - `.gitnexus/`
 
-If you also need repo-local context files:
+Plain `gitnexus analyze` may update repo-local context files. As of
+`d4636249`, this local fork preserves `AGENTS.md`, `CLAUDE.md`, and tracked
+GitNexus skill files that contain `<!-- gitnexus:keep -->`; `--index-only` is
+still the default low-churn command when context regeneration is not the goal.
+
+If you intentionally need repo-local context files:
 
 ```bash
-gitnexus analyze --with-context
+gitnexus analyze
 ```
 
-Additional outputs after `--with-context`:
+Additional outputs after plain `gitnexus analyze`:
 
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -108,6 +114,65 @@ Additional verification:
 ```bash
 gitnexus status
 ```
+
+## Missing Graph Store Recovery
+
+Current GitNexus stores its graph in LadybugDB at `.gitnexus/lbug`. The old
+KuzuDB path `.gitnexus/kuzu` is retired migration state. A missing
+`.gitnexus/kuzu` directory is not a failure and should not be recreated.
+
+The broken state that requires recovery is:
+
+```bash
+.gitnexus/meta.json exists
+.gitnexus/lbug is missing or only lbug sidecar files remain
+```
+
+Classify a target project from its root:
+
+```bash
+test -f .gitnexus/meta.json && echo "meta: yes" || echo "meta: no"
+test -e .gitnexus/lbug && echo "lbug: yes" || echo "lbug: no"
+test -e .gitnexus/kuzu && echo "old kuzu: yes" || echo "old kuzu: no"
+```
+
+Interpretation:
+
+- `old kuzu: no` is normal on current GitNexus.
+- `meta: yes` and `lbug: yes` means the current graph store exists.
+- `meta: yes` and `lbug: no` means force a rebuild.
+- `old kuzu: yes` and `lbug: no` means an old Kuzu index has not been rebuilt
+  into the current LadybugDB store.
+
+Recover affected projects one at a time:
+
+```bash
+cd /path/to/target-repo
+gitnexus analyze --force --index-only --drop-embeddings --workers 0
+gitnexus status
+```
+
+Do not use `--repair-fts` when `.gitnexus/lbug` is missing; FTS repair requires
+an existing graph store. Do not use `gitnexus index` to rebuild a missing graph
+store; `index` only registers an index that already exists.
+
+If a project still fails after all GitNexus analyze and MCP processes have
+stopped, remove only generated graph artifacts in that project and rebuild:
+
+```bash
+cd /path/to/target-repo
+rm -f .gitnexus/lbug \
+      .gitnexus/lbug.wal \
+      .gitnexus/lbug.lock \
+      .gitnexus/lbug.shadow \
+      .gitnexus/lbug.wal.checkpoint \
+      .gitnexus/lbug.init.lock
+
+gitnexus analyze --force --index-only --drop-embeddings --workers 0
+```
+
+Run the removal only after confirming the current directory is the target
+project root.
 
 ## Language Support Availability
 
@@ -163,6 +228,10 @@ Absolute-path fallback:
 ```bash
 node /opt/claude/GitNexus/gitnexus/dist/cli/index.js mcp
 ```
+
+After rebuilding local GitNexus source, restart MCP clients so they load the new
+`dist/cli/index.js`. During local-source recovery, do not switch MCP back to
+`npx -y gitnexus@latest`.
 
 ## Host Expectations
 

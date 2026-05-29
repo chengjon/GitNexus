@@ -281,6 +281,38 @@ export async function runFullAnalysis(
     }
   }
 
+  if (!options.repairFts && kuzuResult.needsReindex) {
+    options = { ...options, force: true };
+  }
+
+  if (existingMeta && !options.force && !options.repairFts) {
+    let shouldForceForMissingGraphStore = false;
+    try {
+      const lbugStat = await fs.lstat(lbugPath);
+      if (!lbugStat.isFile()) {
+        const foundType = lbugStat.isDirectory()
+          ? 'a directory'
+          : lbugStat.isSymbolicLink()
+            ? 'a symbolic link'
+            : 'not a regular file';
+        log(
+          `Existing metadata found, but graph store at ${lbugPath} is ${foundType}; ` +
+            'forcing full rebuild.',
+        );
+        shouldForceForMissingGraphStore = true;
+      }
+    } catch {
+      log(
+        `Existing metadata found, but graph store at ${lbugPath} is missing; ` +
+          'forcing full rebuild.',
+      );
+      shouldForceForMissingGraphStore = true;
+    }
+    if (shouldForceForMissingGraphStore) {
+      options = { ...options, force: true };
+    }
+  }
+
   // ── Crash recovery: dirty flag forces full rebuild ────────────────
   // If the previous incremental run set incrementalInProgress and didn't
   // clear it, the on-disk index may be in a half-state. Cheapest path
