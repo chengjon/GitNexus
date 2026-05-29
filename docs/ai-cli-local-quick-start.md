@@ -156,6 +156,25 @@ Do not use `--repair-fts` when `.gitnexus/lbug` is missing; FTS repair requires
 an existing graph store. Do not use `gitnexus index` to rebuild a missing graph
 store; `index` only registers an index that already exists.
 
+If `--workers 0` runs for a long time without creating `.gitnexus/lbug`, the
+repo may contain generated JavaScript, bundled documentation, or demo assets
+that stall a native parser path. Stop that attempt and rerun the recovery with
+bounded workers so GitNexus can quarantine the offending files:
+
+```bash
+gitnexus analyze --force --index-only --drop-embeddings \
+  --workers 2 \
+  --worker-timeout 20 \
+  --max-file-size 256
+```
+
+If a native worker abort message appears, keep using the same GitNexus install
+channel. For this local-source deployment, update by pulling or merging the
+local checkout, run `npm run build` in `/opt/claude/GitNexus/gitnexus`, then
+restart MCP and CLI clients. Do not switch the affected project to
+`npm install -g gitnexus@latest` unless you intentionally want to leave the
+local-source workflow.
+
 If a project still fails after all GitNexus analyze and MCP processes have
 stopped, remove only generated graph artifacts in that project and rebuild:
 

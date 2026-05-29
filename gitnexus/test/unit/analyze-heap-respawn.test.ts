@@ -251,6 +251,10 @@ describe('analyzeCommand heap respawn', () => {
     expect(cap.records().some((r) => r.msg.includes('Analysis aborted in a native worker'))).toBe(
       true,
     );
+    expect(cap.records().some((r) => r.msg.includes('npm install -g gitnexus@latest'))).toBe(
+      false,
+    );
+    expect(cap.records().some((r) => r.msg.includes('local source checkout'))).toBe(true);
     expect(cap.records().some((r) => r.recoveryHint === 'native-worker-abort')).toBe(true);
     expect(stderrWriteSpy).toHaveBeenCalled();
     cap.restore();

@@ -467,7 +467,8 @@ async function ensureHeap(): Promise<boolean> {
         `  Analysis aborted in a native worker or native binding path.\n` +
           `  Try one of these recovery paths:\n` +
           `    gitnexus analyze --workers 0\n` +
-          `    npm uninstall -g gitnexus && npm install -g gitnexus@latest\n` +
+          `    gitnexus analyze --workers 2 --worker-timeout 20 --max-file-size 256 [your-args]\n` +
+          `    Update GitNexus through the same install channel you already use; for a local source checkout, pull/merge, run npm run build, then restart MCP/CLI clients.\n` +
           `    Use Node 22 LTS if you are on a newer non-LTS runtime.\n`,
         { recoveryHint: 'native-worker-abort' },
       );
