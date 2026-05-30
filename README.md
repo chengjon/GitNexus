@@ -37,6 +37,8 @@ https://github.com/user-attachments/assets/172685ba-8e54-4ea7-9ad1-e31a3398da72
 
 **TL;DR:** The **Web UI** is a quick way to chat with any repo. The **CLI + MCP** is how you make your AI agent actually reliable — it gives Cursor, Claude Code, Antigravity, Codex, and friends a deep architectural view of your codebase so they stop missing dependencies, breaking call chains, and shipping blind edits. Even smaller models get full architectural clarity, making it compete with Goliath models.
 
+> **2026 storage/MCP update:** CLI indexes now use a repo-local LadybugDB graph store at `.gitnexus/lbug` and register repositories in the global `~/.gitnexus/registry.json` registry. The old `.gitnexus/kuzu` directory is legacy migration state. If a project has `.gitnexus/meta.json` but no `.gitnexus/lbug`, rebuild the index before trusting MCP results. See [the upstream update summary](docs/audits/2026-05-29-upstream-version-update-summary.md).
+
 ---
 
 ## Star History
@@ -107,6 +109,8 @@ That's it. This indexes the codebase, installs agent skills, registers Claude Co
 To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
 
 > **Faster install (no C++ toolchain needed):** set `GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1` before `npm install -g gitnexus` to skip vendored grammar materialize/build (`tree-sitter-dart`, `tree-sitter-proto`, `tree-sitter-swift`). Dart/Proto/Swift files won't be parsed, but install completes in seconds without `python3`/`make`/`g++`. Strict `=1` only — any other value falls through to the rebuild.
+
+> **Source checkout operators:** if you run GitNexus from a local fork instead of npm, update with git, then run `cd gitnexus && npm run build`, and restart the host-owned `gitnexus mcp` process. MCP configs should use `gitnexus mcp`; `npx gitnexus@latest mcp` bypasses local fork changes.
 
 ### MCP Setup
 
@@ -228,6 +232,8 @@ gitnexus mcp                     # Start MCP server (stdio) — serves all index
 gitnexus serve                   # Start local HTTP server (multi-repo) for web UI connection
 gitnexus list                    # List all indexed repositories
 gitnexus status                  # Show index status for current repo
+gitnexus verify-staged --json    # Bounded staged detect_changes output for agent closeout gates
+gitnexus detect-changes --scope staged --cwd <path>  # Staged impact check for a specific worktree
 gitnexus clean                   # Delete index for current repo
 gitnexus clean --all --force     # Delete all indexes
 gitnexus wiki [path]             # Generate repository wiki from knowledge graph
@@ -332,6 +338,14 @@ When you run `gitnexus analyze --skills`, GitNexus detects the functional areas 
 ## Multi-Repo MCP Architecture
 
 GitNexus uses a **global registry** so one MCP server can serve multiple indexed repos. No per-project MCP config needed — set it up once and it works everywhere.
+
+Current storage model:
+
+- `gitnexus analyze` writes the repo-local graph store under `.gitnexus/lbug`.
+- `gitnexus analyze` also registers the repo in `~/.gitnexus/registry.json`.
+- `gitnexus mcp` reads the registry and lazily opens LadybugDB connections for the requested repo.
+- `.gitnexus/kuzu` is legacy; index health should be checked against `.gitnexus/lbug`, not Kuzu.
+- `.gitnexus/meta.json` without `.gitnexus/lbug` means the graph store is incomplete and should be rebuilt with `gitnexus analyze --index-only` or `gitnexus analyze --force`.
 
 ```mermaid
 flowchart TD
