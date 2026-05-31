@@ -257,20 +257,37 @@ withTestLbugDB(
       // ─── impact error handling tests (#321) ───────────────────────────
       // Verify that impact() returns structured JSON instead of crashing
 
-      it('impact tool returns structured error for unknown symbol', async () => {
+      it('impact tool returns recovery guidance for unknown symbol', async () => {
         const result = await backend.callTool('impact', {
           target: 'nonexistent_symbol_xyz_999',
           direction: 'upstream',
         });
-        // Must return structured JSON, not throw
+
         expect(result).toBeDefined();
-        // Should have either an error field (not found) or impactedCount 0
-        // Either outcome is valid — the key is it doesn't crash
-        if (result.error) {
-          expect(typeof result.error).toBe('string');
-        } else {
-          expect(result.impactedCount).toBe(0);
-        }
+        expect(result.status).toBe('not_found');
+        expect(result.error).toBe("Target 'nonexistent_symbol_xyz_999' not found");
+        expect(result.impactedCount).toBe(0);
+        expect(result.risk).toBe('UNKNOWN');
+        expect(result.suggestion).toContain('query');
+        expect(result.suggestion).toContain('context');
+        expect(result.suggestion).toContain('target_uid');
+        expect(result.next_actions).toEqual([
+          expect.objectContaining({
+            tool: 'query',
+            params: { query: 'nonexistent_symbol_xyz_999' },
+          }),
+          expect.objectContaining({
+            tool: 'context',
+            params: { name: '<candidate_name>' },
+          }),
+          expect.objectContaining({
+            tool: 'impact',
+            params: {
+              target_uid: '<resolved_uid>',
+              direction: 'upstream',
+            },
+          }),
+        ]);
       });
 
       it('impact error response has consistent target shape', async () => {
