@@ -3448,6 +3448,19 @@ export class LocalBackend {
     };
 
     if (summaryOnly) {
+      // Hub guidance: suggest summaryOnly when blast radius is large
+      if (impacted.length > 50) {
+        return {
+          ...base,
+          hub_guidance: {
+            hint: `Large blast radius (${impacted.length} symbols). Consider summaryOnly: true for faster results.`,
+            ...(impacted.length > 200 && {
+              relationTypes_hint:
+                'Narrow by specifying relationTypes (e.g., ["CALLS", "IMPORTS"]) to reduce scope.',
+            }),
+          },
+        };
+      }
       return base;
     }
 
