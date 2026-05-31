@@ -2,7 +2,7 @@
  * Unit Tests: MCP Tool Definitions
  *
  * Tests: GITNEXUS_TOOLS from tools.ts
- * - All 13 tools are defined (per-repo + group_list/group_sync)
+ * - All 14 tools are defined (per-repo + overview + group_list/group_sync)
  * - Each tool has valid name, description, inputSchema
  * - Required fields are correct
  * - Optional repo parameter is present on tools that need it
@@ -30,8 +30,8 @@ const CWD_OMITTED_TOOLS = ['list_repos', 'group_list', 'group_sync'] as const;
 const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
 
 describe('GITNEXUS_TOOLS', () => {
-  it('exports all tools (7 base + 3 route/tool/shape + 1 api_impact + 2 group)', () => {
-    expect(GITNEXUS_TOOLS).toHaveLength(13);
+  it('exports all tools (7 base + 3 route/tool/shape + 1 api_impact + 1 overview + 2 group)', () => {
+    expect(GITNEXUS_TOOLS).toHaveLength(14);
   });
 
   it('contains all expected tool names', () => {
@@ -43,6 +43,7 @@ describe('GITNEXUS_TOOLS', () => {
         'cypher',
         'context',
         'detect_changes',
+        'overview',
         'rename',
         'impact',
         'api_impact',
