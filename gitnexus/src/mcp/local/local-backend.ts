@@ -25,6 +25,7 @@ import {
   parseDiffHunks,
   getCanonicalRepoRoot,
   getGitRoot,
+  getCurrentCommit,
   type FileDiff,
 } from '../../storage/git.js';
 import { realpathSync } from 'fs';
@@ -223,6 +224,39 @@ interface RepoHandle {
 
 export interface RepoResolutionOptions {
   cwd?: string;
+}
+
+export interface IndexStatus {
+  stale: boolean;
+  commits_behind?: number;
+  stale_hint?: string;
+  has_embeddings: boolean;
+  embedding_count?: number;
+}
+
+function buildIndexStatus(repo: RepoHandle): IndexStatus {
+  const hasEmbeddings = (repo.stats?.embeddings ?? 0) > 0;
+  let stale = false;
+  let commitsBehind: number | undefined;
+  let staleHint: string | undefined;
+  try {
+    const current = getCurrentCommit(repo.repoPath);
+    if (current && current !== repo.lastCommit) {
+      stale = true;
+      commitsBehind = 1; // exact count requires git log, keep lightweight
+      staleHint =
+        'Index is stale — results may not reflect recent changes. Re-run: gitnexus analyze';
+    }
+  } catch {
+    // repo path may be inaccessible; treat as non-stale to avoid noise
+  }
+  return {
+    stale,
+    ...(commitsBehind != null && { commits_behind: commitsBehind }),
+    ...(staleHint && { stale_hint: staleHint }),
+    has_embeddings: hasEmbeddings,
+    ...(hasEmbeddings && { embedding_count: repo.stats!.embeddings }),
+  };
 }
 
 /** Resolve symlinks for path comparison; falls back to path.resolve on error.
@@ -1197,6 +1231,7 @@ export class LocalBackend {
       process_symbols: dedupedSymbols,
       definitions: definitions.slice(0, 20), // cap standalone definitions
       timing,
+      index_status: buildIndexStatus(repo),
       ...(!ftsUsed && {
         warning:
           'FTS indexes missing — keyword search degraded. Run: gitnexus analyze --repair-fts (or gitnexus analyze --force) to rebuild indexes.',
@@ -2783,8 +2818,10 @@ export class LocalBackend {
   }
 
   private async impact(repo: RepoHandle, params: ImpactParams): Promise<any> {
+    const indexStatus = buildIndexStatus(repo);
     try {
-      return await this._impactImpl(repo, params);
+      const result = await this._impactImpl(repo, params);
+      return { ...result, index_status: indexStatus };
     } catch (err: any) {
       // Return structured error instead of crashing (#321)
       return {
@@ -2794,6 +2831,7 @@ export class LocalBackend {
         impactedCount: 0,
         risk: 'UNKNOWN',
         suggestion: 'The graph query failed — try gitnexus context <symbol> as a fallback',
+        index_status: indexStatus,
         ...(isWalCorruptionError(err) ? { recoverySuggestion: WAL_RECOVERY_SUGGESTION } : {}),
       };
     }
