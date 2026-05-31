@@ -2861,6 +2861,14 @@ export class LocalBackend {
         direction,
         impactedCount: 0,
         risk: 'UNKNOWN',
+        recovery: {
+          hint: 'The target symbol could not be resolved. Try these steps:',
+          steps: [
+            `Use query({ query: "${target}" }) to find candidate symbols`,
+            'Use context({ name: "<candidate>" }) to confirm the right symbol',
+            'Retry impact with target_uid from context results to avoid name ambiguity',
+          ],
+        },
       };
     }
 
