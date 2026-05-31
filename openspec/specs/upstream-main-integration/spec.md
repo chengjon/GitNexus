@@ -217,8 +217,12 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **WHEN** an MCP client calls a repo-scoped tool such as `query`, `context`,
   `impact`, `rename`, `cypher`, or `detect_changes` with a `cwd` parameter
   while multiple repositories are indexed
-- **THEN** GitNexus uses that cwd as a repository-selection hint before falling
-  back to the MCP server process cwd
+- **THEN** GitNexus uses that cwd as a repository-selection hint
+- **AND** if the explicit cwd does not identify a registered repository,
+  resolution remains ambiguous or no-match rather than falling back to the MCP
+  server process cwd
+- **AND** when no cwd parameter is supplied, the existing MCP server process cwd
+  compatibility fallback is preserved
 - **AND** an explicit `repo` parameter continues to take precedence over the cwd
   hint
 - **AND** ambiguous cwd matches return an ambiguity error rather than selecting

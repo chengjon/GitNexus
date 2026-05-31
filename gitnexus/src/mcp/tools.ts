@@ -54,7 +54,7 @@ const DESTRUCTIVE_TOOL_ANNOTATIONS: ToolAnnotations = {
 const CWD_HINT_PROPERTY = {
   type: 'string',
   description:
-    'Compatibility working directory hint from MCP clients. When provided, GitNexus uses it to choose the indexed repository before falling back to the MCP server process cwd.',
+    'Compatibility working directory hint from MCP clients. When provided, GitNexus uses it as the repository-selection hint; if it does not identify a registered repository, resolution remains ambiguous or no-match rather than falling back to the MCP server process cwd. When omitted, GitNexus may use the MCP server process cwd for compatibility.',
 };
 
 export const GITNEXUS_TOOLS: ToolDefinition[] = [
@@ -292,7 +292,7 @@ Returns: changed symbols, affected processes, and a risk summary.`,
         cwd: {
           type: 'string',
           description:
-            'Compatibility working directory hint from MCP clients. When provided, GitNexus uses it to choose the indexed repository before falling back to the MCP server process cwd, then uses it for automatic linked-worktree detection before falling back to the indexed repo path.',
+            'Compatibility working directory hint from MCP clients. When provided, GitNexus uses it as the repository-selection hint; if it does not identify a registered repository, resolution remains ambiguous or no-match rather than falling back to the MCP server process cwd. After repo selection, detect_changes also uses cwd for automatic linked-worktree detection before falling back to the indexed repo path.',
         },
         repo: {
           type: 'string',
