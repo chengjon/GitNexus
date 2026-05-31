@@ -1511,7 +1511,17 @@ export class LocalBackend {
           recoverySuggestion: WAL_RECOVERY_SUGGESTION,
         };
       }
-      return { error: msg };
+      return {
+        error: msg,
+        recovery: {
+          hint: 'The Cypher query failed. Common causes:',
+          steps: [
+            'Check for syntax errors (missing RETURN, unmatched parentheses)',
+            'Verify node labels exist — use backticks for multi-word types: `Struct`, `Enum`, `Trait`',
+            'READ gitnexus://repo/{name}/schema for the full graph schema',
+          ],
+        },
+      };
     }
   }
 
@@ -1520,7 +1530,13 @@ export class LocalBackend {
    * Falls back to raw result if rows aren't tabular objects.
    */
   private formatCypherAsMarkdown(result: any): any {
-    if (!Array.isArray(result) || result.length === 0) return result;
+    if (!Array.isArray(result) || result.length === 0) {
+      return {
+        markdown: '_No results._',
+        row_count: 0,
+        hint: 'The query matched no nodes/edges. Try broadening filters or check labels with gitnexus://repo/{name}/schema.',
+      };
+    }
 
     const firstRow = result[0];
     if (typeof firstRow !== 'object' || firstRow === null) return result;
