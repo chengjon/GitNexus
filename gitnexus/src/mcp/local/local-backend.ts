@@ -2936,14 +2936,27 @@ export class LocalBackend {
     };
     const symType = outcome.resolvedLabel || outcome.symbol.type || '';
 
-    const effectiveRelationTypes =
-      (symType === 'Class' || symType === 'Interface') &&
-      !hasExplicitRelationTypes &&
-      !relationTypes.includes('ACCESSES')
-        ? [...relationTypes, 'ACCESSES']
-        : relationTypes;
+    const isContainer = symType === 'Class' || symType === 'Interface' || symType === 'Struct';
+    const autoExpanded: string[] = [];
+    const effectiveRelationTypes = (() => {
+      if (!isContainer || hasExplicitRelationTypes) return relationTypes;
+      const result = [...relationTypes];
+      if (!result.includes('ACCESSES')) {
+        result.push('ACCESSES');
+        autoExpanded.push('ACCESSES');
+      }
+      if (!result.includes('HAS_METHOD')) {
+        result.push('HAS_METHOD');
+        autoExpanded.push('HAS_METHOD');
+      }
+      if (!result.includes('HAS_PROPERTY')) {
+        result.push('HAS_PROPERTY');
+        autoExpanded.push('HAS_PROPERTY');
+      }
+      return result;
+    })();
 
-    return this._runImpactBFS(repo, sym, symType, direction, {
+    const bfsResult = await this._runImpactBFS(repo, sym, symType, direction, {
       maxDepth,
       relationTypes: effectiveRelationTypes,
       includeTests,
@@ -2952,6 +2965,17 @@ export class LocalBackend {
       offset: Number.isFinite(params.offset) ? params.offset : 0,
       summaryOnly: params.summaryOnly,
     });
+
+    if (autoExpanded.length > 0) {
+      return {
+        ...bfsResult,
+        expanded_relation_types: autoExpanded,
+        relation_types_hint:
+          `Impact included ${autoExpanded.join(', ')} automatically because the target is a ${symType}. ` +
+          'Pass explicit relationTypes to override.',
+      };
+    }
+    return bfsResult;
   }
 
   /**
