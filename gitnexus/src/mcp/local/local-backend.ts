@@ -2599,6 +2599,7 @@ export class LocalBackend {
       },
       changed_symbols: changedSymbols,
       affected_processes: Array.from(affectedProcesses.values()),
+      index_status: buildIndexStatus(repo),
     };
   }
 
