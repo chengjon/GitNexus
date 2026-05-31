@@ -51,6 +51,12 @@ const DESTRUCTIVE_TOOL_ANNOTATIONS: ToolAnnotations = {
   openWorldHint: false,
 };
 
+const CWD_HINT_PROPERTY = {
+  type: 'string',
+  description:
+    'Client working directory. Used as a repo-selection hint when multiple repos are indexed and no explicit "repo" is given. Ignored when "repo" is specified.',
+};
+
 export const GITNEXUS_TOOLS: ToolDefinition[] = [
   {
     name: 'list_repos',
@@ -126,6 +132,7 @@ SERVICE: optional monorepo path prefix (POSIX-style, case-sensitive segments). W
           description:
             'Indexed repository name or path, or group mode "@<groupName>" / "@<groupName>/<memberPath>" (member path keys from group.yaml). Omit when only one indexed repo exists.',
         },
+        cwd: CWD_HINT_PROPERTY,
         service: {
           type: 'string',
           minLength: 1,
@@ -196,6 +203,7 @@ TIPS:
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: ['query'],
     },
@@ -240,6 +248,7 @@ SERVICE: optional monorepo path prefix (case-sensitive path segments). When "rep
           description:
             'Indexed repository name or path, or group mode "@<groupName>" / "@<groupName>/<memberPath>". Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
         service: {
           type: 'string',
           minLength: 1,
@@ -284,6 +293,7 @@ Returns: changed symbols, affected processes, and a risk summary.`,
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: [],
     },
@@ -319,6 +329,7 @@ Each edit is tagged with confidence:
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: ['new_name'],
     },
@@ -413,6 +424,7 @@ SERVICE: optional monorepo path prefix (case-sensitive path segments). When "rep
           description:
             'Indexed repository name or path, or group mode "@<groupName>" / "@<groupName>/<memberPath>". Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
         service: {
           type: 'string',
           minLength: 1,
@@ -482,6 +494,7 @@ Returns: route nodes with their handlers, middleware wrapper chains (e.g., withA
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: [],
     },
@@ -499,6 +512,7 @@ Returns: tool nodes with their handler files and descriptions.`,
       properties: {
         tool: { type: 'string', description: 'Filter by tool name. Omit for all tools.' },
         repo: { type: 'string', description: 'Repository name or path.' },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: [],
     },
@@ -523,6 +537,7 @@ Returns routes that have both detected response keys AND consumers. Shows top-le
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: [],
     },
@@ -543,6 +558,7 @@ Returns: single route object when one match, or { routes: [...], total: N } for 
         route: { type: 'string', description: 'Route path (e.g., "/api/grants")' },
         file: { type: 'string', description: 'Handler file path (alternative to route)' },
         repo: { type: 'string', description: 'Repository name or path.' },
+        cwd: CWD_HINT_PROPERTY,
       },
       required: [],
     },

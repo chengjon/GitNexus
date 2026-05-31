@@ -221,6 +221,10 @@ interface RepoHandle {
   stats?: RegistryEntry['stats'];
 }
 
+export interface RepoResolutionOptions {
+  cwd?: string;
+}
+
 /** Resolve symlinks for path comparison; falls back to path.resolve on error.
  * Uses `realpathSync.native` (not the pure-JS `realpathSync`) so that Windows
  * 8.3 short names (e.g. RUNNER~1 → runneradmin) are expanded to long form,
@@ -471,18 +475,21 @@ export class LocalBackend {
    * On a miss, re-reads the registry once in case a new repo was indexed
    * while the MCP server was running.
    */
-  async resolveRepo(repoParam?: string): Promise<RepoHandle> {
+  async resolveRepo(
+    repoParam?: string,
+    options: RepoResolutionOptions = {},
+  ): Promise<RepoHandle> {
     let refreshedAfterAmbiguity = false;
     let result: RepoHandle | null;
     try {
-      result = this.resolveRepoFromCache(repoParam);
+      result = this.resolveRepoFromCache(repoParam, options);
     } catch (err) {
       if (!(err instanceof RegistryAmbiguousTargetError)) throw err;
       // Stale in-memory duplicate siblings can linger after unregister; refresh
       // once before re-throwing so a resolved registry can disambiguate (#1658).
       await this.refreshRepos();
       refreshedAfterAmbiguity = true;
-      result = this.resolveRepoFromCache(repoParam);
+      result = this.resolveRepoFromCache(repoParam, options);
     }
 
     if (result) {
@@ -502,7 +509,7 @@ export class LocalBackend {
     if (!refreshedAfterAmbiguity) {
       await this.refreshRepos();
     }
-    const retried = this.resolveRepoFromCache(repoParam);
+    const retried = this.resolveRepoFromCache(repoParam, options);
     if (retried) {
       this.maybeWarnSiblingDrift(retried).catch(() => {});
       return retried;
@@ -539,7 +546,10 @@ export class LocalBackend {
    * Throws {@link RegistryAmbiguousTargetError} when `repoParam` matches
    * multiple handles by name and cwd cannot disambiguate (#1658).
    */
-  private resolveRepoFromCache(repoParam?: string): RepoHandle | null {
+  private resolveRepoFromCache(
+    repoParam?: string,
+    options: RepoResolutionOptions = {},
+  ): RepoHandle | null {
     if (this.repos.size === 0) return null;
 
     if (repoParam) {
@@ -572,7 +582,7 @@ export class LocalBackend {
       );
       if (nameMatches.length === 1) return nameMatches[0];
       if (nameMatches.length > 1) {
-        const cwdPick = this.pickRepoHandleForCwd(nameMatches);
+        const cwdPick = this.pickRepoHandleForCwd(nameMatches, options.cwd);
         if (cwdPick) return cwdPick;
         throw new RegistryAmbiguousTargetError(
           repoParam,
@@ -614,8 +624,11 @@ export class LocalBackend {
    * directory, `getGitRoot` returns null and duplicate-name resolution throws
    * {@link RegistryAmbiguousTargetError} — callers should pass an absolute path.
    */
-  private pickRepoHandleForCwd(candidates: RepoHandle[]): RepoHandle | null {
-    const cwdRoot = getGitRoot(process.cwd());
+  private pickRepoHandleForCwd(
+    candidates: RepoHandle[],
+    cwdHint?: string,
+  ): RepoHandle | null {
+    const cwdRoot = getGitRoot(cwdHint || process.cwd());
     if (!cwdRoot) return null;
     const canonicalCwd = canonicalizePath(cwdRoot);
     const cwdMatches = candidates.filter((handle) => {
@@ -868,7 +881,11 @@ export class LocalBackend {
     }
 
     // Resolve repo from optional param (re-reads registry on miss)
-    const repo = await this.resolveRepo((params as { repo?: string } | undefined)?.repo);
+    const cwdHint = typeof p.cwd === 'string' ? p.cwd : undefined;
+    const repo = await this.resolveRepo(
+      (params as { repo?: string } | undefined)?.repo,
+      cwdHint ? { cwd: cwdHint } : {},
+    );
 
     switch (method) {
       case 'query':
