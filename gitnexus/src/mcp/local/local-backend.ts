@@ -1627,6 +1627,7 @@ export class LocalBackend {
       indexedAt: repo.indexedAt,
       lastCommit: repo.lastCommit,
     };
+    const warnings: string[] = [];
 
     if (params.showClusters !== false) {
       try {
@@ -1651,6 +1652,7 @@ export class LocalBackend {
         result.clusters = this.aggregateClusters(rawClusters).slice(0, limit);
       } catch {
         result.clusters = [];
+        warnings.push('Cluster query failed — returned empty. Re-run: gitnexus analyze');
       }
     }
 
@@ -1674,8 +1676,13 @@ export class LocalBackend {
         }));
       } catch {
         result.processes = [];
+        warnings.push('Process query failed — returned empty. Re-run: gitnexus analyze');
       }
     }
+
+    result.index_status = buildIndexStatus(repo);
+
+    if (warnings.length > 0) result.warnings = warnings;
 
     return result;
   }
@@ -2440,7 +2447,17 @@ export class LocalBackend {
         diffArgs = ['diff', 'HEAD', '-U0'];
         break;
       case 'compare':
-        if (!params.base_ref) return { error: 'base_ref is required for "compare" scope' };
+        if (!params.base_ref) return {
+        error: 'base_ref is required for "compare" scope',
+        recovery: {
+          hint: 'Provide a branch name, tag, or commit hash to compare against.',
+          steps: [
+            'Use base_ref: "main" to compare against the main branch',
+            'Use base_ref: "HEAD~3" to compare against 3 commits ago',
+            'Use scope: "staged" or scope: "all" instead if comparing against HEAD is sufficient',
+          ],
+        },
+      };
         diffArgs = ['diff', params.base_ref, '-U0'];
         break;
       case 'unstaged':
@@ -2501,7 +2518,17 @@ export class LocalBackend {
         windowsHide: true,
       });
     } catch (err: any) {
-      return { error: `Git diff failed: ${err.message}` };
+      return {
+        error: `Git diff failed: ${err.message}`,
+        recovery: {
+          hint: 'Git diff could not run. Common causes:',
+          steps: [
+            'Verify the working directory is inside a git repository',
+            'Check that git is installed and accessible',
+            'If using a worktree, verify the path is a valid linked worktree',
+          ],
+        },
+      };
     }
 
     const fileDiffs: FileDiff[] = parseDiffHunks(diffOutput);
@@ -2516,6 +2543,12 @@ export class LocalBackend {
         },
         changed_symbols: [],
         affected_processes: [],
+        next_steps: [
+          scope !== 'staged'
+            ? `Try scope="staged" to check staged changes, or scope="all" to check all uncommitted changes.`
+            : `No staged changes found. Stage files with \`git add\` first, or try scope="unstaged".`,
+          'If working in a worktree, pass the worktree path via the "worktree" parameter.',
+        ],
       };
     }
 
@@ -2607,7 +2640,7 @@ export class LocalBackend {
             ? 'high'
             : 'critical';
 
-    return {
+    const response: any = {
       summary: {
         changed_count: changedSymbols.length,
         affected_count: processCount,
@@ -2618,6 +2651,12 @@ export class LocalBackend {
       affected_processes: Array.from(affectedProcesses.values()),
       index_status: buildIndexStatus(repo),
     };
+
+    if (processCount > 20) {
+      response.hub_guidance = `Large blast radius: ${processCount} processes affected. Consider reviewing the highest-risk processes first, then use impact() on individual symbols for detailed dependency analysis.`;
+    }
+
+    return response;
   }
 
   /**

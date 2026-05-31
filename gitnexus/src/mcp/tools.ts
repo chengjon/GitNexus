@@ -299,6 +299,42 @@ Returns: changed symbols, affected processes, and a risk summary.`,
     },
   },
   {
+    name: 'overview',
+    description: `Get a high-level overview of the indexed repository: stats, clusters, and top processes.
+
+WHEN TO USE: Starting a new session, orienting on an unfamiliar codebase, or checking index health.
+AFTER THIS: Drill into clusters with query(), explore a process with context(), or check staleness with detect_changes().
+
+Returns: repo stats, functional clusters, and top execution flows.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        showClusters: {
+          type: 'boolean',
+          description: 'Include functional clusters (default: true)',
+          default: true,
+        },
+        showProcesses: {
+          type: 'boolean',
+          description: 'Include top execution flows (default: true)',
+          default: true,
+        },
+        limit: {
+          type: 'number',
+          description: 'Max clusters/processes to return (default: 20)',
+          default: 20,
+        },
+        cwd: CWD_HINT_PROPERTY,
+        repo: {
+          type: 'string',
+          description: 'Repository name or path. Omit if only one repo is indexed.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'rename',
     description: `Multi-file coordinated rename using the knowledge graph + text search.
 Finds all references via graph (high confidence) and regex text search (lower confidence). Preview by default.
