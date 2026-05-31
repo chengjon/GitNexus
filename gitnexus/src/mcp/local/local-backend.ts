@@ -2397,6 +2397,7 @@ export class LocalBackend {
         step_index: r.step || r[2],
         step_count: r.stepCount || r[3],
       })),
+      index_status: buildIndexStatus(repo),
     };
   }
 
