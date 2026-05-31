@@ -3007,11 +3007,31 @@ export class LocalBackend {
     if (outcome.kind === 'not_found') {
       const missing = params.target_uid ?? target;
       return {
+        status: 'not_found',
         error: `Target '${missing}' not found`,
         target: { name: target },
         direction,
         impactedCount: 0,
         risk: 'UNKNOWN',
+        suggestion:
+          'Run query to find candidate symbols or execution flows, inspect the candidate with context, then retry impact with target_uid.',
+        next_actions: [
+          {
+            tool: 'query',
+            params: { query: target },
+            reason: 'Find candidate symbols or execution flows related to the missing target.',
+          },
+          {
+            tool: 'context',
+            params: { name: '<candidate_name>' },
+            reason: 'Confirm the exact symbol identity and copy its uid.',
+          },
+          {
+            tool: 'impact',
+            params: { target_uid: '<resolved_uid>', direction },
+            reason: 'Retry impact with the resolved uid to avoid name ambiguity.',
+          },
+        ],
       };
     }
 

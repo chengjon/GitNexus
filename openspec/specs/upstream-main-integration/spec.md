@@ -228,6 +228,16 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 - **AND** ambiguous cwd matches return an ambiguity error rather than selecting
   an arbitrary repository
 
+#### Scenario: Impact guides recovery when the target symbol is not found
+
+- **WHEN** an MCP client calls `impact` for a target that cannot be resolved to
+  a graph symbol
+- **THEN** GitNexus returns a structured `not_found` response with zero impacted
+  symbols and unknown risk
+- **AND** the response includes a recovery path that tells the client to use
+  `query` to find candidates, `context` to confirm a candidate symbol, and
+  `impact` with `target_uid` to retry without name ambiguity
+
 #### Scenario: MCP local tools run on the upstream backend shape
 
 - **WHEN** a maintainer reviews the old local MCP split files for
