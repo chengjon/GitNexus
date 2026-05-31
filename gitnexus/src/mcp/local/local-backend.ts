@@ -2005,7 +2005,17 @@ export class LocalBackend {
     );
 
     if (outcome.kind === 'not_found') {
-      return { error: `Symbol '${name || uid}' not found` };
+      return {
+        error: `Symbol '${name || uid}' not found`,
+        recovery: {
+          hint: 'The symbol could not be resolved. Try these steps:',
+          steps: [
+            `Use query({ query: "${name}" }) to find candidate symbols by concept`,
+            'Use context with uid, file_path, or kind to disambiguate',
+            'If the symbol was recently added, the index may be stale — re-run: gitnexus analyze',
+          ],
+        },
+      };
     }
 
     if (outcome.kind === 'ambiguous') {
