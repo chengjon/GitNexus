@@ -726,3 +726,25 @@ describe('detect_changes worktree support — end-to-end with real worktree', ()
     }
   });
 });
+
+// ── Structural tests: hub_guidance in _runImpactBFS ──────────────────
+
+describe('impact hub_guidance — structural', () => {
+  const src = readFileSync(
+    path.join(__dirname, '../../src/mcp/local/local-backend.ts'),
+    'utf-8',
+  );
+
+  it('impact success path includes hub_guidance when blast radius is large', () => {
+    expect(src).toMatch(/hub_guidance:\s*hubHint/);
+  });
+
+  it('hub_guidance threshold is at least 50 symbols', () => {
+    expect(src).toMatch(/impacted\.length\s*>\s*50/);
+  });
+
+  it('hub_guidance recommends summaryOnly', () => {
+    expect(src).toMatch(/summaryOnly:\s*true/);
+    expect(src).toMatch(/hub_guidance/);
+  });
+});

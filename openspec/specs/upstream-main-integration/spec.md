@@ -247,6 +247,15 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   advising the caller to re-run `gitnexus analyze`
 - **AND** when embeddings exist, `index_status` includes `embedding_count`
 
+#### Scenario: Impact suggests summaryOnly for large blast radii
+
+- **WHEN** an MCP client calls `impact` without `summaryOnly` and the result
+  contains more than 50 impacted symbols
+- **THEN** the response includes a `hub_guidance` object with a `hint`
+  recommending `summaryOnly: true`
+- **AND** when the count exceeds 200, `hub_guidance` also includes a
+  `relationTypes_hint` suggesting narrower relation types
+
 #### Scenario: MCP local tools run on the upstream backend shape
 
 - **WHEN** a maintainer reviews the old local MCP split files for

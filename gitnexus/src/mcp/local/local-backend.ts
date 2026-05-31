@@ -3594,6 +3594,19 @@ export class LocalBackend {
       return base;
     }
 
+    // Hub-symbol guidance: when blast radius is large or traversal was
+    // incomplete, suggest summaryOnly for a lighter-weight overview.
+    const hubHint =
+      impacted.length > 50 || (!traversalComplete && impacted.length > 20)
+        ? {
+            hint: `Impact returned ${impacted.length} symbols. For a lighter-weight overview, retry with summaryOnly: true.`,
+            ...(impacted.length > 200 && {
+              relationTypes_hint:
+                'Consider narrowing relationTypes to CALLS, DEFINES, or USES to reduce blast radius.',
+            }),
+          }
+        : undefined;
+
     // Apply limit/offset pagination per depth level.
     const paginatedGrouped: Record<number, any[]> = {};
     let anyTruncated = false;
@@ -3678,6 +3691,7 @@ export class LocalBackend {
 
     return {
       ...base,
+      ...(hubHint && { hub_guidance: hubHint }),
       // Surface partial if the per-symbol enrichment was capped, even when the
       // BFS traversal itself completed — some returned symbols may carry an
       // empty processes:[] that is a cap artifact rather than a true absence.
