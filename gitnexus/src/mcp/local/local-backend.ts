@@ -2983,6 +2983,13 @@ export class LocalBackend {
       text_search_edits: astSearchEdits,
       changes: allChanges,
       applied: !dry_run,
+      ...(dry_run && {
+        next_steps: [
+          'Review text_search edits above — they need manual verification.',
+          'Re-run with dry_run: false to apply all changes.',
+          'After applying, run detect_changes to verify scope.',
+        ],
+      }),
     };
   }
 
