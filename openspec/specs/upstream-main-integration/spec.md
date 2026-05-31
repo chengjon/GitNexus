@@ -240,12 +240,57 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
 
 #### Scenario: Repo-scoped MCP tools include index freshness metadata
 
-- **WHEN** an MCP client calls `query` or `impact` on an indexed repository
+- **WHEN** an MCP client calls `query`, `impact`, `context`, `detect_changes`,
+  or `overview` on an indexed repository
 - **THEN** the response includes an `index_status` object with `stale` (boolean)
   and `has_embeddings` (boolean) fields
 - **AND** when the index is stale, `index_status` includes a `stale_hint`
   advising the caller to re-run `gitnexus analyze`
 - **AND** when embeddings exist, `index_status` includes `embedding_count`
+
+#### Scenario: All repo-scoped MCP tools include index freshness metadata
+
+- **WHEN** an MCP client calls any repo-scoped tool (`query`, `context`, `impact`,
+  `detect_changes`, `overview`, `route_map`, `tool_map`, `shape_check`, `api_impact`,
+  `rename`, `cypher`) on an indexed repository
+- **THEN** the response includes an `index_status` object with `stale` (boolean)
+  and `has_embeddings` (boolean) fields on all success and error paths
+- **AND** when the tool queries the graph and the query fails, the response
+  includes a structured `recovery` object with `hint` and `steps` arrays
+- **AND** when the tool returns empty results, the response includes `next_steps`
+  suggesting corrective actions
+
+#### Scenario: Overview is a first-class MCP tool
+
+- **WHEN** an MCP client lists available tools via `tools/list`
+- **THEN** the response includes an `overview` tool with `showClusters`,
+  `showProcesses`, `limit`, `cwd`, and `repo` parameters
+- **AND** the `overview` response includes `index_status`, `clusters`,
+  `processes`, and `warnings` when graph queries fail partially
+
+#### Scenario: Detect_changes guides agents when results are empty or ambiguous
+
+- **WHEN** an MCP client calls `detect_changes` and no git diffs are found
+- **THEN** the response includes `next_steps` suggesting alternate scopes
+  (`staged`, `all`) or worktree parameter usage
+- **AND** when `scope` is `compare` without a `base_ref`, the response includes
+  a structured `recovery` object with corrective steps
+- **AND** when the blast radius exceeds 20 affected processes, the response
+  includes `hub_guidance` recommending focused analysis
+
+#### Scenario: API impact guides recovery when parameters are missing or routes are not found
+
+- **WHEN** an MCP client calls `api_impact` without a `route` or `file` parameter
+- **THEN** the response includes a `recovery` object with steps suggesting
+  `route_map()`, explicit route, or file-based usage
+- **AND** when no routes match the given filter, the response includes
+  `next_steps` and `index_status`
+
+#### Scenario: List_repos guides agents when no repositories are indexed
+
+- **WHEN** an MCP client calls `list_repos` and no repositories are registered
+- **THEN** the response includes `repos: []` and `next_steps` advising the
+  caller to run `gitnexus analyze`
 
 #### Scenario: Impact suggests summaryOnly for large blast radii
 
