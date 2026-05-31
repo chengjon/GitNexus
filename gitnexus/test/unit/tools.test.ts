@@ -12,6 +12,19 @@ import { GITNEXUS_TOOLS } from '../../src/mcp/tools.js';
 
 const GROUP_TOOLS = new Set(['group_list', 'group_sync']);
 const MUTATING_TOOLS = new Set(['rename', 'group_sync']);
+const CWD_AWARE_TOOLS = [
+  'query',
+  'cypher',
+  'context',
+  'impact',
+  'rename',
+  'route_map',
+  'tool_map',
+  'shape_check',
+  'api_impact',
+  'detect_changes',
+] as const;
+const CWD_OMITTED_TOOLS = ['list_repos', 'group_list', 'group_sync'] as const;
 // Read-only tools that legitimately reach external systems. Add a tool name
 // here when introducing a read-only tool that needs openWorldHint: true.
 const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
@@ -149,6 +162,22 @@ describe('GITNEXUS_TOOLS', () => {
     for (const name of ['group_list', 'group_sync'] as const) {
       const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
       expect(tool.inputSchema.properties).not.toHaveProperty('repo');
+    }
+  });
+
+  it('repo-scoped tools expose optional cwd hints for repository selection', () => {
+    for (const name of CWD_AWARE_TOOLS) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema.properties.cwd, name).toBeDefined();
+      expect(tool.inputSchema.properties.cwd.type).toBe('string');
+      expect(tool.inputSchema.required).not.toContain('cwd');
+    }
+  });
+
+  it('non-repo-selection tools omit cwd hints', () => {
+    for (const name of CWD_OMITTED_TOOLS) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema.properties).not.toHaveProperty('cwd');
     }
   });
 

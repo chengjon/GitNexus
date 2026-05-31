@@ -879,6 +879,22 @@ describe('LocalBackend.callTool', () => {
     expect(result.error || result.summary).toBeDefined();
   });
 
+  it('passes cwd into repo resolution before dispatching local tools', async () => {
+    const resolveSpy = vi.spyOn(backend, 'resolveRepo');
+
+    await backend.callTool('detect_changes', { cwd: '/tmp/test-project', scope: 'unstaged' });
+
+    expect(resolveSpy).toHaveBeenCalledWith(undefined, { cwd: '/tmp/test-project' });
+  });
+
+  it('ignores whitespace-only cwd before dispatching local tools', async () => {
+    const resolveSpy = vi.spyOn(backend, 'resolveRepo');
+
+    await backend.callTool('detect_changes', { cwd: '   ', scope: 'unstaged' });
+
+    expect(resolveSpy).toHaveBeenCalledWith(undefined, undefined);
+  });
+
   it('dispatches rename tool', async () => {
     (executeParameterized as any)
       .mockResolvedValueOnce([

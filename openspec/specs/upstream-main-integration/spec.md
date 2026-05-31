@@ -212,6 +212,18 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   repo path, git diff path, client cwd, resolution mode, fallback reason, and
   warnings
 
+#### Scenario: Repo-scoped MCP tools receive a client cwd hint
+
+- **WHEN** an MCP client calls a repo-scoped tool such as `query`, `context`,
+  `impact`, `rename`, `cypher`, or `detect_changes` with a `cwd` parameter
+  while multiple repositories are indexed
+- **THEN** GitNexus uses that cwd as a repository-selection hint before falling
+  back to the MCP server process cwd
+- **AND** an explicit `repo` parameter continues to take precedence over the cwd
+  hint
+- **AND** ambiguous cwd matches return an ambiguity error rather than selecting
+  an arbitrary repository
+
 #### Scenario: MCP local tools run on the upstream backend shape
 
 - **WHEN** a maintainer reviews the old local MCP split files for

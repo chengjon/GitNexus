@@ -23,6 +23,38 @@ const backendSrc = readFileSync(
 );
 const toolsSrc = readFileSync(path.join(__dirname, '../../src/mcp/tools.ts'), 'utf-8');
 
+function makeTestRepoHandle(name: string, repoPath: string): any {
+  const id = name.toLowerCase();
+  return {
+    id,
+    name,
+    repoPath,
+    storagePath: path.join(repoPath, '.gitnexus'),
+    lbugPath: path.join(repoPath, '.gitnexus', 'lbug'),
+    indexedAt: new Date().toISOString(),
+    lastCommit: null,
+    stats: { files: 0, nodes: 0, edges: 0, communities: 0, processes: 0 },
+  };
+}
+
+function makeGitRepo(prefix: string): string {
+  const repoDir = mkdtempSync(path.join(os.tmpdir(), prefix));
+  execSync('git init -q', { cwd: repoDir, stdio: 'ignore' });
+  return repoDir;
+}
+
+function configureGitIdentity(repoDir: string): void {
+  execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'ignore' });
+  execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'ignore' });
+}
+
+function commitInitialFile(repoDir: string, fileName = 'x.ts'): void {
+  configureGitIdentity(repoDir);
+  writeFileSync(path.join(repoDir, fileName), 'export const x = 1;\n');
+  execSync(`git add "${fileName}"`, { cwd: repoDir, stdio: 'ignore' });
+  execSync('git commit -q -m "initial"', { cwd: repoDir, stdio: 'ignore' });
+}
+
 // ── Structural tests (source-grep) ───────────────────────────────────────────
 //
 // NOTE: These grep the source as plain text and verify that key patterns are
@@ -140,6 +172,190 @@ import { LocalBackend, resolveWorktreeCwd } from '../../src/mcp/local/local-back
 import { getCanonicalRepoRoot } from '../../src/storage/git.js';
 
 describe('LocalBackend repo resolution — worktree paths', () => {
+  it('resolves an omitted repo by explicit cwd when multiple repos are registered', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-cwd-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-cwd-b-');
+    try {
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = makeTestRepoHandle('alpha', repoA);
+      const handleB = makeTestRepoHandle('beta', repoB);
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo(undefined, { cwd: repoB })).resolves.toBe(handleB);
+    } finally {
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps omitted repo ambiguous without an explicit cwd hint when multiple repos are registered', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-no-cwd-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-no-cwd-b-');
+    try {
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = makeTestRepoHandle('alpha', repoA);
+      const handleB = makeTestRepoHandle('beta', repoB);
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo()).rejects.toThrow(
+        'Multiple repositories indexed. Specify which one with the "repo" parameter.',
+      );
+    } finally {
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
+  it('does not fall back to process.cwd() for omitted repo when explicit cwd is non-git', async () => {
+    const originalCwd = process.cwd();
+    const repoA = makeGitRepo('gitnexus-resolve-bad-cwd-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-bad-cwd-b-');
+    const plainDir = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-resolve-bad-cwd-plain-'));
+    try {
+      process.chdir(repoA);
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = makeTestRepoHandle('alpha', repoA);
+      const handleB = makeTestRepoHandle('beta', repoB);
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo(undefined, { cwd: plainDir })).rejects.toThrow(
+        'Multiple repositories indexed. Specify which one with the "repo" parameter.',
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+      rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps explicit repo precedence over a conflicting cwd hint', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-explicit-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-explicit-b-');
+    try {
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = makeTestRepoHandle('alpha', repoA);
+      const handleB = makeTestRepoHandle('beta', repoB);
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo('alpha', { cwd: repoB })).resolves.toBe(handleA);
+    } finally {
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
+  it('disambiguates duplicate repo names by explicit cwd', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-dupe-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-dupe-b-');
+    try {
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = { ...makeTestRepoHandle('shared', repoA), id: 'shared-a' };
+      const handleB = { ...makeTestRepoHandle('shared', repoB), id: 'shared-b' };
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo('shared', { cwd: repoB })).resolves.toBe(handleB);
+    } finally {
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
+  it('does not fall back to process.cwd() for duplicate names when explicit cwd is non-git', async () => {
+    const originalCwd = process.cwd();
+    const repoA = makeGitRepo('gitnexus-resolve-dupe-bad-cwd-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-dupe-bad-cwd-b-');
+    const plainDir = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-resolve-dupe-bad-cwd-plain-'));
+    try {
+      process.chdir(repoA);
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = { ...makeTestRepoHandle('shared', repoA), id: 'shared-a' };
+      const handleB = { ...makeTestRepoHandle('shared', repoB), id: 'shared-b' };
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo('shared', { cwd: plainDir })).rejects.toThrow(
+        'Multiple registered repos match "shared"',
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+      rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves an omitted repo by linked-worktree cwd when the indexed handle is the main checkout', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-wt-main-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-wt-main-b-');
+    try {
+      commitInitialFile(repoB);
+      const worktreeDir = path.join(repoB, 'wt-cwd');
+      execSync(`git worktree add -q -b wt-cwd "${worktreeDir}"`, {
+        cwd: repoB,
+        stdio: 'ignore',
+      });
+
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = makeTestRepoHandle('alpha', repoA);
+      const handleB = makeTestRepoHandle('beta', repoB);
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo(undefined, { cwd: worktreeDir })).resolves.toBe(handleB);
+    } finally {
+      try {
+        execSync('git worktree remove -f wt-cwd', { cwd: repoB, stdio: 'ignore' });
+      } catch {
+        // ignore cleanup failure
+      }
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
+  it('disambiguates duplicate repo names by linked-worktree cwd when the indexed handle is the main checkout', async () => {
+    const repoA = makeGitRepo('gitnexus-resolve-dupe-wt-a-');
+    const repoB = makeGitRepo('gitnexus-resolve-dupe-wt-b-');
+    try {
+      commitInitialFile(repoB);
+      const worktreeDir = path.join(repoB, 'wt-shared');
+      execSync(`git worktree add -q -b wt-shared "${worktreeDir}"`, {
+        cwd: repoB,
+        stdio: 'ignore',
+      });
+
+      const backend = new LocalBackend() as any;
+      backend.refreshRepos = async () => {};
+      const handleA = { ...makeTestRepoHandle('shared', repoA), id: 'shared-a' };
+      const handleB = { ...makeTestRepoHandle('shared', repoB), id: 'shared-b' };
+      backend.repos.set(handleA.id, handleA);
+      backend.repos.set(handleB.id, handleB);
+
+      await expect(backend.resolveRepo('shared', { cwd: worktreeDir })).resolves.toBe(handleB);
+    } finally {
+      try {
+        execSync('git worktree remove -f wt-shared', { cwd: repoB, stdio: 'ignore' });
+      } catch {
+        // ignore cleanup failure
+      }
+      rmSync(repoA, { recursive: true, force: true });
+      rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+
   it('resolves an absolute linked-worktree repo param to the indexed main checkout', () => {
     const repoDir = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-rwc-param-'));
     try {

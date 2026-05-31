@@ -222,6 +222,10 @@ interface RepoHandle {
   stats?: RegistryEntry['stats'];
 }
 
+export interface RepoResolutionOptions {
+  cwd?: string;
+}
+
 /** Resolve symlinks for path comparison; falls back to path.resolve on error.
  * Uses `realpathSync.native` (not the pure-JS `realpathSync`) so that Windows
  * 8.3 short names (e.g. RUNNER~1 → runneradmin) are expanded to long form,
@@ -552,18 +556,21 @@ export class LocalBackend {
    * On a miss, re-reads the registry once in case a new repo was indexed
    * while the MCP server was running.
    */
-  async resolveRepo(repoParam?: string): Promise<RepoHandle> {
+  async resolveRepo(
+    repoParam?: string,
+    options: RepoResolutionOptions = {},
+  ): Promise<RepoHandle> {
     let refreshedAfterAmbiguity = false;
     let result: RepoHandle | null;
     try {
-      result = this.resolveRepoFromCache(repoParam);
+      result = this.resolveRepoFromCache(repoParam, options);
     } catch (err) {
       if (!(err instanceof RegistryAmbiguousTargetError)) throw err;
       // Stale in-memory duplicate siblings can linger after unregister; refresh
       // once before re-throwing so a resolved registry can disambiguate (#1658).
       await this.refreshRepos();
       refreshedAfterAmbiguity = true;
-      result = this.resolveRepoFromCache(repoParam);
+      result = this.resolveRepoFromCache(repoParam, options);
     }
 
     if (result) {
@@ -583,7 +590,7 @@ export class LocalBackend {
     if (!refreshedAfterAmbiguity) {
       await this.refreshRepos();
     }
-    const retried = this.resolveRepoFromCache(repoParam);
+    const retried = this.resolveRepoFromCache(repoParam, options);
     if (retried) {
       this.maybeWarnSiblingDrift(retried).catch(() => {});
       return retried;
@@ -612,7 +619,7 @@ export class LocalBackend {
       labels.length > shownLabels.length
         ? ` (showing ${shownLabels.length} of ${labels.length})`
         : '';
-    const cwdPick = this.pickRepoHandleForCwd(handles);
+    const cwdPick = this.pickRepoHandleForCwd(handles, options.cwd);
 
     if (repoParam) {
       const cwdHint = cwdPick ? ` Nearest by cwd: ${cwdPick.name} (${cwdPick.repoPath}).` : '';
@@ -632,7 +639,10 @@ export class LocalBackend {
    * Throws {@link RegistryAmbiguousTargetError} when `repoParam` matches
    * multiple handles by name and cwd cannot disambiguate (#1658).
    */
-  private resolveRepoFromCache(repoParam?: string): RepoHandle | null {
+  private resolveRepoFromCache(
+    repoParam?: string,
+    options: RepoResolutionOptions = {},
+  ): RepoHandle | null {
     if (this.repos.size === 0) return null;
 
     if (repoParam) {
@@ -682,7 +692,7 @@ export class LocalBackend {
       );
       if (nameMatches.length === 1) return nameMatches[0];
       if (nameMatches.length > 1) {
-        const cwdPick = this.pickRepoHandleForCwd(nameMatches);
+        const cwdPick = this.pickRepoHandleForCwd(nameMatches, options.cwd);
         if (cwdPick) return cwdPick;
         throw new RegistryAmbiguousTargetError(
           repoParam,
@@ -713,28 +723,46 @@ export class LocalBackend {
       return this.repos.values().next().value!;
     }
 
+    if (options.cwd) {
+      const cwdPick = this.pickRepoHandleForCwd([...this.repos.values()], options.cwd);
+      if (cwdPick) return cwdPick;
+    }
+
     return null; // Multiple repos, no param — ambiguous
   }
 
   /**
-   * Prefer the indexed repo whose path matches the git root of process.cwd().
+   * Prefer the indexed repo whose path matches the git root of the caller cwd.
    *
    * In MCP stdio server mode, `process.cwd()` is the server's launch directory,
    * not the agent client's cwd. If the server was started from an unrelated
    * directory, `getGitRoot` returns null and duplicate-name resolution throws
    * {@link RegistryAmbiguousTargetError} — callers should pass an absolute path.
    */
-  private pickRepoHandleForCwd(candidates: RepoHandle[]): RepoHandle | null {
-    const cwdRoot = getGitRoot(process.cwd());
+  private pickRepoHandleForCwd(candidates: RepoHandle[], cwdHint?: string): RepoHandle | null {
+    if (cwdHint) {
+      return this.pickRepoHandleForGitRoot(candidates, getGitRoot(path.resolve(cwdHint)));
+    }
+
+    return this.pickRepoHandleForGitRoot(candidates, getGitRoot(process.cwd()));
+  }
+
+  private pickRepoHandleForGitRoot(candidates: RepoHandle[], cwdRoot: string | null): RepoHandle | null {
     if (!cwdRoot) return null;
-    const canonicalCwd = canonicalizePath(cwdRoot);
-    const cwdMatches = candidates.filter((handle) => {
-      const stored = canonicalizePath(handle.repoPath);
-      return process.platform === 'win32'
-        ? stored.toLowerCase() === canonicalCwd.toLowerCase()
-        : stored === canonicalCwd;
+    const exactMatches = candidates.filter((handle) => sameCanonicalPath(handle.repoPath, cwdRoot));
+    if (exactMatches.length === 1) return exactMatches[0];
+
+    const cwdCanonicalRoot = getCanonicalRepoRoot(cwdRoot);
+    if (!cwdCanonicalRoot) return null;
+
+    const canonicalRootMatches = candidates.filter((handle) => {
+      const handleCanonicalRoot = getCanonicalRepoRoot(handle.repoPath);
+      return (
+        !!handleCanonicalRoot &&
+        sameCanonicalPath(tryRealpath(handleCanonicalRoot), tryRealpath(cwdCanonicalRoot))
+      );
     });
-    return cwdMatches.length === 1 ? cwdMatches[0] : null;
+    return canonicalRootMatches.length === 1 ? canonicalRootMatches[0] : null;
   }
 
   private handleToRegistryEntry(handle: RepoHandle): RegistryEntry {
@@ -959,6 +987,12 @@ export class LocalBackend {
 
   // ─── Tool Dispatch ───────────────────────────────────────────────
 
+  private repoResolutionOptions(params: unknown): RepoResolutionOptions | undefined {
+    if (!params || typeof params !== 'object') return undefined;
+    const cwd = (params as { cwd?: unknown }).cwd;
+    return typeof cwd === 'string' && cwd.trim().length > 0 ? { cwd } : undefined;
+  }
+
   async callTool(method: string, params: any): Promise<any> {
     if (method === 'list_repos') {
       return this.listRepos();
@@ -978,7 +1012,10 @@ export class LocalBackend {
     }
 
     // Resolve repo from optional param (re-reads registry on miss)
-    const repo = await this.resolveRepo((params as { repo?: string } | undefined)?.repo);
+    const repo = await this.resolveRepo(
+      (params as { repo?: string } | undefined)?.repo,
+      this.repoResolutionOptions(params),
+    );
 
     switch (method) {
       case 'query':
