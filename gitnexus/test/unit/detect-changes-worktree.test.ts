@@ -748,3 +748,27 @@ describe('impact hub_guidance — structural', () => {
     expect(src).toMatch(/hub_guidance/);
   });
 });
+
+// ── Structural tests: relationTypes auto-expansion ───────────────────
+
+describe('impact relationTypes auto-expansion — structural', () => {
+  const src = readFileSync(
+    path.join(__dirname, '../../src/mcp/local/local-backend.ts'),
+    'utf-8',
+  );
+
+  it('auto-expands ACCESSES, HAS_METHOD, HAS_PROPERTY for container types', () => {
+    expect(src).toMatch(/ACCESSES.*autoExpanded/);
+    expect(src).toMatch(/HAS_METHOD.*autoExpanded/);
+    expect(src).toMatch(/HAS_PROPERTY.*autoExpanded/);
+  });
+
+  it('surfaces expanded_relation_types in the response', () => {
+    expect(src).toMatch(/expanded_relation_types:\s*autoExpanded/);
+    expect(src).toMatch(/relation_types_hint/);
+  });
+
+  it('applies only when relationTypes are not explicitly provided', () => {
+    expect(src).toMatch(/hasExplicitRelationTypes.*return relationTypes/);
+  });
+});
