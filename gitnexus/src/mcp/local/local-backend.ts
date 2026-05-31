@@ -2740,6 +2740,7 @@ export class LocalBackend {
       changed_symbols: changedSymbols,
       affected_processes: Array.from(affectedProcesses.values()),
       metadata: pathMetadata,
+      index_status: buildIndexStatus(repo),
     };
   }
 
