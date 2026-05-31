@@ -898,7 +898,17 @@ export class LocalBackend {
 
   async callTool(method: string, params: any): Promise<any> {
     if (method === 'list_repos') {
-      return this.listRepos();
+      const repos = await this.listRepos();
+      if (repos.length === 0) {
+        return {
+          repos: [],
+          next_steps: [
+            'No repositories are indexed yet. Run `gitnexus analyze` in a git repository to create an index.',
+            'Use `gitnexus status` to check the current state.',
+          ],
+        };
+      }
+      return repos;
     }
 
     if (method.startsWith('group_')) {
@@ -4069,158 +4079,227 @@ export class LocalBackend {
   private async routeMap(repo: RepoHandle, params: { route?: string }): Promise<any> {
     await this.ensureInitialized(repo.id);
 
-    const routeFilter = params.route ? `AND n.name CONTAINS $route` : '';
-    const queryParams = params.route ? { route: params.route } : {};
-    const routes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
+    try {
+      const routeFilter = params.route ? `AND n.name CONTAINS $route` : '';
+      const queryParams = params.route ? { route: params.route } : {};
+      const routes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
 
-    if (routes.length === 0) {
+      if (routes.length === 0) {
+        return {
+          routes: [],
+          total: 0,
+          message: params.route
+            ? `No routes matching "${params.route}"`
+            : 'No routes found in this project.',
+          next_steps: [
+            params.route
+              ? `Use route_map without a filter to see all routes, or try a different substring.`
+              : 'Run gitnexus analyze to ensure route definitions are indexed.',
+            'Use query({ query: "route handler" }) to find route-related code.',
+          ],
+          index_status: buildIndexStatus(repo),
+        };
+      }
+
+      const flowMap = await this.fetchLinkedFlowsBatch(
+        repo.id,
+        routes.map((r) => r.id),
+      );
+
       return {
-        routes: [],
-        total: 0,
-        message: params.route
-          ? `No routes matching "${params.route}"`
-          : 'No routes found in this project.',
+        routes: routes.map((r) => ({
+          route: r.name,
+          handler: r.filePath,
+          middleware: r.middleware || [],
+          consumers: r.consumers,
+          flows: flowMap.get(r.id) || [],
+        })),
+        total: routes.length,
+        index_status: buildIndexStatus(repo),
+      };
+    } catch (err: any) {
+      return {
+        error: `route_map failed: ${err.message}`,
+        recovery: {
+          hint: 'The graph query failed. This may indicate a corrupted index.',
+          steps: [
+            'Run gitnexus analyze to rebuild the index',
+            'If the error persists, try gitnexus analyze --force for a full rebuild',
+          ],
+        },
+        index_status: buildIndexStatus(repo),
       };
     }
-
-    const flowMap = await this.fetchLinkedFlowsBatch(
-      repo.id,
-      routes.map((r) => r.id),
-    );
-
-    return {
-      routes: routes.map((r) => ({
-        route: r.name,
-        handler: r.filePath,
-        middleware: r.middleware || [],
-        consumers: r.consumers,
-        flows: flowMap.get(r.id) || [],
-      })),
-      total: routes.length,
-    };
   }
 
   private async shapeCheck(repo: RepoHandle, params: { route?: string }): Promise<any> {
     await this.ensureInitialized(repo.id);
 
-    const routeFilter = params.route ? `AND n.name CONTAINS $route` : '';
-    const queryParams = params.route ? { route: params.route } : {};
-    const allRoutes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
+    try {
+      const routeFilter = params.route ? `AND n.name CONTAINS $route` : '';
+      const queryParams = params.route ? { route: params.route } : {};
+      const allRoutes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
 
-    const results = allRoutes
-      .filter(
-        (r) =>
-          ((r.responseKeys && r.responseKeys.length > 0) ||
-            (r.errorKeys && r.errorKeys.length > 0)) &&
-          r.consumers.length > 0,
-      )
-      .map((r) => {
-        // Keys already normalized by fetchRoutesWithConsumers (quotes stripped)
-        const responseKeys = r.responseKeys ?? [];
-        const errorKeys = r.errorKeys ?? [];
-        // Combined set: consumer accessing either success or error keys is valid
-        const allKnownKeys = new Set([...responseKeys, ...errorKeys]);
+      const results = allRoutes
+        .filter(
+          (r) =>
+            ((r.responseKeys && r.responseKeys.length > 0) ||
+              (r.errorKeys && r.errorKeys.length > 0)) &&
+            r.consumers.length > 0,
+        )
+        .map((r) => {
+          const responseKeys = r.responseKeys ?? [];
+          const errorKeys = r.errorKeys ?? [];
+          const allKnownKeys = new Set([...responseKeys, ...errorKeys]);
 
-        // Check each consumer's accessed keys against the route's response shape
-        const responseKeySet = new Set(responseKeys);
-        const consumers = r.consumers.map((c) => {
-          if (!c.accessedKeys || c.accessedKeys.length === 0) {
-            return { name: c.name, filePath: c.filePath };
-          }
-          const mismatched = c.accessedKeys.filter((k) => !allKnownKeys.has(k));
-          // Keys in allKnownKeys but not in responseKeys — error-path access (e.g., .error from errorKeys)
-          const errorPathKeys = c.accessedKeys.filter(
-            (k) => allKnownKeys.has(k) && !responseKeySet.has(k),
+          const responseKeySet = new Set(responseKeys);
+          const consumers = r.consumers.map((c) => {
+            if (!c.accessedKeys || c.accessedKeys.length === 0) {
+              return { name: c.name, filePath: c.filePath };
+            }
+            const mismatched = c.accessedKeys.filter((k) => !allKnownKeys.has(k));
+            const errorPathKeys = c.accessedKeys.filter(
+              (k) => allKnownKeys.has(k) && !responseKeySet.has(k),
+            );
+            const isMultiFetch = (c.fetchCount ?? 1) > 1;
+            return {
+              name: c.name,
+              filePath: c.filePath,
+              accessedKeys: c.accessedKeys,
+              ...(mismatched.length > 0
+                ? {
+                    mismatched,
+                    mismatchConfidence: isMultiFetch ? ('low' as const) : ('high' as const),
+                  }
+                : {}),
+              ...(errorPathKeys.length > 0 ? { errorPathKeys } : {}),
+              ...(isMultiFetch
+                ? {
+                    attributionNote: `This file fetches ${c.fetchCount} routes — accessed keys may belong to a different route.`,
+                  }
+                : {}),
+            };
+          });
+
+          const hasMismatches = consumers.some(
+            (c) => 'mismatched' in c && (c as any).mismatched.length > 0,
           );
-          const isMultiFetch = (c.fetchCount ?? 1) > 1;
+
           return {
-            name: c.name,
-            filePath: c.filePath,
-            accessedKeys: c.accessedKeys,
-            ...(mismatched.length > 0
-              ? {
-                  mismatched,
-                  mismatchConfidence: isMultiFetch ? ('low' as const) : ('high' as const),
-                }
-              : {}),
-            ...(errorPathKeys.length > 0 ? { errorPathKeys } : {}),
-            ...(isMultiFetch
-              ? {
-                  attributionNote: `This file fetches ${c.fetchCount} routes — accessed keys may belong to a different route.`,
-                }
-              : {}),
+            route: r.name,
+            handler: r.filePath,
+            ...(responseKeys.length > 0 ? { responseKeys } : {}),
+            ...(errorKeys.length > 0 ? { errorKeys } : {}),
+            consumers,
+            ...(hasMismatches ? { status: 'MISMATCH' as const } : {}),
           };
         });
 
-        const hasMismatches = consumers.some(
-          (c) => 'mismatched' in c && (c as any).mismatched.length > 0,
-        );
+      const mismatchCount = results.filter((r) => r.status === 'MISMATCH').length;
 
-        return {
-          route: r.name,
-          handler: r.filePath,
-          ...(responseKeys.length > 0 ? { responseKeys } : {}),
-          ...(errorKeys.length > 0 ? { errorKeys } : {}),
-          consumers,
-          ...(hasMismatches ? { status: 'MISMATCH' as const } : {}),
-        };
-      });
+      const response: any = {
+        routes: results,
+        total: results.length,
+        routesWithShapes: results.length,
+        ...(mismatchCount > 0 ? { mismatches: mismatchCount } : {}),
+        index_status: buildIndexStatus(repo),
+        message:
+          results.length === 0
+            ? 'No routes with both response shapes and consumers found.'
+            : mismatchCount > 0
+              ? `Found ${results.length} route(s) with response shape data. ${mismatchCount} route(s) have consumer/shape mismatches.`
+              : `Found ${results.length} route(s) with response shape data and consumers.`,
+      };
 
-    const mismatchCount = results.filter((r) => r.status === 'MISMATCH').length;
+      if (results.length === 0) {
+        response.next_steps = [
+          'Use route_map() to see all available routes',
+          'Use query({ query: "response shape" }) to find routes with response type definitions',
+        ];
+      } else if (mismatchCount > 0) {
+        response.next_steps = [
+          'Review mismatched keys to determine if they are false positives or real bugs',
+          'Use api_impact({ route: "<routeName>" }) for deeper analysis of specific routes',
+        ];
+      }
 
-    return {
-      routes: results,
-      total: results.length,
-      routesWithShapes: results.length,
-      ...(mismatchCount > 0 ? { mismatches: mismatchCount } : {}),
-      message:
-        results.length === 0
-          ? 'No routes with both response shapes and consumers found.'
-          : mismatchCount > 0
-            ? `Found ${results.length} route(s) with response shape data. ${mismatchCount} route(s) have consumer/shape mismatches.`
-            : `Found ${results.length} route(s) with response shape data and consumers.`,
-    };
+      return response;
+    } catch (err: any) {
+      return {
+        error: `shape_check failed: ${err.message}`,
+        recovery: {
+          hint: 'The graph query failed. This may indicate a corrupted index.',
+          steps: [
+            'Run gitnexus analyze to rebuild the index',
+            'If the error persists, try gitnexus analyze --force for a full rebuild',
+          ],
+        },
+        index_status: buildIndexStatus(repo),
+      };
+    }
   }
 
   private async toolMap(repo: RepoHandle, params: { tool?: string }): Promise<any> {
     await this.ensureInitialized(repo.id);
 
-    const toolFilter = params.tool ? `AND n.name CONTAINS $tool` : '';
-    const queryParams = params.tool ? { tool: params.tool } : {};
+    try {
+      const toolFilter = params.tool ? `AND n.name CONTAINS $tool` : '';
+      const queryParams = params.tool ? { tool: params.tool } : {};
 
-    const rows = await executeParameterized(
-      repo.id,
-      `
-      MATCH (n:Tool)
-      WHERE n.id STARTS WITH 'Tool:' ${toolFilter}
-      RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.description AS description
-    `,
-      queryParams,
-    );
+      const rows = await executeParameterized(
+        repo.id,
+        `
+        MATCH (n:Tool)
+        WHERE n.id STARTS WITH 'Tool:' ${toolFilter}
+        RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.description AS description
+      `,
+        queryParams,
+      );
 
-    if (rows.length === 0) {
+      if (rows.length === 0) {
+        return {
+          tools: [],
+          total: 0,
+          message: params.tool ? `No tools matching "${params.tool}"` : 'No tool definitions found.',
+          next_steps: [
+            params.tool
+              ? `Use tool_map without a filter to see all tools, or try a different substring.`
+              : 'Run gitnexus analyze to ensure tool definitions are indexed.',
+            'Use query({ query: "tool handler" }) to find tool-related code.',
+          ],
+          index_status: buildIndexStatus(repo),
+        };
+      }
+
+      const toolIds = rows.map((r: any) => r.id ?? r[0]);
+      const flowMap = await this.fetchLinkedFlowsBatch(repo.id, toolIds);
+
       return {
-        tools: [],
-        total: 0,
-        message: params.tool ? `No tools matching "${params.tool}"` : 'No tool definitions found.',
+        tools: rows.map((r: any) => {
+          const id = r.id ?? r[0];
+          return {
+            name: r.name ?? r[1],
+            filePath: r.filePath ?? r[2],
+            description: (r.description ?? r[3] ?? '').slice(0, 200),
+            flows: flowMap.get(id) || [],
+          };
+        }),
+        total: rows.length,
+        index_status: buildIndexStatus(repo),
+      };
+    } catch (err: any) {
+      return {
+        error: `tool_map failed: ${err.message}`,
+        recovery: {
+          hint: 'The graph query failed. This may indicate a corrupted index.',
+          steps: [
+            'Run gitnexus analyze to rebuild the index',
+            'If the error persists, try gitnexus analyze --force for a full rebuild',
+          ],
+        },
+        index_status: buildIndexStatus(repo),
       };
     }
-
-    const toolIds = rows.map((r: any) => r.id ?? r[0]);
-    const flowMap = await this.fetchLinkedFlowsBatch(repo.id, toolIds);
-
-    return {
-      tools: rows.map((r: any) => {
-        const id = r.id ?? r[0];
-        return {
-          name: r.name ?? r[1],
-          filePath: r.filePath ?? r[2],
-          description: (r.description ?? r[3] ?? '').slice(0, 200),
-          flows: flowMap.get(id) || [],
-        };
-      }),
-      total: rows.length,
-    };
   }
 
   private async apiImpact(
@@ -4230,27 +4309,45 @@ export class LocalBackend {
     await this.ensureInitialized(repo.id);
 
     if (!params.route && !params.file) {
-      return { error: 'Either "route" or "file" parameter is required.' };
+      return {
+        error: 'Either "route" or "file" parameter is required.',
+        recovery: {
+          hint: 'Provide a route name or file path to analyze API impact.',
+          steps: [
+            'Use route_map() to see all available routes',
+            'Use api_impact({ route: "/api/users" }) for a specific route',
+            'Use api_impact({ file: "src/routes/users.ts" }) for all routes in a file',
+          ],
+        },
+      };
     }
 
-    // If file is provided but route is not, look up the route by file path
-    let routeFilter = '';
-    const queryParams: Record<string, string> = {};
+    try {
+      // If file is provided but route is not, look up the route by file path
+      let routeFilter = '';
+      const queryParams: Record<string, string> = {};
 
-    if (params.route) {
-      routeFilter = `AND n.name CONTAINS $route`;
-      queryParams.route = params.route;
-    } else if (params.file) {
-      routeFilter = `AND n.filePath CONTAINS $file`;
-      queryParams.file = params.file;
-    }
+      if (params.route) {
+        routeFilter = `AND n.name CONTAINS $route`;
+        queryParams.route = params.route;
+      } else if (params.file) {
+        routeFilter = `AND n.filePath CONTAINS $file`;
+        queryParams.file = params.file;
+      }
 
-    const routes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
+      const routes = await this.fetchRoutesWithConsumers(repo.id, routeFilter, queryParams);
 
-    if (routes.length === 0) {
-      const target = params.route || params.file;
-      return { error: `No routes found matching "${target}".` };
-    }
+      if (routes.length === 0) {
+        const target = params.route || params.file;
+        return {
+          error: `No routes found matching "${target}".`,
+          next_steps: [
+            'Use route_map() to see all available routes',
+            'Try a different substring or use api_impact({ file: "..." }) instead',
+          ],
+          index_status: buildIndexStatus(repo),
+        };
+      }
 
     const flowMap = await this.fetchLinkedFlowsBatch(
       repo.id,
@@ -4363,12 +4460,39 @@ export class LocalBackend {
       };
     });
 
-    // If a single route was targeted, return it directly (not wrapped in array)
-    if (results.length === 1) {
-      return results[0];
-    }
+      // If a single route was targeted, return it directly (not wrapped in array)
+      if (results.length === 1) {
+        return { ...results[0], index_status: buildIndexStatus(repo) };
+      }
 
-    return { routes: results, total: results.length };
+      const highRiskCount = results.filter(
+        (r: any) => r.impactSummary?.riskLevel === 'HIGH',
+      ).length;
+
+      const response: any = {
+        routes: results,
+        total: results.length,
+        index_status: buildIndexStatus(repo),
+      };
+
+      if (highRiskCount > 5) {
+        response.hub_guidance = `${highRiskCount} routes have HIGH risk. Focus on those first, then use shape_check() for detailed mismatch analysis.`;
+      }
+
+      return response;
+    } catch (err: any) {
+      return {
+        error: `api_impact failed: ${err.message}`,
+        recovery: {
+          hint: 'The graph query failed. This may indicate a corrupted index.',
+          steps: [
+            'Run gitnexus analyze to rebuild the index',
+            'If the error persists, try gitnexus analyze --force for a full rebuild',
+          ],
+        },
+        index_status: buildIndexStatus(repo),
+      };
+    }
   }
 
   // ─── Direct Graph Queries (for resources.ts) ────────────────────
