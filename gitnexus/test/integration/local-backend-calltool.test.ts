@@ -344,3 +344,74 @@ withTestLbugDB(
     },
   },
 );
+
+// ─── Block 3: index_status metadata ──────────────────────────────────
+
+withTestLbugDB(
+  'local-backend-index-status',
+  (handle) => {
+    describe('index_status in tool responses', () => {
+      let backend: LocalBackend;
+
+      beforeAll(async () => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error('LocalBackend not initialized');
+        }
+        backend = ext._backend;
+      });
+
+      it('query response includes index_status with has_embeddings', async () => {
+        const result = await backend.callTool('query', { query: 'validate' });
+        expect(result).toHaveProperty('index_status');
+        expect(result.index_status).toHaveProperty('stale');
+        expect(result.index_status).toHaveProperty('has_embeddings');
+        expect(typeof result.index_status.has_embeddings).toBe('boolean');
+      });
+
+      it('impact success response includes index_status', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'validate',
+          direction: 'upstream',
+        });
+        expect(result).toHaveProperty('index_status');
+        expect(result.index_status).toHaveProperty('stale');
+        expect(result.index_status).toHaveProperty('has_embeddings');
+      });
+
+      it('impact not-found response includes index_status alongside recovery guidance', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'nonexistent_symbol_xyz_999',
+          direction: 'upstream',
+        });
+        expect(result.status).toBe('not_found');
+        expect(result).toHaveProperty('index_status');
+        expect(result.index_status).toHaveProperty('stale');
+        expect(result.index_status).toHaveProperty('has_embeddings');
+        expect(result).toHaveProperty('suggestion');
+        expect(result).toHaveProperty('next_actions');
+      });
+    });
+  },
+  {
+    seed: LOCAL_BACKEND_SEED_DATA,
+    ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'test-repo',
+          path: '/test/repo',
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc1234',
+          stats: { files: 2, nodes: 3, communities: 1, processes: 1, embeddings: 0 },
+        },
+      ]);
+
+      const backend = new LocalBackend();
+      await backend.init();
+      (handle as any)._backend = backend;
+    },
+  },
+);

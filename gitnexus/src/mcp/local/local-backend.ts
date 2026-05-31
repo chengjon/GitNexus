@@ -295,6 +295,30 @@ function createDetectChangesPathMetadata(
   };
 }
 
+export interface IndexStatus {
+  stale: boolean;
+  commits_behind?: number;
+  stale_hint?: string;
+  has_embeddings: boolean;
+  embedding_count?: number;
+}
+
+function buildIndexStatus(repo: RepoHandle): IndexStatus {
+  const indexedCommit = repo.lastCommit || null;
+  const currentCommit = indexedCommit ? getCurrentCommit(repo.repoPath) : null;
+  const stale = !!indexedCommit && !!currentCommit && indexedCommit !== currentCommit;
+  const embeddingCount = repo.stats?.embeddings ?? 0;
+  return {
+    stale,
+    ...(stale && {
+      commits_behind: 0, // sync check — exact count requires git rev-list; stale=true is enough signal
+      stale_hint: `Index may be stale. Re-run \`gitnexus analyze\` to refresh.`,
+    }),
+    has_embeddings: embeddingCount > 0,
+    ...(embeddingCount > 0 && { embedding_count: embeddingCount }),
+  };
+}
+
 function createDetectChangesMetadata(
   repo: RepoHandle,
   pathMetadata: Record<string, any>,
@@ -1327,6 +1351,7 @@ export class LocalBackend {
       process_symbols: dedupedSymbols,
       definitions: definitions.slice(0, 20), // cap standalone definitions
       timing,
+      index_status: buildIndexStatus(repo),
       ...(!ftsUsed && {
         warning:
           'FTS indexes missing — keyword search degraded. Run: gitnexus analyze --repair-fts (or gitnexus analyze --force) to rebuild indexes.',
@@ -2934,8 +2959,10 @@ export class LocalBackend {
   }
 
   private async impact(repo: RepoHandle, params: ImpactParams): Promise<any> {
+    const indexStatus = buildIndexStatus(repo);
     try {
-      return await this._impactImpl(repo, params);
+      const result = await this._impactImpl(repo, params);
+      return { ...result, index_status: indexStatus };
     } catch (err: any) {
       // Return structured error instead of crashing (#321)
       return {
@@ -2945,6 +2972,7 @@ export class LocalBackend {
         impactedCount: 0,
         risk: 'UNKNOWN',
         suggestion: 'The graph query failed — try gitnexus context <symbol> as a fallback',
+        index_status: indexStatus,
         ...(isWalCorruptionError(err) ? { recoverySuggestion: WAL_RECOVERY_SUGGESTION } : {}),
       };
     }

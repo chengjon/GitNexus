@@ -238,6 +238,15 @@ classified as absorbed, reimplemented, retired, or remapped before replacing
   `query` to find candidates, `context` to confirm a candidate symbol, and
   `impact` with `target_uid` to retry without name ambiguity
 
+#### Scenario: Repo-scoped MCP tools include index freshness metadata
+
+- **WHEN** an MCP client calls `query` or `impact` on an indexed repository
+- **THEN** the response includes an `index_status` object with `stale` (boolean)
+  and `has_embeddings` (boolean) fields
+- **AND** when the index is stale, `index_status` includes a `stale_hint`
+  advising the caller to re-run `gitnexus analyze`
+- **AND** when embeddings exist, `index_status` includes `embedding_count`
+
 #### Scenario: MCP local tools run on the upstream backend shape
 
 - **WHEN** a maintainer reviews the old local MCP split files for
