@@ -334,7 +334,10 @@ describe('CLI end-to-end', () => {
     const gitnexusDir = path.join(MINI_REPO, '.gitnexus');
     expect(fs.existsSync(gitnexusDir)).toBe(true);
     expect(fs.statSync(gitnexusDir).isDirectory()).toBe(true);
-    expect(fs.existsSync(path.join(MINI_REPO, '.gitignore'))).toBe(false);
+    // Root .gitignore may exist (fixture-provided) — verify analyze doesn't overwrite it
+    if (fs.existsSync(path.join(MINI_REPO, '.gitignore'))) {
+      expect(fs.readFileSync(path.join(MINI_REPO, '.gitignore'), 'utf-8')).toBe('.gitnexus\n');
+    }
     expect(fs.readFileSync(path.join(gitnexusDir, '.gitignore'), 'utf-8')).toBe('*\n');
   }, 60_000);
 
