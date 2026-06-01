@@ -1,0 +1,95 @@
+{
+  "metric_version": "v1.1",
+  "generated_at": "2026-06-01T19:00:00Z",
+  "generated_by": "tech-debt-checker skill (manual run)",
+  "project": "GitNexus",
+  "git_commit": "3e02e28f5b165bbf876f55ce4b1048eba1f9c935",
+  "tool_versions": {
+    "typescript": "5.9.3",
+    "eslint": "9.39.4",
+    "vitest": "4.1.7"
+  },
+
+  "backend_type_errors": 0,
+  "backend_type_suppressions": 0,
+  "backend_strict_mode": false,
+
+  "frontend_type_errors": 0,
+  "frontend_type_suppressions": 0,
+  "frontend_strict_mode": true,
+
+  "backend_lint_errors": 0,
+  "backend_lint_warnings": 534,
+  "backend_lint_files_with_issues": 108,
+
+  "backend_large_file_count": 69,
+  "frontend_large_file_count": 13,
+  "large_file_extensions_backend": [".ts"],
+  "large_file_extensions_frontend": [".ts", ".tsx", ".vue"],
+  "large_file_roots": {
+    "backend": "gitnexus/src/",
+    "frontend": "gitnexus-web/src/"
+  },
+  "large_file_line_limit": 500,
+
+  "source_files": 578,
+  "source_lines": 139814,
+  "test_files": 674,
+
+  "test_total": 9908,
+  "test_passed": 9713,
+  "test_failed": 23,
+  "test_pending": 172,
+  "test_skip_xfail_count": 68,
+  "test_coverage_statements": 27,
+  "test_coverage_branches": 23,
+  "test_coverage_functions": 28,
+  "test_coverage_lines": 27,
+
+  "backend_todo_count": 5,
+  "backend_fixme_count": 0,
+  "backend_hack_count": 0,
+  "backend_xxx_count": 1,
+  "frontend_todo_count": 3,
+  "frontend_fixme_count": 0,
+  "frontend_hack_count": 0,
+  "frontend_xxx_count": 0,
+
+  "secrets_in_code": 0,
+  "debt_exception_count": 0,
+  "debt_exception_expired": 0,
+
+  "outdated_deps_backend": 16,
+  "outdated_deps_frontend": 19,
+  "cve_vulnerabilities": 0,
+
+  "god_class_count": 11,
+
+  "dimension_ratings": {
+    "D1_code_quality": "D",
+    "D2_architecture": "C",
+    "D3_testing": "B",
+    "D4_documentation": "B",
+    "D5_dependencies": "B",
+    "D6_process_security": "A"
+  },
+
+  "gated_metrics": ["backend_type_errors", "frontend_type_errors", "test_failed"],
+  "gated_targets": {
+    "backend_type_errors": 0,
+    "frontend_type_errors": 0,
+    "test_failed": 0
+  },
+
+  "observed_metrics": [
+    "backend_lint_warnings",
+    "backend_type_suppressions",
+    "frontend_type_suppressions",
+    "backend_large_file_count",
+    "frontend_large_file_count",
+    "test_coverage_statements",
+    "backend_todo_count",
+    "backend_xxx_count",
+    "frontend_todo_count"
+  ]
+}
