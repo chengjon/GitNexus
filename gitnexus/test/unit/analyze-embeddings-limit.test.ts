@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach } from 'vitest';
 
 const runFullAnalysisMock = vi.fn();
 let tmpHome: string | null = null;
+
+// Default: no stored config → resolveEmbeddingNodeLimit returns undefined.
+// Individual tests override this when they need a stored nodeLimit.
+const resolveNodeLimitMock = vi.fn((limit: number | undefined) => limit);
+
+vi.mock('../../src/core/embeddings/config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/embeddings/config.js')>();
+  return {
+    ...actual,
+    resolveEmbeddingNodeLimit: resolveNodeLimitMock,
+  };
+});
 
 vi.mock('../../src/core/run-analyze.js', () => ({
   runFullAnalysis: runFullAnalysisMock,
@@ -47,6 +58,10 @@ describe('analyzeCommand --embeddings [limit] parsing', () => {
       alreadyUpToDate: true,
     });
     process.exitCode = undefined;
+    // Ensure config from a previous test's tmpHome doesn't leak
+    delete process.env.GITNEXUS_HOME;
+    resolveNodeLimitMock.mockReset();
+    resolveNodeLimitMock.mockImplementation((limit: number | undefined) => limit);
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim();
   });
 
@@ -92,15 +107,7 @@ describe('analyzeCommand --embeddings [limit] parsing', () => {
   });
 
   it('bare --embeddings uses configured node limit when one is saved', async () => {
-    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-embedding-node-limit-'));
-    process.env.HOME = tmpHome;
-    process.env.GITNEXUS_HOME = path.join(tmpHome, '.gitnexus');
-    await fs.mkdir(path.join(tmpHome, '.gitnexus'), { recursive: true });
-    await fs.writeFile(
-      path.join(tmpHome, '.gitnexus', 'config.json'),
-      JSON.stringify({ embeddings: { nodeLimit: 90000 } }),
-      'utf-8',
-    );
+    resolveNodeLimitMock.mockReturnValueOnce(90000);
     const { analyzeCommand } = await import('../../src/cli/analyze.js');
 
     await analyzeCommand(undefined, { embeddings: true });

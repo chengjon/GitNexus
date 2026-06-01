@@ -1248,10 +1248,16 @@ describe('LocalBackend.resolveRepo', () => {
     (getGitRoot as any).mockReturnValue(entries[7].path);
     await backend.init();
 
-    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Repository "missing-project" not found/);
-    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Nearest by cwd: project-7/);
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(
+      /Repository "missing-project" not found/,
+    );
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(
+      /Nearest by cwd: project-7/,
+    );
     await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/showing 8 of 12/);
-    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(/Run: gitnexus list --all/);
+    await expect(backend.resolveRepo('missing-project')).rejects.toThrow(
+      /Run: gitnexus list --all/,
+    );
   });
 
   it('resolves repo case-insensitively', async () => {
@@ -1452,11 +1458,13 @@ describe('LocalBackend.listRepos', () => {
     backend = new LocalBackend();
   });
 
-  it('returns empty array when no repos', async () => {
+  it('returns empty repos with next_steps when no repos', async () => {
     setupNoRepos();
     await backend.init();
-    const repos = await backend.callTool('list_repos', {});
-    expect(repos).toEqual([]);
+    const result = await backend.callTool('list_repos', {});
+    expect(result.repos).toEqual([]);
+    expect(result.next_steps).toBeDefined();
+    expect(result.next_steps.length).toBeGreaterThan(0);
   });
 
   it('returns repo metadata', async () => {
@@ -1545,12 +1553,13 @@ describe('cypher result formatting', () => {
     expect(result.row_count).toBe(2);
   });
 
-  it('returns empty array as-is', async () => {
+  it('returns markdown placeholder for empty result', async () => {
     (executeParameterized as any).mockResolvedValue([]);
     const result = await backend.callTool('cypher', {
       query: 'MATCH (n:Function) RETURN n.name LIMIT 0',
     });
-    expect(result).toEqual([]);
+    expect(result).toHaveProperty('markdown');
+    expect(result.row_count).toBe(0);
   });
 
   it('returns error object when cypher fails', async () => {
