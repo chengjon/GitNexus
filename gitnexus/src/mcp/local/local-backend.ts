@@ -580,10 +580,7 @@ export class LocalBackend {
    * On a miss, re-reads the registry once in case a new repo was indexed
    * while the MCP server was running.
    */
-  async resolveRepo(
-    repoParam?: string,
-    options: RepoResolutionOptions = {},
-  ): Promise<RepoHandle> {
+  async resolveRepo(repoParam?: string, options: RepoResolutionOptions = {}): Promise<RepoHandle> {
     let refreshedAfterAmbiguity = false;
     let result: RepoHandle | null;
     try {
@@ -771,7 +768,10 @@ export class LocalBackend {
     return this.pickRepoHandleForGitRoot(candidates, getGitRoot(process.cwd()));
   }
 
-  private pickRepoHandleForGitRoot(candidates: RepoHandle[], cwdRoot: string | null): RepoHandle | null {
+  private pickRepoHandleForGitRoot(
+    candidates: RepoHandle[],
+    cwdRoot: string | null,
+  ): RepoHandle | null {
     if (!cwdRoot) return null;
     const exactMatches = candidates.filter((handle) => sameCanonicalPath(handle.repoPath, cwdRoot));
     if (exactMatches.length === 1) return exactMatches[0];
@@ -1660,6 +1660,11 @@ export class LocalBackend {
    * Falls back to raw result if rows aren't tabular objects.
    */
   private formatCypherAsMarkdown(result: any): any {
+    // Pass through error objects from cypher() (write-block, not-ready, etc.)
+    if (result && typeof result === 'object' && !Array.isArray(result) && result.error) {
+      return result;
+    }
+
     if (!Array.isArray(result) || result.length === 0) {
       return {
         markdown: '_No results._',
@@ -2578,17 +2583,18 @@ export class LocalBackend {
         diffArgs = ['diff', 'HEAD', '-U0'];
         break;
       case 'compare':
-        if (!params.base_ref) return {
-        error: 'base_ref is required for "compare" scope',
-        recovery: {
-          hint: 'Provide a branch name, tag, or commit hash to compare against.',
-          steps: [
-            'Use base_ref: "main" to compare against the main branch',
-            'Use base_ref: "HEAD~3" to compare against 3 commits ago',
-            'Use scope: "staged" or scope: "all" instead if comparing against HEAD is sufficient',
-          ],
-        },
-      };
+        if (!params.base_ref)
+          return {
+            error: 'base_ref is required for "compare" scope',
+            recovery: {
+              hint: 'Provide a branch name, tag, or commit hash to compare against.',
+              steps: [
+                'Use base_ref: "main" to compare against the main branch',
+                'Use base_ref: "HEAD~3" to compare against 3 commits ago',
+                'Use scope: "staged" or scope: "all" instead if comparing against HEAD is sufficient',
+              ],
+            },
+          };
         diffArgs = ['diff', params.base_ref, '-U0'];
         break;
       case 'unstaged':
@@ -3179,9 +3185,18 @@ export class LocalBackend {
       if (hasExplicitRelationTypes) return relationTypes;
       const base = [...relationTypes];
       if (isContainer) {
-        if (!base.includes('ACCESSES')) { base.push('ACCESSES'); autoExpanded.push('ACCESSES'); }
-        if (!base.includes('HAS_METHOD')) { base.push('HAS_METHOD'); autoExpanded.push('HAS_METHOD'); }
-        if (!base.includes('HAS_PROPERTY')) { base.push('HAS_PROPERTY'); autoExpanded.push('HAS_PROPERTY'); }
+        if (!base.includes('ACCESSES')) {
+          base.push('ACCESSES');
+          autoExpanded.push('ACCESSES');
+        }
+        if (!base.includes('HAS_METHOD')) {
+          base.push('HAS_METHOD');
+          autoExpanded.push('HAS_METHOD');
+        }
+        if (!base.includes('HAS_PROPERTY')) {
+          base.push('HAS_PROPERTY');
+          autoExpanded.push('HAS_PROPERTY');
+        }
       }
       return base;
     })();
@@ -4397,7 +4412,9 @@ export class LocalBackend {
         return {
           tools: [],
           total: 0,
-          message: params.tool ? `No tools matching "${params.tool}"` : 'No tool definitions found.',
+          message: params.tool
+            ? `No tools matching "${params.tool}"`
+            : 'No tool definitions found.',
           next_steps: [
             params.tool
               ? `Use tool_map without a filter to see all tools, or try a different substring.`
@@ -4486,116 +4503,116 @@ export class LocalBackend {
         };
       }
 
-    const flowMap = await this.fetchLinkedFlowsBatch(
-      repo.id,
-      routes.map((r) => r.id),
-    );
+      const flowMap = await this.fetchLinkedFlowsBatch(
+        repo.id,
+        routes.map((r) => r.id),
+      );
 
-    // Count how many routes share the same handler file (for middleware partial detection)
-    const routeCountByHandler = new Map<string, number>();
-    for (const r of routes) {
-      if (r.filePath) {
-        routeCountByHandler.set(r.filePath, (routeCountByHandler.get(r.filePath) ?? 0) + 1);
-      }
-    }
-
-    const results = routes.map((r) => {
-      // Keys already normalized by fetchRoutesWithConsumers (quotes stripped)
-      const responseKeys = r.responseKeys ?? [];
-      const errorKeys = r.errorKeys ?? [];
-      const allKnownKeys = new Set([...responseKeys, ...errorKeys]);
-
-      // Build consumer list with mismatch detection
-      const consumers = r.consumers.map((c) => ({
-        name: c.name,
-        file: c.filePath,
-        accesses: c.accessedKeys ?? [],
-        ...(c.fetchCount && c.fetchCount > 1
-          ? {
-              attributionNote: `This file fetches ${c.fetchCount} routes — accessed keys may belong to a different route.`,
-            }
-          : {}),
-      }));
-
-      // Detect mismatches: consumer accesses keys not in response shape
-      const mismatches: Array<{
-        consumer: string;
-        field: string;
-        reason: string;
-        confidence: 'high' | 'low';
-      }> = [];
-      if (allKnownKeys.size > 0) {
-        for (const c of r.consumers) {
-          if (!c.accessedKeys) continue;
-          const isMultiFetch = (c.fetchCount ?? 1) > 1;
-          for (const key of c.accessedKeys) {
-            if (!allKnownKeys.has(key)) {
-              mismatches.push({
-                consumer: c.filePath,
-                field: key,
-                reason: 'accessed but not in response shape',
-                confidence: isMultiFetch ? 'low' : 'high',
-              });
-            }
-          }
+      // Count how many routes share the same handler file (for middleware partial detection)
+      const routeCountByHandler = new Map<string, number>();
+      for (const r of routes) {
+        if (r.filePath) {
+          routeCountByHandler.set(r.filePath, (routeCountByHandler.get(r.filePath) ?? 0) + 1);
         }
       }
 
-      const flows = flowMap.get(r.id) || [];
-      const consumerCount = r.consumers.length;
+      const results = routes.map((r) => {
+        // Keys already normalized by fetchRoutesWithConsumers (quotes stripped)
+        const responseKeys = r.responseKeys ?? [];
+        const errorKeys = r.errorKeys ?? [];
+        const allKnownKeys = new Set([...responseKeys, ...errorKeys]);
 
-      // Risk level heuristic
-      let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-      if (consumerCount >= 10) {
-        riskLevel = 'HIGH';
-      } else if (consumerCount >= 4) {
-        riskLevel = 'MEDIUM';
-      } else {
-        riskLevel = 'LOW';
-      }
-      // Bump up one level if mismatches exist
-      if (mismatches.length > 0) {
-        if (riskLevel === 'LOW') riskLevel = 'MEDIUM';
-        else if (riskLevel === 'MEDIUM') riskLevel = 'HIGH';
-      }
+        // Build consumer list with mismatch detection
+        const consumers = r.consumers.map((c) => ({
+          name: c.name,
+          file: c.filePath,
+          accesses: c.accessedKeys ?? [],
+          ...(c.fetchCount && c.fetchCount > 1
+            ? {
+                attributionNote: `This file fetches ${c.fetchCount} routes — accessed keys may belong to a different route.`,
+              }
+            : {}),
+        }));
 
-      const warning =
-        consumerCount > 0
-          ? `Changing response shape will affect ${consumerCount} component${consumerCount === 1 ? '' : 's'}`
-          : undefined;
-
-      // Flag when middleware was detected but handler exports multiple HTTP methods
-      // (middleware chain may only reflect one export)
-      const middlewareArr = r.middleware || [];
-      const handlerRouteCount = r.filePath ? (routeCountByHandler.get(r.filePath) ?? 1) : 1;
-      const middlewarePartial = middlewareArr.length > 0 && handlerRouteCount > 1;
-
-      return {
-        route: r.name,
-        handler: r.filePath,
-        responseShape: {
-          success: responseKeys,
-          error: errorKeys,
-        },
-        middleware: middlewareArr,
-        ...(middlewarePartial
-          ? {
-              middlewareDetection: 'partial' as const,
-              middlewareNote:
-                'Middleware captured from first HTTP method export only — other methods in this handler may use different middleware chains.',
+        // Detect mismatches: consumer accesses keys not in response shape
+        const mismatches: Array<{
+          consumer: string;
+          field: string;
+          reason: string;
+          confidence: 'high' | 'low';
+        }> = [];
+        if (allKnownKeys.size > 0) {
+          for (const c of r.consumers) {
+            if (!c.accessedKeys) continue;
+            const isMultiFetch = (c.fetchCount ?? 1) > 1;
+            for (const key of c.accessedKeys) {
+              if (!allKnownKeys.has(key)) {
+                mismatches.push({
+                  consumer: c.filePath,
+                  field: key,
+                  reason: 'accessed but not in response shape',
+                  confidence: isMultiFetch ? 'low' : 'high',
+                });
+              }
             }
-          : {}),
-        consumers,
-        ...(mismatches.length > 0 ? { mismatches } : {}),
-        executionFlows: flows,
-        impactSummary: {
-          directConsumers: consumerCount,
-          affectedFlows: flows.length,
-          riskLevel,
-          ...(warning ? { warning } : {}),
-        },
-      };
-    });
+          }
+        }
+
+        const flows = flowMap.get(r.id) || [];
+        const consumerCount = r.consumers.length;
+
+        // Risk level heuristic
+        let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+        if (consumerCount >= 10) {
+          riskLevel = 'HIGH';
+        } else if (consumerCount >= 4) {
+          riskLevel = 'MEDIUM';
+        } else {
+          riskLevel = 'LOW';
+        }
+        // Bump up one level if mismatches exist
+        if (mismatches.length > 0) {
+          if (riskLevel === 'LOW') riskLevel = 'MEDIUM';
+          else if (riskLevel === 'MEDIUM') riskLevel = 'HIGH';
+        }
+
+        const warning =
+          consumerCount > 0
+            ? `Changing response shape will affect ${consumerCount} component${consumerCount === 1 ? '' : 's'}`
+            : undefined;
+
+        // Flag when middleware was detected but handler exports multiple HTTP methods
+        // (middleware chain may only reflect one export)
+        const middlewareArr = r.middleware || [];
+        const handlerRouteCount = r.filePath ? (routeCountByHandler.get(r.filePath) ?? 1) : 1;
+        const middlewarePartial = middlewareArr.length > 0 && handlerRouteCount > 1;
+
+        return {
+          route: r.name,
+          handler: r.filePath,
+          responseShape: {
+            success: responseKeys,
+            error: errorKeys,
+          },
+          middleware: middlewareArr,
+          ...(middlewarePartial
+            ? {
+                middlewareDetection: 'partial' as const,
+                middlewareNote:
+                  'Middleware captured from first HTTP method export only — other methods in this handler may use different middleware chains.',
+              }
+            : {}),
+          consumers,
+          ...(mismatches.length > 0 ? { mismatches } : {}),
+          executionFlows: flows,
+          impactSummary: {
+            directConsumers: consumerCount,
+            affectedFlows: flows.length,
+            riskLevel,
+            ...(warning ? { warning } : {}),
+          },
+        };
+      });
 
       // If a single route was targeted, return it directly (not wrapped in array)
       if (results.length === 1) {
