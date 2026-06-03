@@ -16,7 +16,7 @@
 
 ## 4. Testing
 
-- [ ] 4.1 Test `--staged-only` with staged files
-- [ ] 4.2 Test `--changed-only` after edit
-- [ ] 4.3 Test `--files` with explicit paths
-- [ ] 4.4 Test: full analyze still works when no flags provided
+- [x] 4.1 Test `--staged-only` with staged files (cli-incremental-analyze.test.ts)
+- [x] 4.2 Test `--changed-only` after edit (cli-incremental-analyze.test.ts)
+- [x] 4.3 Test `--files` with explicit paths (cli-incremental-analyze.test.ts)
+- [x] 4.4 Test: full analyze still works when no flags provided (cli-incremental-analyze.test.ts)

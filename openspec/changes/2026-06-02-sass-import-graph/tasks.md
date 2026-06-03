@@ -24,5 +24,5 @@
 - [x] 5.2 Test: extract @import and @forward directives
 - [x] 5.3 Test: isStyleFile detects supported extensions
 - [x] 5.4 Test: relative path resolution from source directory
-- [ ] 5.5 Test: impact on a SCSS file shows style dependents
-- [ ] 5.6 Test: context on a SCSS file shows import chain
+- [x] 5.5 Test: impact on a SCSS file shows style dependents (p0-p1-p2-mcp-response.test.ts)
+- [x] 5.6 Test: context on a SCSS file shows import chain (p0-p1-p2-mcp-response.test.ts)

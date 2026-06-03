@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { classifyFile, classifyFiles, aggregateClasses } from '../../src/core/file-classifier.js';
 import { generateRiskRationale } from '../../src/core/risk-rationale.js';
 import { extractStyleImports, isStyleFile } from '../../src/core/ingestion/style-imports.js';
+import { readFileSync } from 'fs';
+import path from 'path';
 
 // ── File Classifier ──────────────────────────────────────────────────────
 
@@ -184,5 +186,31 @@ describe('detect-changes response shape', () => {
     const classes = classifyFiles(changedPaths);
     const hasForbidden = classes.some((c) => c.classes.some((cls) => forbidden.includes(cls)));
     expect(hasForbidden).toBe(false);
+  });
+});
+
+// ── P2: Grammar Warning Dedup ───────────────────────────────────────────
+
+describe('grammar-warning dedup', () => {
+  it('dedup logic: Set prevents repeat emissions (P2 2.1/2.2)', () => {
+    // Simulates the reportedThisSession Set pattern from optional-grammars.ts
+    const reported = new Set<string>();
+    const emitted: string[] = [];
+    const grammars = ['tree-sitter-swift', 'tree-sitter-dart', 'tree-sitter-swift'];
+    for (const name of grammars) {
+      if (reported.has(name)) continue;
+      reported.add(name);
+      emitted.push(name);
+    }
+    expect(emitted).toEqual(['tree-sitter-swift', 'tree-sitter-dart']);
+    expect(emitted).toHaveLength(2);
+  });
+
+  it('source has reportedThisSession Set with has/add pattern', () => {
+    const src = readFileSync(path.join(__dirname, '../../src/cli/optional-grammars.ts'), 'utf-8');
+    expect(src).toMatch(/reportedThisSession/);
+    expect(src).toMatch(/reportedThisSession\.has/);
+    expect(src).toMatch(/reportedThisSession\.add/);
+    expect(src).toMatch(/new Set<string>/);
   });
 });

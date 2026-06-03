@@ -15,5 +15,5 @@
 - [x] 3.1 Test: SCSS-only changes classified as `style`
 - [x] 3.2 Test: mixed changes classified correctly
 - [x] 3.3 Test: unknown file types classified as `source` (default)
-- [ ] 3.4 Test: forbidden_file_classes triggers warning in MCP response
-- [ ] 3.5 Test: repo-specific overrides take precedence
+- [x] 3.4 Test: forbidden_file_classes triggers warning in MCP response (p0-p1-p2-mcp-response.test.ts)
+- [ ] 3.5 Test: repo-specific overrides take precedence (deferred — feature not yet implemented)
