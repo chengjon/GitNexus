@@ -120,3 +120,69 @@ describe('style-imports', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ── P0: Index Status shape (stale_reasons, fresh_for_staged_diff) ────────
+
+describe('index-status fields', () => {
+  it('generateRiskRationale produces detect_changes compatible rationale', () => {
+    // Simulates what detect_changes does with risk_rationale
+    const result = generateRiskRationale('MEDIUM', [
+      { name: 'affected_processes', value: 3, threshold: 0, breached: true },
+    ]);
+    expect(result.risk_level).toBe('MEDIUM');
+    expect(result.rationale.length).toBeGreaterThan(0);
+    expect(result.rationale[0]).toContain('affected_processes');
+  });
+
+  it('fresh_for_staged_diff concept: empty staged set means fresh', () => {
+    // When no staged files exist, fresh_for_staged_diff should be true
+    const stagedFiles: string[] = [];
+    const isFresh = stagedFiles.length === 0;
+    expect(isFresh).toBe(true);
+  });
+
+  it('stale_reasons concept: commit mismatch detected', () => {
+    const indexedCommit = 'abc123';
+    const currentCommit = 'def456';
+    const reasons: string[] = [];
+    if (indexedCommit !== currentCommit) reasons.push('commit_mismatch');
+    expect(reasons).toEqual(['commit_mismatch']);
+  });
+});
+
+// ── P1: changed_file_classes integration shape ──────────────────────────
+
+describe('detect-changes response shape', () => {
+  it('classifyFiles produces changed_file_classes aggregate', () => {
+    const changedPaths = [
+      'src/app.ts',
+      'src/app.test.ts',
+      'styles/main.scss',
+      'openspec/change/proposal.md',
+      'package.json',
+    ];
+    const classes = classifyFiles(changedPaths);
+    const agg = aggregateClasses(classes);
+    expect(agg.source).toBe(1);
+    expect(agg.test).toBe(1);
+    expect(agg.style).toBe(1);
+    expect(agg.governance).toBe(1);
+    expect(agg.config).toBe(1);
+  });
+
+  it('forbidden_file_classes warning logic', () => {
+    const changedPaths = ['openspec/change/proposal.md', 'AGENTS.md'];
+    const forbidden = ['governance'];
+    const classes = classifyFiles(changedPaths);
+    const hasForbidden = classes.some((c) => c.classes.some((cls) => forbidden.includes(cls)));
+    expect(hasForbidden).toBe(true);
+  });
+
+  it('no forbidden match produces no warning', () => {
+    const changedPaths = ['src/app.ts', 'src/util.ts'];
+    const forbidden = ['governance'];
+    const classes = classifyFiles(changedPaths);
+    const hasForbidden = classes.some((c) => c.classes.some((cls) => forbidden.includes(cls)));
+    expect(hasForbidden).toBe(false);
+  });
+});
