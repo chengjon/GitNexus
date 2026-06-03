@@ -1,11 +1,13 @@
 ## 1. Implementation
 
-- [ ] 1.1 Add a session-level set of reported grammar warnings
+- [x] 1.1 Add a session-level set of reported grammar warnings
 - [ ] 1.2 Check if any files in the analysis set match the grammar's file type
-      before emitting the warning
+      before emitting the warning (deferred — scope-aware suppression not implemented)
 - [ ] 1.3 If no matching files exist, suppress the warning entirely
-- [ ] 1.4 If matching files exist, show warning once per session/repo
+      (deferred — depends on 1.2)
+- [x] 1.4 If matching files exist, show warning once per session/repo
 - [ ] 1.5 Add `--verbose` flag that shows all grammar warnings regardless
+      (deferred — not required for initial implementation)
 
 ## 2. Testing
 
