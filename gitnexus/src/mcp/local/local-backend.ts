@@ -26,6 +26,7 @@ import {
   getCanonicalRepoRoot,
   getGitRoot,
   getCurrentCommit,
+  getStagedFiles,
   type FileDiff,
 } from '../../storage/git.js';
 import { realpathSync } from 'fs';
@@ -299,6 +300,8 @@ export interface IndexStatus {
   stale: boolean;
   commits_behind?: number;
   stale_hint?: string;
+  stale_reasons?: string[];
+  fresh_for_staged_diff?: boolean;
   has_embeddings: boolean;
   embedding_count?: number;
 }
@@ -308,12 +311,26 @@ function buildIndexStatus(repo: RepoHandle): IndexStatus {
   const currentCommit = indexedCommit ? getCurrentCommit(repo.repoPath) : null;
   const stale = !!indexedCommit && !!currentCommit && indexedCommit !== currentCommit;
   const embeddingCount = repo.stats?.embeddings ?? 0;
+
+  // Granular stale reasons
+  const stale_reasons: string[] = [];
+  let fresh_for_staged_diff = !stale;
+  if (stale) {
+    stale_reasons.push('current_commit_differs_from_indexed_commit');
+    // Check whether staged files are still covered by the current index.
+    // If there are no staged files, the index is usable for staged-diff analysis.
+    const stagedFiles = getStagedFiles(repo.repoPath);
+    fresh_for_staged_diff = stagedFiles.length === 0;
+  }
+
   return {
     stale,
     ...(stale && {
       commits_behind: 0, // sync check — exact count requires git rev-list; stale=true is enough signal
       stale_hint: `Index may be stale. Re-run \`gitnexus analyze\` to refresh.`,
+      stale_reasons,
     }),
+    fresh_for_staged_diff,
     has_embeddings: embeddingCount > 0,
     ...(embeddingCount > 0 && { embedding_count: embeddingCount }),
   };
@@ -327,6 +344,16 @@ function createDetectChangesMetadata(
   const currentCommit = getCurrentCommit(diffCwd) ?? getCurrentCommit(repo.repoPath) ?? null;
   const indexedCommit = repo.lastCommit || null;
   const stale = !!indexedCommit && !!currentCommit && indexedCommit !== currentCommit;
+
+  // Granular stale reasons and staged-diff freshness
+  const stale_reasons: string[] = [];
+  let fresh_for_staged_diff = !stale;
+  if (stale) {
+    stale_reasons.push('current_commit_differs_from_indexed_commit');
+    const stagedFiles = getStagedFiles(diffCwd ?? repo.repoPath);
+    fresh_for_staged_diff = stagedFiles.length === 0;
+  }
+
   return {
     ...pathMetadata,
     selected_repo: repo.name,
@@ -338,6 +365,8 @@ function createDetectChangesMetadata(
     current_commit: currentCommit,
     stale,
     stale_reason: stale ? 'current_commit_differs_from_indexed_commit' : null,
+    stale_reasons: stale_reasons.length > 0 ? stale_reasons : undefined,
+    fresh_for_staged_diff,
     stale_severity: stale ? 'warning' : 'none',
   };
 }
@@ -833,6 +862,8 @@ export class LocalBackend {
               await closeLbug(repoId);
               this.initializedRepos.delete(repoId);
               handle.indexedAt = meta.indexedAt;
+              if (meta.lastCommit) handle.lastCommit = meta.lastCommit;
+              if (meta.stats) handle.stats = meta.stats;
               await initLbug(repoId, handle.lbugPath);
               this.initializedRepos.add(repoId);
             } finally {
@@ -2566,6 +2597,7 @@ export class LocalBackend {
       base_ref?: string;
       cwd?: string;
       worktree?: string;
+      forbidden_file_classes?: string[];
     },
   ): Promise<any> {
     await this.ensureInitialized(repo.id);
@@ -2796,6 +2828,29 @@ export class LocalBackend {
             ? 'high'
             : 'critical';
 
+    // Risk rationale
+    let riskRationale: string[] = [];
+    try {
+      const { generateRiskRationale } = await import('../../core/risk-rationale.js');
+      const rr = generateRiskRationale(risk, [
+        {
+          name: 'affected_processes',
+          value: processCount,
+          threshold: 0,
+          breached: processCount > 0,
+        },
+        {
+          name: 'affected_processes_high',
+          value: processCount,
+          threshold: 5,
+          breached: processCount > 5,
+        },
+      ]);
+      riskRationale = rr.rationale;
+    } catch {
+      /* best-effort */
+    }
+
     const response: any = {
       summary: {
         changed_count: changedSymbols.length,
@@ -2803,11 +2858,39 @@ export class LocalBackend {
         changed_files: fileDiffs.length,
         risk_level: risk,
       },
+      risk_rationale: riskRationale,
       changed_symbols: changedSymbols,
       affected_processes: Array.from(affectedProcesses.values()),
       metadata: pathMetadata,
       index_status: buildIndexStatus(repo),
     };
+
+    // File classification
+    try {
+      const { classifyFiles, aggregateClasses } = await import('../../core/file-classifier.js');
+      const changedPaths = fileDiffs.map((d: FileDiff) => d.filePath);
+      const classifications = classifyFiles(changedPaths);
+      response.changed_file_classes = aggregateClasses(classifications);
+
+      // Check forbidden classes
+      if (params.forbidden_file_classes && Array.isArray(params.forbidden_file_classes)) {
+        const forbidden = new Set(params.forbidden_file_classes as string[]);
+        const violations: string[] = [];
+        for (const cls of classifications) {
+          if (cls.classes.some((c) => forbidden.has(c))) {
+            violations.push(cls.path);
+          }
+        }
+        if (violations.length > 0) {
+          response.forbidden_class_violations = violations;
+          response.forbidden_class_warning =
+            `Found changes in forbidden file classes: ${[...forbidden].join(', ')}. ` +
+            `Affected files: ${violations.join(', ')}`;
+        }
+      }
+    } catch {
+      // Classification is best-effort — don't fail the tool call
+    }
 
     if (processCount > 20) {
       response.hub_guidance = `Large blast radius: ${processCount} processes affected. Consider reviewing the highest-risk processes first, then use impact() on individual symbols for detailed dependency analysis.`;
@@ -3679,6 +3762,31 @@ export class LocalBackend {
       risk = 'MEDIUM';
     }
 
+    // Risk rationale
+    let impactRationale: string[] = [];
+    try {
+      const { generateRiskRationale } = await import('../../core/risk-rationale.js');
+      const rr = generateRiskRationale(risk, [
+        { name: 'direct_callers', value: directCount, threshold: 5, breached: directCount >= 5 },
+        {
+          name: 'affected_processes',
+          value: processCount,
+          threshold: 3,
+          breached: processCount >= 3,
+        },
+        { name: 'affected_modules', value: moduleCount, threshold: 3, breached: moduleCount >= 3 },
+        {
+          name: 'total_impacted',
+          value: impacted.length,
+          threshold: 30,
+          breached: impacted.length >= 30,
+        },
+      ]);
+      impactRationale = rr.rationale;
+    } catch {
+      /* best-effort */
+    }
+
     // Build per-depth counts (always included, even in summaryOnly mode)
     const byDepthCounts: Record<number, number> = {};
     for (const [depth, items] of Object.entries(grouped)) {
@@ -3695,6 +3803,7 @@ export class LocalBackend {
       direction,
       impactedCount: impacted.length,
       risk,
+      risk_rationale: impactRationale,
       ...(!traversalComplete && { partial: true }),
       summary: {
         direct: directCount,

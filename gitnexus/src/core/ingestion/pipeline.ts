@@ -34,6 +34,7 @@ import {
   mroPhase,
   communitiesPhase,
   processesPhase,
+  styleImportsPhase,
   type ScopeResolutionOutput,
   type PipelinePhase,
   type CommunitiesOutput,
@@ -119,6 +120,12 @@ export interface PipelineOptions {
    * without leaking `process.env` state across invocations.
    */
   chunkByteBudget?: number;
+  /**
+   * Optional filter: only these repo-relative paths should be scanned.
+   * When set, the scan phase skips files not in this set.
+   * Used by --staged-only, --changed-only, and --files CLI flags.
+   */
+  fileFilter?: ReadonlySet<string>;
 }
 
 // ── Phase registry ─────────────────────────────────────────────────────────
@@ -146,6 +153,7 @@ function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
     ormPhase,
     crossFilePhase,
     scopeResolutionPhase,
+    styleImportsPhase,
   ];
 
   if (!options?.skipGraphPhases) {

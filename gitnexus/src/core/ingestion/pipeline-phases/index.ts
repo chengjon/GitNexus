@@ -23,6 +23,7 @@ export {
 export { mroPhase, type MROOutput } from './mro.js';
 export { communitiesPhase, type CommunitiesOutput } from './communities.js';
 export { processesPhase, type ProcessesOutput } from './processes.js';
+export { styleImportsPhase, type StyleImportsOutput } from './style-imports.js';
 
 // ── Infrastructure ─────────────────────────────────────────────────────────
 

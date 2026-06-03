@@ -126,6 +126,12 @@ export interface AnalyzeOptions {
    * the count; `undefined` defers to the env / auto-formula fallback.
    */
   workerPoolSize?: number;
+  /** Only scan and index files staged in the git index. */
+  stagedOnly?: boolean;
+  /** Only scan and index files changed vs HEAD. */
+  changedOnly?: boolean;
+  /** Explicit list of repo-relative file paths to analyze. */
+  files?: string[];
 }
 
 export interface AnalyzeResult {
@@ -479,6 +485,44 @@ export async function runFullAnalysis(
   // in-place (cache hits leave entries unchanged; misses add new ones).
   const parseCache = await loadParseCache(storagePath);
 
+  // ── Resolve file filter for scoped analysis modes ─────────────────
+  let fileFilter: Set<string> | undefined;
+  try {
+    if (options.stagedOnly) {
+      const out = execFileSync('git', ['diff', '--cached', '--name-only'], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      fileFilter = new Set(
+        out
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((p) => p.replace(/\\/g, '/')),
+      );
+    } else if (options.changedOnly) {
+      const out = execFileSync('git', ['diff', '--name-only', 'HEAD'], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      fileFilter = new Set(
+        out
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((p) => p.replace(/\\/g, '/')),
+      );
+    } else if (options.files && options.files.length > 0) {
+      fileFilter = new Set(options.files.map((p) => p.replace(/\\/g, '/')));
+    }
+  } catch {
+    /* non-git repo or no changes — no filter */
+  }
+
   // ── Phase 1: Full Pipeline (0–60%) ────────────────────────────────
   const pipelineResult = await runPipelineFromRepo(
     repoPath,
@@ -490,7 +534,7 @@ export async function runFullAnalysis(
         : p.message || phaseLabel;
       progress(p.phase, scaled, message);
     },
-    { parseCache, workerPoolSize: options.workerPoolSize },
+    { parseCache, workerPoolSize: options.workerPoolSize, fileFilter },
   );
 
   // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────

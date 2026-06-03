@@ -29,6 +29,9 @@ interface OptionalGrammar {
   extensions: string[];
 }
 
+/** Tracks grammars already warned this session to avoid repeat output. */
+const reportedThisSession = new Set<string>();
+
 const OPTIONAL_GRAMMARS: OptionalGrammar[] = [
   { name: 'tree-sitter-dart', pkg: 'tree-sitter-dart', extensions: ['.dart'] },
   { name: 'tree-sitter-proto', pkg: 'tree-sitter-proto', extensions: ['.proto'] },
@@ -110,6 +113,8 @@ export function warnMissingOptionalGrammars(opts?: {
     if (relevantExtensions && !g.extensions.some((e) => relevantExtensions.has(e))) {
       continue;
     }
+    if (reportedThisSession.has(g.name)) continue;
+    reportedThisSession.add(g.name);
     cliWarn(
       `GitNexus${ctx}: optional grammar "${g.name}" is unavailable — ${g.extensions.join('/')} files will not be parsed. Reinstall without GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1 (and ensure python3, make, g++) to enable.`,
       { grammar: g.name, extensions: g.extensions, context: opts?.context },
