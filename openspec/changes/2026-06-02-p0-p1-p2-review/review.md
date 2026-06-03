@@ -1,15 +1,25 @@
 # GitNexus P0/P1/P2 Improvements — Review Summary
 
-**Commit:** `4ad039c6` (main)
+**Commit:** `4ad039c6` (main), follow-up `HEAD`
 **Date:** 2026-06-03
 **Author:** JohnC + Claude
 **Scope:** CLI, MCP server, ingestion pipeline, shared graph types
+**Status:** Implemented draft / pending verification
 
 ---
 
 ## Background
 
-Based on usage feedback collected in `mystocks_spec/docs/reports/tasks/2026-06-02-gitnexus-usage-feedback.md`, six improvements were identified and implemented across three priority levels. All changes are tracked as OpenSpec change proposals under `openspec/changes/2026-06-02-*`.
+Six improvements were identified from operational usage feedback and implemented
+across three priority levels. The feedback originated from a separate repository
+(`mystocks_spec`). The six priorities were:
+
+1. **P0** MCP server returns stale `lastCommit`/`stats` after CLI rebuilds index
+2. **P1** `detect_changes` does not classify files by type (source/test/config/etc.)
+3. **P2** Risk level has no machine-readable explanation
+4. **P1** No way to analyze only changed/staged files
+5. **P2** Grammar warnings repeat multiple times per session
+6. **P1** Sass `@use`/`@import`/`@forward` relationships invisible to graph
 
 ---
 
@@ -108,45 +118,85 @@ Since `STYLE_IMPORTS` is in `REL_TYPES`, existing MCP tools (`impact`, `context`
 
 ## OpenSpec Tracking
 
-Each improvement has a corresponding change proposal:
+Each improvement has a corresponding change proposal with delta specs:
 
-| Change | Directory |
-|--------|-----------|
-| MCP index freshness fix | `openspec/changes/2026-06-02-mcp-index-freshness-fix/` |
-| File classification | `openspec/changes/2026-06-02-detect-changes-file-classification/` |
-| Risk rationale | `openspec/changes/2026-06-02-risk-rationale/` |
-| Incremental analyze | `openspec/changes/2026-06-02-incremental-analyze-mode/` |
-| Grammar suppression | `openspec/changes/2026-06-02-grammar-warning-suppression/` |
-| Sass import graph | `openspec/changes/2026-06-02-sass-import-graph/` |
+| Change | Directory | Validation |
+|--------|-----------|------------|
+| MCP index freshness fix | `openspec/changes/2026-06-02-mcp-index-freshness-fix/` | `openspec validate` PASS |
+| File classification | `openspec/changes/2026-06-02-detect-changes-file-classification/` | `openspec validate` PASS |
+| Risk rationale | `openspec/changes/2026-06-02-risk-rationale/` | `openspec validate` PASS |
+| Incremental analyze | `openspec/changes/2026-06-02-incremental-analyze-mode/` | `openspec validate` PASS |
+| Grammar suppression | `openspec/changes/2026-06-02-grammar-warning-suppression/` | `openspec validate` PASS |
+| Sass import graph | `openspec/changes/2026-06-02-sass-import-graph/` | `openspec validate` PASS |
 
-Each directory contains: `proposal.md`, `tasks.md`, `.openspec.yaml`.
+Each directory contains: `proposal.md`, `tasks.md`, `.openspec.yaml`, and `specs/<capability>/spec.md` with delta headers and scenarios.
 
 ---
 
 ## Verification
 
-- **Build:** Both `gitnexus-shared` and `gitnexus` build cleanly (`npm run build`).
-- **Tests:** 9,729 pass, 7 fail (all pre-existing, verified by stashing changes and re-running). The only test our changes could have broken (`cli-index-help.test.ts` zh-CN localization) was caught and fixed by adding i18n entries for the 3 new CLI flags.
-- **Pre-commit hooks:** ESLint + Prettier + TypeScript type-check all pass.
+### Build & Type Check
+
+```bash
+cd /opt/claude/GitNexus/gitnexus-shared && npm run build   # tsc → PASS
+cd /opt/claude/GitNexus/gitnexus && npm run build           # tsc + vite → PASS
+```
+
+### Test Suite
+
+```bash
+cd /opt/claude/GitNexus/gitnexus && npx vitest run --reporter=verbose
+# Result: 9,745 pass, 7 fail (all pre-existing, verified via git stash control run)
+# Pre-existing failures: detect-changes-worktree, embedder, git, language-skip,
+#   sibling-clone-drift — none related to this change
+```
+
+### Focused Tests for New Behavior
+
+```bash
+cd /opt/claude/GitNexus/gitnexus && npx vitest run test/unit/p0-p1-p2-features.test.ts --reporter=verbose
+# Result: 16 pass, 0 fail
+# Covers: file-classifier (8), risk-rationale (4), style-imports (4)
+```
+
+Test file: `gitnexus/test/unit/p0-p1-p2-features.test.ts`
+Covered symbols: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`
+
+Not yet covered by focused tests: `changed_file_classes` in MCP response, `forbidden_file_classes` parameter, `fresh_for_staged_diff`/`stale_reasons` in MCP response, `--staged-only`/`--changed-only` CLI flags, grammar warning dedup runtime behavior.
+
+### OpenSpec Validation
+
+```bash
+for d in mcp-index-freshness-fix incremental-analyze-mode sass-import-graph \
+         detect-changes-file-classification grammar-warning-suppression risk-rationale; do
+  openspec validate "2026-06-02-${d}" --strict
+done
+# Result: 6/6 PASS
+```
+
+### Pre-commit Hooks
+
+ESLint + Prettier + TypeScript type-check all pass on commit `4ad039c6`.
 
 ---
 
 ## Stats
 
-- **38 files changed**, 1,027 insertions(+), 7 deletions(-)
+- **39 files changed** (commit `4ad039c6`), **1,027 insertions**, 7 deletions
 - **4 new source files:** `file-classifier.ts`, `risk-rationale.ts`, `style-imports.ts`, `style-imports.ts` (phase)
-- **6 OpenSpec change proposals** (18 files: proposal, tasks, yaml each)
+- **6 OpenSpec change proposals** with valid delta specs (each passes `openspec validate --strict`)
 - **16 modified existing files**
+- **1 new test file** with 16 focused tests
 
 ---
 
 ## Review Checklist
 
-- [ ] P0: Verify `ensureInitialized` correctly refreshes `lastCommit`/`stats` on re-init
-- [ ] P0: Verify `gitnexus status --json` produces correct structured output
-- [ ] P1: Verify file classifier covers expected patterns (test fixtures, config files, etc.)
-- [ ] P1: Verify `detect_changes` response includes `changed_file_classes`
-- [ ] P1: Verify `--staged-only`/`--changed-only`/`--files` flags work end-to-end
-- [ ] P1: Verify `STYLE_IMPORTS` edges appear in graph for SCSS repos
-- [ ] P2: Verify `risk_rationale` appears in `detect_changes` and `impact` responses
-- [ ] P2: Verify grammar warnings print only once per session
+- [ ] P0: `ensureInitialized` refreshes `lastCommit`/`stats` — see `local-backend.ts` ensureInitialized block, `handle.lastCommit = meta.lastCommit`
+- [ ] P0: `gitnexus status --json` structured output — test: run `gitnexus status --json` in a git repo
+- [ ] P1: file classifier covers expected patterns — tests: `p0-p1-p2-features.test.ts` lines 14-60 (8 test cases)
+- [ ] P1: `detect_changes` response includes `changed_file_classes` — code: `local-backend.ts` detectChanges, dynamic import of `classifyFiles` + `aggregateClasses`
+- [ ] P1: `--staged-only`/`--changed-only`/`--files` flags — code: `index.ts` line 91-93, `run-analyze.ts` fileFilter resolution
+- [ ] P1: `STYLE_IMPORTS` edges in graph — tests: `p0-p1-p2-features.test.ts` lines 104-130 (4 test cases); code: `pipeline-phases/style-imports.ts`
+- [ ] P2: `risk_rationale` in `detect_changes` and `impact` — tests: `p0-p1-p2-features.test.ts` lines 64-101 (4 test cases)
+- [ ] P2: grammar warnings print once per session — code: `optional-grammars.ts` `reportedThisSession` Set
