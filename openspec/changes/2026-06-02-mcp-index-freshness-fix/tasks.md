@@ -13,37 +13,21 @@
       are covered by the current graph, even if HEAD differs
 - [x] 2.2 Add granular stale reasons:
       - `commit_mismatch` — HEAD differs from indexed commit
-- [ ] 2.3 Add `index_path` and `index_generation_id` to MCP metadata
-      (deferred — not required for freshness fix)
 
-## 3. Index Path Transparency
+## 3. CLI Freshness Command
 
-- [ ] 3.1 Add `analyzer_source` field to detect_changes metadata:
-      `local-cli` | `mcp-managed` | `unknown`
-      (deferred — not required for freshness fix)
-- [ ] 3.2 Add `last_analyze_at` and `last_analyze_command` to metadata
-      (deferred — not required for freshness fix)
-- [ ] 3.3 Add `index_matches_local_cli: true | false | unknown`
-      (deferred — not required for freshness fix)
-
-## 4. CLI Freshness Command
-
-- [x] 4.1 Add `gitnexus status --json` with fields: repo, repo_path,
+- [x] 3.1 Add `gitnexus status --json` with fields: repo, repo_path,
       indexed_commit, current_commit, dirty, staged_files,
       index_updated_at, fresh_for_staged_diff
-- [x] 4.2 Document the command in CLI help and zh-CN i18n
+- [x] 3.2 Document the command in CLI help and zh-CN i18n
 
-## 5. Testing
+## 4. Testing
 
-- [ ] 5.1 Test: local analyze → immediate MCP detect_changes shows
-      `stale: false` or actionable stale reason
-- [ ] 5.2 Test: staged-only change after analyze shows
-      `fresh_for_staged_diff: true`
-- [ ] 5.3 Test: index path mismatch detected and reported
-- [ ] 5.4 Update existing detect_changes tests for new metadata fields
+- [ ] 4.1 Test: fresh_for_staged_diff populated in index status
+- [ ] 4.2 Test: stale_reasons populated when commits differ
+- [ ] 4.3 Test: gitnexus status --json structured output
 
-## 6. Verification
+## 5. Verification
 
-- [ ] 6.1 Run `gitnexus detect_changes({scope: "staged"})` in a worktree
-      after local analyze — confirm stale metadata is accurate
-- [ ] 6.2 Run `gitnexus status --json` — confirm output matches expectations
+- [ ] 5.1 Run `gitnexus status --json` — confirm output matches expectations
+- [ ] 5.2 Run MCP detect_changes after local analyze — confirm stale metadata

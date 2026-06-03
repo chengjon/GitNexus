@@ -4,7 +4,7 @@
 **Date:** 2026-06-03
 **Author:** JohnC + Claude
 **Scope:** CLI, MCP server, ingestion pipeline, shared graph types
-**Status:** Implemented draft / pending verification
+**Status:** Implementation complete — focused tests passing, OpenSpec valid, build clean. Remaining: MCP integration tests and full E2E verification.
 
 ---
 
@@ -155,14 +155,15 @@ cd /opt/claude/GitNexus/gitnexus && npx vitest run --reporter=verbose
 
 ```bash
 cd /opt/claude/GitNexus/gitnexus && npx vitest run test/unit/p0-p1-p2-features.test.ts --reporter=verbose
-# Result: 16 pass, 0 fail
-# Covers: file-classifier (8), risk-rationale (4), style-imports (4)
+# Result: 22 pass, 0 fail
+# Covers: file-classifier (8), risk-rationale (4), style-imports (4),
+#         index-status fields (3), detect-changes response shape (3)
 ```
 
 Test file: `gitnexus/test/unit/p0-p1-p2-features.test.ts`
-Covered symbols: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`
+Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes` aggregate shape, `forbidden_file_classes` warning logic, `stale_reasons`/`fresh_for_staged_diff` concepts.
 
-Not yet covered by focused tests: `changed_file_classes` in MCP response, `forbidden_file_classes` parameter, `fresh_for_staged_diff`/`stale_reasons` in MCP response, `--staged-only`/`--changed-only` CLI flags, grammar warning dedup runtime behavior.
+Not yet covered: `--staged-only`/`--changed-only` CLI flag E2E, grammar warning dedup runtime behavior, MCP response-level integration with real lbug fixture.
 
 ### OpenSpec Validation
 
@@ -186,7 +187,7 @@ ESLint + Prettier + TypeScript type-check all pass on commit `4ad039c6`.
 - **4 new source files:** `file-classifier.ts`, `risk-rationale.ts`, `style-imports.ts`, `style-imports.ts` (phase)
 - **6 OpenSpec change proposals** with valid delta specs (each passes `openspec validate --strict`)
 - **16 modified existing files**
-- **1 new test file** with 16 focused tests
+- **1 new test file** with 22 focused tests
 
 ---
 

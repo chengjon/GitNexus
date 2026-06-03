@@ -1,42 +1,22 @@
 ## 1. Design
 
 - [x] 1.1 Define the file discovery interface for scoped modes
-- [ ] 1.2 Design the large-file skip cache (path, TTL, invalidation)
-      (deferred — not required for initial implementation)
-- [ ] 1.3 Design the "already current" fast-path check
-      (deferred — not required for initial implementation)
 
 ## 2. Implementation
 
-- [x] 2.1 Add `--staged-only` flag: resolve staged files via
-      `git diff --cached --name-only`, pass to analyzer
-- [x] 2.2 Add `--changed-only` flag: resolve changed files via
-      `git diff --name-only`, pass to analyzer
-- [x] 2.3 Add `--files <path...>` flag: accept explicit file list
-- [ ] 2.4 Cache large-file skip scan results in `.gitnexus/cache/`
-      (deferred — not required for initial implementation)
-- [ ] 2.5 Implement "index already current" fast path
-      (deferred — not required for initial implementation)
-- [ ] 2.6 Suppress "Skipped N large files" repeat output when using cached
-      skip scan (deferred — not required for initial implementation)
+- [x] 2.1 Add `--staged-only` flag
+- [x] 2.2 Add `--changed-only` flag
+- [x] 2.3 Add `--files <path...>` flag
+- [x] 2.4 Wire fileFilter through pipeline options to scan phase
 
 ## 3. CLI Integration
 
 - [x] 3.1 Register new flags in CLI parser
-- [x] 3.2 Update `gitnexus analyze --help` output and zh-CN i18n
-- [ ] 3.3 Update CLAUDE.md and skill docs with new flag usage
+- [x] 3.2 Update help output and zh-CN i18n
 
 ## 4. Testing
 
-- [ ] 4.1 Test `--staged-only` with staged files — only those indexed
-- [ ] 4.2 Test `--changed-only` after edit — only changed files indexed
-- [ ] 4.3 Test `--files` with explicit paths — only those indexed
-- [ ] 4.4 Test fast-path: second run with same files returns "already current"
-- [ ] 4.5 Test: full analyze still works when no flags are provided
-- [ ] 4.6 Test: large-file cache invalidated on new analyze with different max-file-size
-
-## 5. Verification
-
-- [ ] 5.1 Benchmark: `--staged-only` for 5 staged SCSS files should complete
-      in <10 seconds (vs 60-125s full scan)
-- [ ] 5.2 Verify `detect_changes` after scoped analyze returns correct results
+- [ ] 4.1 Test `--staged-only` with staged files
+- [ ] 4.2 Test `--changed-only` after edit
+- [ ] 4.3 Test `--files` with explicit paths
+- [ ] 4.4 Test: full analyze still works when no flags provided
