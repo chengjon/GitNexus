@@ -16,5 +16,5 @@
 - [x] 3.2 Test: HIGH risk returns rationale identifying breached signals
 - [x] 3.3 Test: empty signals returns appropriate rationale
 - [x] 3.4 Test: rationale strings are machine-readable
-- [ ] 3.5 Test: risk_rationale appears in detect_changes MCP response
-- [ ] 3.6 Test: risk_rationale appears in impact MCP response
+- [x] 3.5 Test: risk_rationale appears in detect_changes MCP response (p0-p1-p2-mcp-response.test.ts)
+- [x] 3.6 Test: risk_rationale appears in impact MCP response (p0-p1-p2-mcp-response.test.ts)

@@ -193,11 +193,11 @@ ESLint + Prettier + TypeScript type-check all pass on commit `4ad039c6`.
 
 ## Review Checklist
 
-- [ ] P0: `ensureInitialized` refreshes `lastCommit`/`stats` — see `local-backend.ts` ensureInitialized block, `handle.lastCommit = meta.lastCommit`
-- [ ] P0: `gitnexus status --json` structured output — test: run `gitnexus status --json` in a git repo
-- [ ] P1: file classifier covers expected patterns — tests: `p0-p1-p2-features.test.ts` lines 14-60 (8 test cases)
-- [ ] P1: `detect_changes` response includes `changed_file_classes` — code: `local-backend.ts` detectChanges, dynamic import of `classifyFiles` + `aggregateClasses`
-- [ ] P1: `--staged-only`/`--changed-only`/`--files` flags — code: `index.ts` line 91-93, `run-analyze.ts` fileFilter resolution
-- [ ] P1: `STYLE_IMPORTS` edges in graph — tests: `p0-p1-p2-features.test.ts` lines 104-130 (4 test cases); code: `pipeline-phases/style-imports.ts`
-- [ ] P2: `risk_rationale` in `detect_changes` and `impact` — tests: `p0-p1-p2-features.test.ts` lines 64-101 (4 test cases)
-- [ ] P2: grammar warnings print once per session — code: `optional-grammars.ts` `reportedThisSession` Set
+- [x] P0: `ensureInitialized` refreshes `lastCommit`/`stats` — code path verified in `local-backend.ts`
+- [ ] P0: `gitnexus status --json` structured output — CLI E2E follow-up
+- [x] P1: file classifier covers expected patterns — focused tests in `p0-p1-p2-features.test.ts`
+- [x] P1: `detect_changes` response shape can include `changed_file_classes` — focused response-shape tests added
+- [ ] P1: `--staged-only`/`--changed-only`/`--files` flags — CLI E2E follow-up
+- [ ] P1: `STYLE_IMPORTS` edges appear through `impact`/`context` — MCP integration follow-up
+- [x] P2: `risk_rationale` generation and response-shape compatibility — focused tests in `p0-p1-p2-features.test.ts`
+- [ ] P2: grammar warnings print once per session — runtime subprocess follow-up

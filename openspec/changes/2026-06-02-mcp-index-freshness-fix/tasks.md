@@ -23,11 +23,11 @@
 
 ## 4. Testing
 
-- [ ] 4.1 Test: fresh_for_staged_diff populated in index status
-- [ ] 4.2 Test: stale_reasons populated when commits differ
-- [ ] 4.3 Test: gitnexus status --json structured output
+- [x] 4.1 Test: fresh_for_staged_diff populated in index status (MCP integration test: p0-p1-p2-mcp-response.test.ts)
+- [x] 4.2 Test: stale_reasons populated when commits differ (MCP integration test: p0-p1-p2-mcp-response.test.ts)
+- [x] 4.3 Test: gitnexus status --json structured output (CLI E2E test: cli-incremental-analyze.test.ts)
 
 ## 5. Verification
 
-- [ ] 5.1 Run `gitnexus status --json` — confirm output matches expectations
-- [ ] 5.2 Run MCP detect_changes after local analyze — confirm stale metadata
+- [x] 5.1 Run `gitnexus status --json` — confirmed via CLI E2E test
+- [ ] 5.2 Run MCP detect_changes after local analyze — requires live MCP server session
