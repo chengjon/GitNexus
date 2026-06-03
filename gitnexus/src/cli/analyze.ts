@@ -590,6 +590,12 @@ export interface AnalyzeOptions {
   embeddingBatchSize?: string;
   embeddingSubBatchSize?: string;
   embeddingDevice?: string;
+  /** Only scan and index files staged in the git index. */
+  stagedOnly?: boolean;
+  /** Only scan and index files changed vs HEAD. */
+  changedOnly?: boolean;
+  /** Explicit list of repo-relative file paths to analyze. */
+  files?: string[];
 }
 
 /**
@@ -971,6 +977,10 @@ const analyzeCommandImpl = async (inputPath?: string, options?: AnalyzeOptions):
         // GITNEXUS_WORKER_POOL_SIZE env mutation. `undefined` defers to the
         // env / auto-formula fallback inside the pipeline.
         workerPoolSize,
+        // Scoped file analysis modes
+        stagedOnly: options?.stagedOnly,
+        changedOnly: options?.changedOnly,
+        files: options?.files,
       },
       {
         onProgress: (_phase, percent, message) => {

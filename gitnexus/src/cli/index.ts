@@ -88,6 +88,9 @@ program
   .option('--embedding-batch-size <n>', 'Number of nodes per embedding batch')
   .option('--embedding-sub-batch-size <n>', 'Number of chunks per embedding model call')
   .option('--embedding-device <device>', 'Embedding device: auto, cpu, dml, cuda, or wasm')
+  .option('--staged-only', 'Only analyze files staged in git index')
+  .option('--changed-only', 'Only analyze files changed vs HEAD')
+  .option('--files <path...>', 'Only analyze specific file paths (repo-relative)')
   .addHelpText('after', () => t('help.analyze.environment'))
   .action(createLbugLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
 
@@ -160,6 +163,7 @@ program
 program
   .command('status')
   .description('Show index status for current repo')
+  .option('--json', 'Output status as structured JSON')
   .action(createLazyAction(() => import('./status.js'), 'statusCommand'));
 
 program

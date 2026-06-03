@@ -202,6 +202,42 @@ export const getCurrentCommit = (repoPath: string): string => {
 };
 
 /**
+ * Get the list of staged file paths (from `git diff --cached --name-only`).
+ * Returns an empty array if the cwd is not a git repo or git fails.
+ */
+export const getStagedFiles = (cwd: string): string[] => {
+  try {
+    const out = execSync('git diff --cached --name-only', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    return out.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Get the list of files changed vs HEAD (from `git diff --name-only HEAD`).
+ * Returns an empty array if the cwd is not a git repo or git fails.
+ */
+export const getChangedFiles = (cwd: string): string[] => {
+  try {
+    const out = execSync('git diff --name-only HEAD', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    return out.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+/**
  * Get a stable canonical identifier for the repo's `origin` remote, if any.
  *
  * Used to fingerprint two on-disk clones as the same logical repository

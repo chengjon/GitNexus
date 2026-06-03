@@ -45,8 +45,15 @@ export const scanPhase: PipelinePhase<ScanOutput> = {
       });
     });
 
-    const totalFiles = scannedFiles.length;
-    const allPaths = scannedFiles.map((f) => f.path);
+    // Apply file filter for --staged-only / --changed-only / --files modes
+    const fileFilter = (ctx.options as any)?.fileFilter as ReadonlySet<string> | undefined;
+    const filteredFiles =
+      fileFilter && fileFilter.size > 0
+        ? scannedFiles.filter((f) => fileFilter.has(f.path))
+        : scannedFiles;
+
+    const totalFiles = filteredFiles.length;
+    const allPaths = filteredFiles.map((f) => f.path);
 
     ctx.onProgress({
       phase: 'extracting',
@@ -55,6 +62,6 @@ export const scanPhase: PipelinePhase<ScanOutput> = {
       stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: ctx.graph.nodeCount },
     });
 
-    return { scannedFiles, allPaths, totalFiles };
+    return { scannedFiles: filteredFiles, allPaths, totalFiles };
   },
 };

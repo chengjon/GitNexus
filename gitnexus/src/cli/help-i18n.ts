@@ -170,6 +170,9 @@ const OPTION_DESCRIPTION_KEYS = {
   'group contracts|--repo <repo>': 'help.option.group.contracts.repo',
   'group contracts|--unmatched': 'help.option.group.contracts.unmatched',
   'group contracts|--json': 'help.option.json',
+  'analyze|--staged-only': 'help.option.analyze.stagedOnly',
+  'analyze|--changed-only': 'help.option.analyze.changedOnly',
+  'status|--json': 'help.option.status.json',
 } satisfies Record<string, CliMessageKey>;
 
 function localizeTitle(title: string): string {

@@ -298,6 +298,13 @@ Returns: changed symbols, affected processes, and a risk summary.`,
           type: 'string',
           description: 'Repository name or path. Omit if only one repo is indexed.',
         },
+        forbidden_file_classes: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'File classes that should not appear in the change set (e.g., ["router", "api_contract"]). ' +
+            'Returns a warning if any changed file matches. Available classes: source, test, config, build, style, documentation, governance, data, generated, script, asset, unknown.',
+        },
       },
       required: [],
     },
