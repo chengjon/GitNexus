@@ -1,7 +1,7 @@
-<!-- version: 1.2.0 -->
+<!-- version: 1.2.1 -->
 <!-- local structured header adapted from upstream template -->
 
-Last reviewed: 2026-04-15
+Last reviewed: 2026-06-05
 
 ## Repository Development Rules
 
@@ -129,6 +129,7 @@ Every non-trivial workline MUST also state a one-line `Line Scope` contract befo
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-06-05 | 1.2.1 | Documented the verified local `gitnexus analyze --embeddings` environment contract for writable `GITNEXUS_HOME`, Ollama provider settings, and 1024-dimensional embeddings. |
 | 2026-04-15 | 1.2.0 | Added line-scope contracts, workline separation, functional completion closure rules, source-of-truth alignment, and cross-domain ownership boundaries for day-to-day development. |
 | 2026-04-15 | 1.1.0 | Added delivery-priority rules that keep feature/test/release work ahead of historical-doc convergence, while retaining the existing low-intensity docs governance workflow. |
 | 2026-04-06 | 1.0.0 | Added a local structured header adapted from upstream, but rewritten to point only at real local sources. |
@@ -272,18 +273,27 @@ GITNEXUS_HF_LOCAL_ONLY=1
 GITNEXUS_EMBEDDING_PROVIDER=ollama
 GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434
 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b
+# qwen3-embedding:0.6b returns 1024-dimensional vectors; keep this explicit
+# so the CLI does not fall back to the 384d local-transformers default.
+GITNEXUS_EMBEDDING_DIMS=1024
 ```
 
 Recommended Ollama example:
 
 ```bash
+GITNEXUS_HOME=/tmp/gitnexus-analyze-home \
 GITNEXUS_EMBEDDING_PROVIDER=ollama \
 GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_DIMS=1024 \
 GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
 GITNEXUS_EMBEDDING_BATCH_SIZE=64 \
 gitnexus analyze --embeddings
 ```
+
+Use a writable `GITNEXUS_HOME` when the default home directory is read-only.
+In restricted agent sandboxes, `/root/.gitnexus/registry.json` may be read-only
+even though the repository-local `.gitnexus/` index is writable.
 
 Use `--force` only for intentional full rebuilds or corrupted indexes.
 
@@ -295,6 +305,7 @@ The same settings can also be stored in `~/.gitnexus/config.json`:
     "provider": "ollama",
     "ollamaBaseUrl": "http://localhost:11434",
     "ollamaModel": "qwen3-embedding:0.6b",
+    "embeddingDims": 1024,
     "nodeLimit": 90000,
     "batchSize": 64
   }
