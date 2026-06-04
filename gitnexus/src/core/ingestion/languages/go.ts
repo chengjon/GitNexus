@@ -5,7 +5,6 @@
  * LanguageProvider, following the Strategy pattern used by the pipeline.
  *
  * Key Go traits:
- *   - importSemantics: 'wildcard-leaf' (Go imports entire packages)
  *   - callRouter: present (Go method calls may need routing)
  */
 
@@ -27,8 +26,6 @@ import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { goVariableConfig } from '../variable-extractors/configs/go.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { goCallConfig } from '../call-extractors/configs/go.js';
-import { createHeritageExtractor } from '../heritage-extractors/generic.js';
-import { goHeritageConfig } from '../heritage-extractors/configs/go.js';
 import {
   emitGoScopeCaptures,
   goArityCompatibility,
@@ -38,6 +35,56 @@ import {
   interpretGoImport,
   interpretGoTypeBinding,
 } from './go/index.js';
+
+const GO_BUILT_INS: ReadonlySet<string> = new Set([
+  // built-in functions
+  'make',
+  'new',
+  'len',
+  'cap',
+  'append',
+  'copy',
+  'delete',
+  'close',
+  'panic',
+  'recover',
+  'print',
+  'println',
+  'complex',
+  'real',
+  'imag',
+  'clear',
+  'min',
+  'max',
+  // built-in types
+  'error',
+  'bool',
+  'string',
+  'int',
+  'int8',
+  'int16',
+  'int32',
+  'int64',
+  'uint',
+  'uint8',
+  'uint16',
+  'uint32',
+  'uint64',
+  'uintptr',
+  'float32',
+  'float64',
+  'complex64',
+  'complex128',
+  'byte',
+  'rune',
+  'any',
+  'comparable',
+  // built-in values
+  'true',
+  'false',
+  'nil',
+  'iota',
+]);
 
 export const goProvider = defineLanguage({
   id: SupportedLanguages.Go,
@@ -85,13 +132,12 @@ export const goProvider = defineLanguage({
   typeConfig: goConfig,
   exportChecker: goExportChecker,
   importResolver: createImportResolver(goImportConfig),
-  importSemantics: 'wildcard-leaf',
   callExtractor: createCallExtractor(goCallConfig),
   fieldExtractor: createFieldExtractor(goFieldConfig),
   methodExtractor: createMethodExtractor(goMethodConfig),
   variableExtractor: createVariableExtractor(goVariableConfig),
   classExtractor: createClassExtractor(goClassConfig),
-  heritageExtractor: createHeritageExtractor(goHeritageConfig),
+  builtInNames: GO_BUILT_INS,
 
   // ── RFC #909 Ring 3: scope-based resolution hooks ──────────
   emitScopeCaptures: emitGoScopeCaptures,
