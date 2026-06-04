@@ -2867,9 +2867,11 @@ export class LocalBackend {
 
     // File classification
     try {
-      const { classifyFiles, aggregateClasses } = await import('../../core/file-classifier.js');
+      const { classifyFiles, aggregateClasses, loadRepoFileClassificationRules } =
+        await import('../../core/file-classifier.js');
       const changedPaths = fileDiffs.map((d: FileDiff) => d.filePath);
-      const classifications = classifyFiles(changedPaths);
+      const overrideRules = await loadRepoFileClassificationRules(repo.repoPath);
+      const classifications = classifyFiles(changedPaths, { overrideRules });
       response.changed_file_classes = aggregateClasses(classifications);
 
       // Check forbidden classes

@@ -16,4 +16,4 @@
 - [x] 3.2 Test: mixed changes classified correctly
 - [x] 3.3 Test: unknown file types classified as `source` (default)
 - [x] 3.4 Test: forbidden_file_classes triggers warning in MCP response (p0-p1-p2-mcp-response.test.ts)
-- [ ] 3.5 Test: repo-specific overrides take precedence (deferred — feature not yet implemented)
+- [x] 3.5 Test: repo-specific overrides take precedence — covered by `p0-p1-p2-features.test.ts` and `p0-p1-p2-mcp-response.test.ts`
