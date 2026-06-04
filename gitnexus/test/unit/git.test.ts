@@ -174,6 +174,7 @@ describe('git utilities', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-dotgit-'));
       try {
         fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.writeFileSync(path.join(tmpDir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
         const nested = path.join(tmpDir, 'packages', 'app');
         fs.mkdirSync(nested, { recursive: true });
 
@@ -188,6 +189,20 @@ describe('git utilities', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-nonrepo-'));
       try {
         expect(findGitRootByDotGit(tmpDir)).toBeNull();
+        expect(mockExecSync).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores empty .git directories that are not real git metadata', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-empty-dotgit-'));
+      try {
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        const nested = path.join(tmpDir, 'nested');
+        fs.mkdirSync(nested);
+
+        expect(findGitRootByDotGit(nested)).toBeNull();
         expect(mockExecSync).not.toHaveBeenCalled();
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -221,6 +236,7 @@ describe('git utilities', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-fileinput-'));
       try {
         fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.writeFileSync(path.join(tmpDir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
         const filePath = path.join(tmpDir, 'pkg', 'index.ts');
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, 'export {};\n');

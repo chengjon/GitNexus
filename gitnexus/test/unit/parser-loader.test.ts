@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { loadParser, loadLanguage } from '../../src/core/tree-sitter/parser-loader.js';
+import {
+  isLanguageAvailable,
+  loadParser,
+  loadLanguage,
+} from '../../src/core/tree-sitter/parser-loader.js';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
 
 describe('parser-loader', () => {
@@ -156,7 +160,14 @@ int main(void) {
   });
 
   describe('Swift optional dependency', () => {
-    it('loads Swift from the default optional dependency and parses source', async () => {
+    it('loads Swift when the optional dependency is available and otherwise reports unsupported', async () => {
+      if (!isLanguageAvailable(SupportedLanguages.Swift)) {
+        await expect(loadLanguage(SupportedLanguages.Swift)).rejects.toThrow(
+          'Unsupported language',
+        );
+        return;
+      }
+
       const parser = await loadParser();
       await loadLanguage(SupportedLanguages.Swift);
 

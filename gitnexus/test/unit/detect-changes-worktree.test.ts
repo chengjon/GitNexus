@@ -730,10 +730,7 @@ describe('detect_changes worktree support — end-to-end with real worktree', ()
 // ── Structural tests: hub_guidance in _runImpactBFS ──────────────────
 
 describe('impact hub_guidance — structural', () => {
-  const src = readFileSync(
-    path.join(__dirname, '../../src/mcp/local/local-backend.ts'),
-    'utf-8',
-  );
+  const src = readFileSync(path.join(__dirname, '../../src/mcp/local/local-backend.ts'), 'utf-8');
 
   it('impact success path includes hub_guidance when blast radius is large', () => {
     expect(src).toMatch(/hub_guidance:\s*hubHint/);
@@ -752,15 +749,12 @@ describe('impact hub_guidance — structural', () => {
 // ── Structural tests: relationTypes auto-expansion ───────────────────
 
 describe('impact relationTypes auto-expansion — structural', () => {
-  const src = readFileSync(
-    path.join(__dirname, '../../src/mcp/local/local-backend.ts'),
-    'utf-8',
-  );
+  const src = readFileSync(path.join(__dirname, '../../src/mcp/local/local-backend.ts'), 'utf-8');
 
   it('auto-expands ACCESSES, HAS_METHOD, HAS_PROPERTY for container types', () => {
-    expect(src).toMatch(/ACCESSES.*autoExpanded/);
-    expect(src).toMatch(/HAS_METHOD.*autoExpanded/);
-    expect(src).toMatch(/HAS_PROPERTY.*autoExpanded/);
+    expect(src).toMatch(/autoExpanded\.push\('ACCESSES'\)/);
+    expect(src).toMatch(/autoExpanded\.push\('HAS_METHOD'\)/);
+    expect(src).toMatch(/autoExpanded\.push\('HAS_PROPERTY'\)/);
   });
 
   it('surfaces expanded_relation_types in the response', () => {
