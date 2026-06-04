@@ -13,7 +13,7 @@ Commit `097130b9` materially improved the earlier P0/P1/P2 closeout, and the fol
 - C3 Meta review scope: `openspec/changes/2026-06-02-p0-p1-p2-review/` contains only `review.md` and this review file, not `.openspec.yaml`/`proposal.md`/`tasks.md`; `openspec validate 2026-06-02-p0-p1-p2-review --strict` returning `Unknown item` is therefore not evidence that a child OpenSpec change is invalid.
 - F1 Focused test execution: `npm test -- test/unit/p0-p1-p2-features.test.ts test/integration/p0-p1-p2-mcp-response.test.ts test/integration/cli-incremental-analyze.test.ts --reporter=default` passed locally with 3 files and 40 tests passing in about 71 seconds.
 - F2 Scope gate: `gitnexus_detect_changes({scope: "compare", base_ref: "097130b9^", repo: "GitNexus", cwd: "/opt/claude/GitNexus"})` reported 10 changed files, low risk, no changed indexed process symbols, and file classes limited to test/governance/documentation.
-- N4 Task status: current child task files now show 62 checked and 2 open items across the six child changes; the two open items are explicitly deferred: repo-specific classifier overrides and live MCP detect_changes after local analyze.
+- N4 Task status: current child task files now show 63 checked and 1 open item across the six child changes; the remaining open item is explicitly deferred: repo-specific classifier overrides.
 - F3 Follow-up verification: after strengthening the tests, `npm test -- test/unit/p0-p1-p2-features.test.ts test/integration/p0-p1-p2-mcp-response.test.ts test/integration/cli-incremental-analyze.test.ts --reporter=default` passed with 3 files and 40 tests in about 53 seconds. The MCP response tests now create a real temporary git repo with commit drift and source changes; the CLI scoped analyze tests now inspect `.gitnexus/meta.json.fileHashes`.
 
 ## Issues
@@ -23,7 +23,7 @@ Commit `097130b9` materially improved the earlier P0/P1/P2 closeout, and the fol
 
 ## Suggestions
 
-- Keep the two intentionally deferred child tasks open, but align `review.md` wording so “implementation complete” means child implementation/test additions landed, while residual live-session verification remains tracked separately.
+- Keep the remaining repo-specific classifier override task open, but do not mix that new feature work into the completed P0/P1/P2 evidence and live-session verification line.
 
 ## Verdict
 

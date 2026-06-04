@@ -30,4 +30,4 @@
 ## 5. Verification
 
 - [x] 5.1 Run `gitnexus status --json` — confirmed via CLI E2E test
-- [ ] 5.2 Run MCP detect_changes after local analyze — requires live MCP server session
+- [x] 5.2 Run MCP detect_changes after local analyze — verified on 2026-06-04 after `gitnexus analyze`; MCP `detect_changes` reported `indexed_commit` = `current_commit` (`9f2ab66d`), `stale: false`, `fresh_for_staged_diff: true`, and `changed_files: 0`
