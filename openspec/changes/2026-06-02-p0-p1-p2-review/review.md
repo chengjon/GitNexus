@@ -4,7 +4,7 @@
 **Date:** 2026-06-04
 **Author:** JohnC + Claude
 **Scope:** CLI, MCP server, ingestion pipeline, shared graph types
-**Status:** Implementation and focused test-evidence strengthening complete — focused tests passing, OpenSpec valid. Remaining deferred outside this review line: repo-specific classifier overrides and live MCP `detect_changes` after local analyze.
+**Status:** Implementation and focused test-evidence strengthening complete — focused tests passing, OpenSpec valid, and live MCP `detect_changes` after local analyze verified. Remaining deferred outside this review line: repo-specific classifier overrides.
 
 ---
 
@@ -173,7 +173,7 @@ Test files:
 
 Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes`, `forbidden_file_classes`, `risk_rationale`, `stale_reasons`, `fresh_for_staged_diff`, `STYLE_IMPORTS`, `--staged-only`, `--changed-only`, `--files`, and `status --json`.
 
-Still deferred outside this review line: repo-specific classifier overrides and live MCP `detect_changes` after local analyze.
+Still deferred outside this review line: repo-specific classifier overrides.
 
 ### OpenSpec Validation
 
@@ -183,6 +183,15 @@ for d in mcp-index-freshness-fix incremental-analyze-mode sass-import-graph \
   openspec validate "2026-06-02-${d}" --strict
 done
 # Result: 6/6 PASS
+```
+
+### Live MCP Index Freshness Verification
+
+```bash
+gitnexus analyze
+gitnexus_detect_changes({ scope: "all", repo: "GitNexus", cwd: "/opt/claude/GitNexus" })
+# Result: indexed_commit = current_commit = 9f2ab66d, stale: false,
+#         fresh_for_staged_diff: true, changed_files: 0
 ```
 
 ### Pre-commit Hooks
