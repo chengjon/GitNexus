@@ -37,6 +37,7 @@ const tsxImportUrl = pathToFileURL(path.join(tsxPkgDir, 'dist', 'loader.mjs')).h
  * Uses the absolute tsx loader URL so it works outside the project tree.
  */
 function runSkillsCli(cwd: string, timeoutMs = 45000) {
+  const testHome = path.join(cwd, '.gitnexus-test-home');
   return spawnSync(process.execPath, ['--import', tsxImportUrl, cliEntry, 'analyze', '--skills'], {
     cwd,
     encoding: 'utf8',
@@ -44,6 +45,9 @@ function runSkillsCli(cwd: string, timeoutMs = 45000) {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      GITNEXUS_HOME: path.join(testHome, '.gitnexus'),
+      HOME: testHome,
+      XDG_CONFIG_HOME: path.join(testHome, '.config'),
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=8192`.trim(),
     },
   });

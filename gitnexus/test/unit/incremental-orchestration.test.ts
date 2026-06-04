@@ -21,10 +21,12 @@
  */
 
 import { execSync } from 'child_process';
+import { mkdtempSync, rmSync } from 'fs';
 import { writeFile, readFile, copyFile, mkdir } from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
   getStoragePaths,
   saveMeta,
@@ -36,6 +38,9 @@ import { createTempDir } from '../helpers/test-db.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_SRC = path.resolve(HERE, '..', 'fixtures', 'mini-repo', 'src');
+
+let originalEnv: NodeJS.ProcessEnv;
+let tempHome = '';
 
 /**
  * Copy the mini-repo fixture into a fresh git-initialized temp directory.
@@ -71,6 +76,23 @@ async function setupMiniRepo(): Promise<{ dbPath: string; cleanup: () => Promise
 }
 
 describe('runFullAnalysis — incremental orchestration', () => {
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    tempHome = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-incr-orch-home-'));
+    process.env = {
+      ...originalEnv,
+      HOME: tempHome,
+      GITNEXUS_HOME: path.join(tempHome, '.gitnexus'),
+      XDG_CONFIG_HOME: path.join(tempHome, '.config'),
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    rmSync(tempHome, { recursive: true, force: true });
+    tempHome = '';
+  });
+
   it('first run populates fileHashes + schemaVersion and clears incrementalInProgress on success', async () => {
     const repo = await setupMiniRepo();
     try {

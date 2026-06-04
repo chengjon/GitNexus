@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { statSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import path from 'path';
 
 // Git utilities for repository detection, commit tracking, and diff analysis
@@ -245,14 +245,29 @@ export const findGitRootByDotGit = (fromPath: string): string | null => {
   }
 
   while (true) {
-    try {
-      statSync(path.join(current, '.git'));
+    if (isValidDotGitEntry(path.join(current, '.git'))) {
       return current;
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) return null;
-      current = parent;
     }
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+};
+
+const isValidDotGitEntry = (dotGitPath: string): boolean => {
+  try {
+    const stat = statSync(dotGitPath);
+    if (stat.isDirectory()) {
+      statSync(path.join(dotGitPath, 'HEAD'));
+      return true;
+    }
+    if (stat.isFile()) {
+      return readFileSync(dotGitPath, 'utf8').trimStart().startsWith('gitdir:');
+    }
+    return false;
+  } catch {
+    return false;
   }
 };
 /**
