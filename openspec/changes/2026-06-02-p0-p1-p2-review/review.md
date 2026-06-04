@@ -4,7 +4,7 @@
 **Date:** 2026-06-04
 **Author:** JohnC + Claude
 **Scope:** CLI, MCP server, ingestion pipeline, shared graph types
-**Status:** Implementation and focused test-evidence strengthening complete — focused tests passing, OpenSpec valid, and live MCP `detect_changes` after local analyze verified. Remaining deferred outside this review line: repo-specific classifier overrides.
+**Status:** Implementation and focused test-evidence strengthening complete — focused tests passing, OpenSpec valid, live MCP `detect_changes` after local analyze verified, and repo-specific classifier overrides implemented.
 
 ---
 
@@ -159,10 +159,11 @@ cd /opt/claude/GitNexus/gitnexus && npm test -- \
   test/integration/p0-p1-p2-mcp-response.test.ts \
   test/integration/cli-incremental-analyze.test.ts \
   --reporter=default
-# Result: 40 pass, 0 fail
+# Result: 42 pass, 0 fail
 # Covers: file-classifier, risk-rationale, style-imports, index-status fields,
 #         detect_changes MCP response fields, STYLE_IMPORTS traversal,
-#         incremental analyze CLI flags, and status --json.
+#         repo-specific classifier overrides, incremental analyze CLI flags,
+#         and status --json.
 ```
 
 Test files:
@@ -171,9 +172,9 @@ Test files:
 - `gitnexus/test/integration/p0-p1-p2-mcp-response.test.ts`
 - `gitnexus/test/integration/cli-incremental-analyze.test.ts`
 
-Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes`, `forbidden_file_classes`, `risk_rationale`, `stale_reasons`, `fresh_for_staged_diff`, `STYLE_IMPORTS`, `--staged-only`, `--changed-only`, `--files`, and `status --json`.
+Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, repo-local `fileClassification.rules`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes`, `forbidden_file_classes`, `risk_rationale`, `stale_reasons`, `fresh_for_staged_diff`, `STYLE_IMPORTS`, `--staged-only`, `--changed-only`, `--files`, and `status --json`.
 
-Still deferred outside this review line: repo-specific classifier overrides.
+No P0/P1/P2 child task remains deferred in this review line.
 
 ### OpenSpec Validation
 
@@ -196,7 +197,7 @@ gitnexus_detect_changes({ scope: "all", repo: "GitNexus", cwd: "/opt/claude/GitN
 
 ### Pre-commit Hooks
 
-ESLint + Prettier + TypeScript type-check passed on the committed implementation/test follow-up line. For the current working-tree test-evidence strengthening, the focused Vitest suite above is the fresh verification signal.
+ESLint + Prettier + TypeScript type-check passed on the committed implementation/test follow-up line. For the repo-specific classifier override line, the focused Vitest suite and `npm run build` are the fresh verification signals.
 
 ---
 
@@ -206,7 +207,7 @@ ESLint + Prettier + TypeScript type-check passed on the committed implementation
 - **4 new source files:** `file-classifier.ts`, `risk-rationale.ts`, `style-imports.ts`, `style-imports.ts` (phase)
 - **6 OpenSpec change proposals** with valid delta specs (each passes `openspec validate --strict`)
 - **16 modified existing files**
-- **3 focused test files** with 40 focused tests
+- **3 focused test files** with 42 focused tests
 
 ---
 
@@ -215,6 +216,7 @@ ESLint + Prettier + TypeScript type-check passed on the committed implementation
 - [x] P0: `ensureInitialized` refreshes `lastCommit`/`stats` — code path verified in `local-backend.ts`
 - [x] P0: `gitnexus status --json` structured output — CLI E2E in `cli-incremental-analyze.test.ts`
 - [x] P1: file classifier covers expected patterns — focused tests in `p0-p1-p2-features.test.ts`
+- [x] P1: repo-specific classifier overrides take precedence — unit and MCP integration tests
 - [x] P1: `detect_changes` response includes `changed_file_classes` and forbidden-class warnings — MCP integration in `p0-p1-p2-mcp-response.test.ts`
 - [x] P1: `--staged-only`/`--changed-only`/`--files` flags — CLI E2E in `cli-incremental-analyze.test.ts`
 - [x] P1: `STYLE_IMPORTS` edges appear through `impact`/`context` — MCP integration in `p0-p1-p2-mcp-response.test.ts`

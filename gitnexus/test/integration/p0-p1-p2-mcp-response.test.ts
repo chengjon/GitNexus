@@ -178,6 +178,30 @@ withTestLbugDB(
         // Governance files won't appear in normal source code changes
         expect(result.forbidden_class_violations).toBeUndefined();
       });
+
+      it('applies repo-specific classification overrides before default rules', async () => {
+        fs.mkdirSync(path.join(repoPath, '.gitnexus'), { recursive: true });
+        fs.writeFileSync(
+          path.join(repoPath, '.gitnexus', 'config.json'),
+          JSON.stringify({
+            fileClassification: {
+              rules: [{ pattern: '^src/auth\\.ts$', classes: ['governance'] }],
+            },
+          }),
+        );
+
+        const result = await backend.callTool('detect_changes', {
+          scope: 'unstaged',
+          cwd: repoPath,
+          forbidden_file_classes: ['governance'],
+        });
+
+        expect(result).not.toHaveProperty('error');
+        expect(result.summary.changed_files).toBe(1);
+        expect(result.changed_file_classes).toMatchObject({ governance: 1 });
+        expect(result.changed_file_classes).not.toHaveProperty('source');
+        expect(result.forbidden_class_violations).toEqual(['src/auth.ts']);
+      });
     });
 
     describe('impact response fields (P2)', () => {

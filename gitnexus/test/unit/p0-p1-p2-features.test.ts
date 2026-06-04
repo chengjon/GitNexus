@@ -47,6 +47,14 @@ describe('file-classifier', () => {
     const result = classifyFile('custom.xyz', [{ pattern: /\.xyz$/i, classes: ['data'] }]);
     expect(result.classes).toContain('data');
   });
+
+  it('lets repo-specific override rules take precedence over defaults', () => {
+    const result = classifyFile('AGENTS.md', {
+      overrideRules: [{ pattern: /^AGENTS\.md$/i, classes: ['source'] }],
+    });
+
+    expect(result.classes).toEqual(['source']);
+  });
 });
 
 // ── Risk Rationale ───────────────────────────────────────────────────────
