@@ -1,10 +1,10 @@
 # GitNexus P0/P1/P2 Improvements — Review Summary
 
-**Commit:** `4ad039c6` (main), follow-up `HEAD`
-**Date:** 2026-06-03
+**Commit:** `4ad039c6` (implementation), `097130b9` (test/task follow-up), current working tree (test-evidence strengthening)
+**Date:** 2026-06-04
 **Author:** JohnC + Claude
 **Scope:** CLI, MCP server, ingestion pipeline, shared graph types
-**Status:** Implementation complete — focused tests passing, OpenSpec valid, build clean. Remaining: MCP integration tests and full E2E verification.
+**Status:** Implementation and focused test-evidence strengthening complete — focused tests passing, OpenSpec valid. Remaining deferred outside this review line: repo-specific classifier overrides and live MCP `detect_changes` after local analyze.
 
 ---
 
@@ -154,16 +154,26 @@ cd /opt/claude/GitNexus/gitnexus && npx vitest run --reporter=verbose
 ### Focused Tests for New Behavior
 
 ```bash
-cd /opt/claude/GitNexus/gitnexus && npx vitest run test/unit/p0-p1-p2-features.test.ts --reporter=verbose
-# Result: 22 pass, 0 fail
-# Covers: file-classifier (8), risk-rationale (4), style-imports (4),
-#         index-status fields (3), detect-changes response shape (3)
+cd /opt/claude/GitNexus/gitnexus && npm test -- \
+  test/unit/p0-p1-p2-features.test.ts \
+  test/integration/p0-p1-p2-mcp-response.test.ts \
+  test/integration/cli-incremental-analyze.test.ts \
+  --reporter=default
+# Result: 40 pass, 0 fail
+# Covers: file-classifier, risk-rationale, style-imports, index-status fields,
+#         detect_changes MCP response fields, STYLE_IMPORTS traversal,
+#         incremental analyze CLI flags, and status --json.
 ```
 
-Test file: `gitnexus/test/unit/p0-p1-p2-features.test.ts`
-Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes` aggregate shape, `forbidden_file_classes` warning logic, `stale_reasons`/`fresh_for_staged_diff` concepts.
+Test files:
 
-Not yet covered: `--staged-only`/`--changed-only` CLI flag E2E, grammar warning dedup runtime behavior, MCP response-level integration with real lbug fixture.
+- `gitnexus/test/unit/p0-p1-p2-features.test.ts`
+- `gitnexus/test/integration/p0-p1-p2-mcp-response.test.ts`
+- `gitnexus/test/integration/cli-incremental-analyze.test.ts`
+
+Covered: `classifyFile`, `classifyFiles`, `aggregateClasses`, `generateRiskRationale`, `isStyleFile`, `extractStyleImports`, `changed_file_classes`, `forbidden_file_classes`, `risk_rationale`, `stale_reasons`, `fresh_for_staged_diff`, `STYLE_IMPORTS`, `--staged-only`, `--changed-only`, `--files`, and `status --json`.
+
+Still deferred outside this review line: repo-specific classifier overrides and live MCP `detect_changes` after local analyze.
 
 ### OpenSpec Validation
 
@@ -177,27 +187,27 @@ done
 
 ### Pre-commit Hooks
 
-ESLint + Prettier + TypeScript type-check all pass on commit `4ad039c6`.
+ESLint + Prettier + TypeScript type-check passed on the committed implementation/test follow-up line. For the current working-tree test-evidence strengthening, the focused Vitest suite above is the fresh verification signal.
 
 ---
 
 ## Stats
 
-- **39 files changed** (commit `4ad039c6`), **1,027 insertions**, 7 deletions
+- **39 files changed** in the original implementation commit `4ad039c6`, plus focused test/task follow-ups through `097130b9` and the current working tree
 - **4 new source files:** `file-classifier.ts`, `risk-rationale.ts`, `style-imports.ts`, `style-imports.ts` (phase)
 - **6 OpenSpec change proposals** with valid delta specs (each passes `openspec validate --strict`)
 - **16 modified existing files**
-- **1 new test file** with 22 focused tests
+- **3 focused test files** with 40 focused tests
 
 ---
 
 ## Review Checklist
 
 - [x] P0: `ensureInitialized` refreshes `lastCommit`/`stats` — code path verified in `local-backend.ts`
-- [ ] P0: `gitnexus status --json` structured output — CLI E2E follow-up
+- [x] P0: `gitnexus status --json` structured output — CLI E2E in `cli-incremental-analyze.test.ts`
 - [x] P1: file classifier covers expected patterns — focused tests in `p0-p1-p2-features.test.ts`
-- [x] P1: `detect_changes` response shape can include `changed_file_classes` — focused response-shape tests added
-- [ ] P1: `--staged-only`/`--changed-only`/`--files` flags — CLI E2E follow-up
-- [ ] P1: `STYLE_IMPORTS` edges appear through `impact`/`context` — MCP integration follow-up
-- [x] P2: `risk_rationale` generation and response-shape compatibility — focused tests in `p0-p1-p2-features.test.ts`
-- [ ] P2: grammar warnings print once per session — runtime subprocess follow-up
+- [x] P1: `detect_changes` response includes `changed_file_classes` and forbidden-class warnings — MCP integration in `p0-p1-p2-mcp-response.test.ts`
+- [x] P1: `--staged-only`/`--changed-only`/`--files` flags — CLI E2E in `cli-incremental-analyze.test.ts`
+- [x] P1: `STYLE_IMPORTS` edges appear through `impact`/`context` — MCP integration in `p0-p1-p2-mcp-response.test.ts`
+- [x] P2: `risk_rationale` generation and response-shape compatibility — unit and MCP integration tests
+- [x] P2: grammar warnings print once per session — unit-level session dedup coverage in `p0-p1-p2-features.test.ts`
