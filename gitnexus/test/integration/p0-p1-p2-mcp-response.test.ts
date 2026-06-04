@@ -9,9 +9,12 @@
  *   - STYLE_IMPORTS: impact and context traversal
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { spawnSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
-import { withTestLbugDB } from '../helpers/test-indexed-db.js';
+import { type IndexedDBHandle, withTestLbugDB } from '../helpers/test-indexed-db.js';
 import {
   LOCAL_BACKEND_SEED_DATA,
   LOCAL_BACKEND_FTS_INDEXES,
@@ -35,11 +38,67 @@ const STYLE_IMPORT_SEED = [
 
 const COMBINED_SEED = [...LOCAL_BACKEND_SEED_DATA, ...STYLE_IMPORT_SEED];
 
-vi.mock('../../src/storage/repo-manager.js', () => ({
-  listRegisteredRepos: vi.fn().mockResolvedValue([]),
-  cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
-  findSiblingClones: vi.fn().mockResolvedValue([]),
-}));
+const gitEnv = {
+  GIT_AUTHOR_NAME: 'test',
+  GIT_AUTHOR_EMAIL: 'test@test',
+  GIT_COMMITTER_NAME: 'test',
+  GIT_COMMITTER_EMAIL: 'test@test',
+};
+
+function runGit(repoPath: string, args: string[]) {
+  const result = spawnSync('git', args, {
+    cwd: repoPath,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...gitEnv },
+  });
+  expect(result.status, `git ${args.join(' ')} stderr: ${result.stderr}`).toBe(0);
+  return result.stdout.trim();
+}
+
+function createRepoWithDetectChangesFixture(handle: IndexedDBHandle): {
+  repoPath: string;
+  initialCommit: string;
+} {
+  const repoPath = path.join(handle.tmpHandle.dbPath, 'detect-changes-repo');
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoPath, 'src', 'auth.ts'),
+    [
+      'export function login(input: string) {',
+      '  return validate(input);',
+      '}',
+      '',
+      'export function validate(input: string) {',
+      '  return input.trim().length > 0;',
+      '}',
+      '',
+    ].join('\n'),
+  );
+
+  runGit(repoPath, ['init']);
+  runGit(repoPath, ['add', '-A']);
+  runGit(repoPath, ['commit', '-m', 'initial']);
+  const initialCommit = runGit(repoPath, ['rev-parse', 'HEAD']);
+
+  fs.appendFileSync(path.join(repoPath, 'src', 'auth.ts'), '\nexport const changed = true;\n');
+  runGit(repoPath, ['add', 'src/auth.ts']);
+  runGit(repoPath, ['commit', '-m', 'advance-head']);
+
+  fs.appendFileSync(path.join(repoPath, 'src', 'auth.ts'), '\nexport const unstaged = true;\n');
+
+  return { repoPath, initialCommit };
+}
+
+vi.mock('../../src/storage/repo-manager.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/storage/repo-manager.js')>();
+  return {
+    ...actual,
+    listRegisteredRepos: vi.fn().mockResolvedValue([]),
+    cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
+    findSiblingClones: vi.fn().mockResolvedValue([]),
+  };
+});
 
 // ─── Block 1: detect_changes and impact response fields ──────────────
 
@@ -48,76 +107,74 @@ withTestLbugDB(
   (handle) => {
     describe('detect_changes response fields (P0/P1/P2)', () => {
       let backend: LocalBackend;
+      let repoPath: string;
 
       beforeAll(async () => {
-        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        const ext = handle as typeof handle & { _backend?: LocalBackend; _repoPath?: string };
         if (!ext._backend) throw new Error('backend not initialized');
+        if (!ext._repoPath) throw new Error('fixture repo not initialized');
         backend = ext._backend;
+        repoPath = ext._repoPath;
       });
 
       it('response includes index_status with fresh_for_staged_diff (P0 4.1)', async () => {
-        const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
-        // May return error (no real git repo) or empty changes — both OK
-        if (result.error) {
-          expect(result).toHaveProperty('recovery');
-          return;
-        }
+        const result = await backend.callTool('detect_changes', {
+          scope: 'unstaged',
+          cwd: repoPath,
+        });
+        expect(result).not.toHaveProperty('error');
         expect(result).toHaveProperty('metadata');
-        expect(result.metadata).toHaveProperty('index_status');
-        // fresh_for_staged_diff should be present in metadata.index_status
-        if (result.metadata?.index_status) {
-          expect(result.metadata.index_status).toHaveProperty('fresh_for_staged_diff');
-          expect(typeof result.metadata.index_status.fresh_for_staged_diff).toBe('boolean');
-        }
+        expect(result.metadata).toHaveProperty('fresh_for_staged_diff', true);
+        expect(result).toHaveProperty('index_status');
+        expect(result.index_status).toHaveProperty('fresh_for_staged_diff', true);
       });
 
-      it('response includes stale_reasons in metadata (P0 4.2)', async () => {
-        const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
-        if (result.error) return;
-        if (result.metadata?.index_status) {
-          // stale_reasons may be undefined when not stale — that's valid
-          if (result.metadata.index_status.stale_reasons !== undefined) {
-            expect(Array.isArray(result.metadata.index_status.stale_reasons)).toBe(true);
-          }
-        }
+      it('response includes stale_reasons when commits differ (P0 4.2)', async () => {
+        const result = await backend.callTool('detect_changes', {
+          scope: 'unstaged',
+          cwd: repoPath,
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.metadata.stale_reasons).toContain(
+          'current_commit_differs_from_indexed_commit',
+        );
+        expect(result.index_status.stale_reasons).toContain(
+          'current_commit_differs_from_indexed_commit',
+        );
       });
 
       it('response includes risk_rationale when changes detected (P2 3.5)', async () => {
-        const result = await backend.callTool('detect_changes', { scope: 'unstaged' });
-        if (result.error) return;
-        // When no changes detected, risk_rationale may be absent (early return path)
-        if (result.summary?.changed_files > 0) {
-          expect(result).toHaveProperty('risk_rationale');
-          expect(Array.isArray(result.risk_rationale)).toBe(true);
-        } else {
-          // No changes — summary should indicate zero changes
-          expect(result.summary).toBeDefined();
-          expect(result.summary.changed_files).toBe(0);
-        }
+        const result = await backend.callTool('detect_changes', {
+          scope: 'unstaged',
+          cwd: repoPath,
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.summary.changed_files).toBe(1);
+        expect(result).toHaveProperty('risk_rationale');
+        expect(Array.isArray(result.risk_rationale)).toBe(true);
       });
 
       it('with forbidden_file_classes returns violations when applicable (P1 3.4)', async () => {
         const result = await backend.callTool('detect_changes', {
           scope: 'unstaged',
+          cwd: repoPath,
           forbidden_file_classes: ['source'],
         });
-        if (result.error) return;
-        // If no changes, no violations expected (early return)
-        if (result.summary?.changed_files === 0) return;
-        // If changes exist and they're source files, violations should appear
-        if (result.forbidden_class_violations) {
-          expect(Array.isArray(result.forbidden_class_violations)).toBe(true);
-          expect(result).toHaveProperty('forbidden_class_warning');
-          expect(result.forbidden_class_warning).toMatch(/forbidden file classes/);
-        }
+        expect(result).not.toHaveProperty('error');
+        expect(result.summary.changed_files).toBe(1);
+        expect(result.changed_file_classes).toMatchObject({ source: 1 });
+        expect(result.forbidden_class_violations).toEqual(['src/auth.ts']);
+        expect(result).toHaveProperty('forbidden_class_warning');
+        expect(result.forbidden_class_warning).toMatch(/forbidden file classes/);
       });
 
       it('forbidden_file_classes with governance class produces no violations on source files', async () => {
         const result = await backend.callTool('detect_changes', {
           scope: 'unstaged',
+          cwd: repoPath,
           forbidden_file_classes: ['governance'],
         });
-        if (result.error) return;
+        expect(result).not.toHaveProperty('error');
         // Governance files won't appear in normal source code changes
         expect(result.forbidden_class_violations).toBeUndefined();
       });
@@ -234,19 +291,21 @@ withTestLbugDB(
     ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
     poolAdapter: true,
     afterSetup: async (handle) => {
+      const fixtureRepo = createRepoWithDetectChangesFixture(handle);
       vi.mocked(listRegisteredRepos).mockResolvedValue([
         {
           name: 'test-repo',
-          path: '/test/repo',
+          path: fixtureRepo.repoPath,
           storagePath: handle.tmpHandle.dbPath,
           indexedAt: new Date().toISOString(),
-          lastCommit: 'p0p1p2test',
+          lastCommit: fixtureRepo.initialCommit,
           stats: { files: 5, nodes: 10, communities: 1, processes: 3 },
         },
       ]);
       const backend = new LocalBackend();
       await backend.init();
       (handle as any)._backend = backend;
+      (handle as any)._repoPath = fixtureRepo.repoPath;
     },
   },
 );

@@ -21,6 +21,7 @@ const FIXTURE_SRC = path.resolve(testDir, '..', 'fixtures', 'mini-repo');
 const _require = createRequire(import.meta.url);
 const tsxPkgDir = path.dirname(_require.resolve('tsx/package.json'));
 const tsxImportUrl = pathToFileURL(path.join(tsxPkgDir, 'dist', 'loader.mjs')).href;
+const TARGET_FILE = 'src/validator.ts';
 
 let MINI_REPO: string;
 let tmpParent: string;
@@ -52,6 +53,19 @@ function runCli(args: string[], cwd: string, timeoutMs = 60000) {
   });
 }
 
+function expectCliSuccess(result: ReturnType<typeof runCli>) {
+  expect(result.status, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).not.toBeNull();
+  expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+}
+
+function indexedFiles(repo: string): string[] {
+  const metaPath = path.join(repo, '.gitnexus', 'meta.json');
+  expect(fs.existsSync(metaPath), 'expected analyze to write .gitnexus/meta.json').toBe(true);
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  expect(meta.fileHashes).toBeDefined();
+  return Object.keys(meta.fileHashes).sort();
+}
+
 function makeRepo(prefix: string): string {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const repo = path.join(parent, 'mini-repo');
@@ -81,37 +95,37 @@ describe('incremental analyze mode', () => {
   it('--staged-only analyzes only staged files (P1 4.1)', () => {
     const repo = makeRepo('gn-staged-');
     // Edit and stage a single file
-    fs.appendFileSync(path.join(repo, 'src', 'main.py'), '\n# staged change\n');
-    spawnSync('git', ['add', 'src/main.py'], { cwd: repo, stdio: 'pipe' });
+    fs.appendFileSync(path.join(repo, TARGET_FILE), '\nexport const stagedChange = true;\n');
+    spawnSync('git', ['add', TARGET_FILE], { cwd: repo, stdio: 'pipe' });
 
     const result = runCli(['analyze', '--staged-only'], repo);
-    if (result.status === null) return; // timeout on slow CI
-    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expectCliSuccess(result);
+    expect(indexedFiles(repo)).toEqual([TARGET_FILE]);
   }, 90_000);
 
   it('--changed-only analyzes changed files (P1 4.2)', () => {
     const repo = makeRepo('gn-changed-');
     // Edit without staging
-    fs.appendFileSync(path.join(repo, 'src', 'main.py'), '\n# unstaged change\n');
+    fs.appendFileSync(path.join(repo, TARGET_FILE), '\nexport const unstagedChange = true;\n');
 
     const result = runCli(['analyze', '--changed-only'], repo);
-    if (result.status === null) return;
-    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expectCliSuccess(result);
+    expect(indexedFiles(repo)).toEqual([TARGET_FILE]);
   }, 90_000);
 
   it('--files with explicit path (P1 4.3)', () => {
     const repo = makeRepo('gn-files-');
 
-    const result = runCli(['analyze', '--files', 'src/main.py'], repo);
-    if (result.status === null) return;
-    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    const result = runCli(['analyze', '--files', TARGET_FILE], repo);
+    expectCliSuccess(result);
+    expect(indexedFiles(repo)).toEqual([TARGET_FILE]);
   }, 90_000);
 
   it('full analyze still works with no flags (P1 4.4)', () => {
     const result = runCli(['analyze'], MINI_REPO);
-    if (result.status === null) return;
-    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expectCliSuccess(result);
     expect(fs.existsSync(path.join(MINI_REPO, '.gitnexus'))).toBe(true);
+    expect(indexedFiles(MINI_REPO).length).toBeGreaterThan(1);
   }, 90_000);
 });
 
@@ -119,11 +133,10 @@ describe('status --json (P0 4.3/5.1)', () => {
   it('outputs valid JSON with expected fields', () => {
     // First analyze to create an index
     const analyzeResult = runCli(['analyze'], MINI_REPO);
-    if (analyzeResult.status === null) return;
+    expectCliSuccess(analyzeResult);
 
     const result = runCli(['status', '--json'], MINI_REPO);
-    if (result.status === null) return;
-    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expectCliSuccess(result);
 
     const json = JSON.parse(result.stdout);
     expect(json).toHaveProperty('repoPath');
