@@ -45,6 +45,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-gitnexus
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npx tsc --noEmit
         working-directory: gitnexus
 

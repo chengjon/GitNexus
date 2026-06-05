@@ -307,6 +307,8 @@ jobs:
       - uses: ./.github/actions/setup-gitnexus
         with:
           build: 'true'
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
 
       - name: Pack gitnexus tarball
         shell: bash
@@ -315,6 +317,8 @@ jobs:
 
       - name: Install gitnexus tarball into isolated prefix
         shell: bash
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/gitnexus-smoke"
