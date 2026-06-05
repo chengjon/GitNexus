@@ -225,6 +225,19 @@ describe('getRemoteUrl', () => {
 // worktrees via `git rev-parse --git-common-dir`.
 
 describe('getCanonicalRepoRoot', () => {
+  it('keeps CodeQL-sensitive path handling patterns out of git helpers', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../src/storage/git.ts'), 'utf8');
+    const canonicalStart = source.indexOf('export const getCanonicalRepoRoot');
+    const canonicalEnd = source.indexOf('};', canonicalStart);
+    const canonicalSource = source.slice(canonicalStart, canonicalEnd);
+    const dotGitStart = source.indexOf('const isValidDotGitEntry');
+    const dotGitEnd = source.indexOf('};', dotGitStart);
+    const dotGitSource = source.slice(dotGitStart, dotGitEnd);
+
+    expect(canonicalSource).not.toMatch(/\bcwd:\s*fromPath\b/);
+    expect(dotGitSource).not.toMatch(/statSync\(dotGitPath\)[\s\S]*readFileSync\(dotGitPath/);
+  });
+
   it('returns null for a plain temp directory (not a git repo)', async () => {
     const { getCanonicalRepoRoot } = await import('../../src/storage/git.js');
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-canonical-'));
