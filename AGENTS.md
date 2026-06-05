@@ -75,16 +75,16 @@ commits, or posts.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **GitNexus** (37485 symbols, 57374 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **GitNexus** (35493 symbols, 54397 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-> To preserve semantic embeddings in a restricted local agent environment, use a writable `GITNEXUS_HOME` and the verified local Ollama dimensions:
-> `GITNEXUS_HOME=/tmp/gitnexus-analyze-home GITNEXUS_EMBEDDING_PROVIDER=ollama GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b GITNEXUS_EMBEDDING_DIMS=1024 GITNEXUS_EMBEDDING_NODE_LIMIT=90000 GITNEXUS_EMBEDDING_BATCH_SIZE=64 gitnexus analyze --embeddings`.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+> To preserve semantic embeddings in this restricted local agent environment, use a writable `GITNEXUS_HOME` and the verified Ollama dimensions:
+> `GITNEXUS_HOME=/tmp/gitnexus-analyze-home GITNEXUS_EMBEDDING_PROVIDER=ollama GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b GITNEXUS_EMBEDDING_DIMS=1024 GITNEXUS_EMBEDDING_NODE_LIMIT=90000 GITNEXUS_EMBEDDING_BATCH_SIZE=64 node .gitnexus/run.cjs analyze --embeddings`.
 
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
