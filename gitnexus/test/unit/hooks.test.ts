@@ -3330,8 +3330,11 @@ describe('PostToolUse with missing/corrupt meta.json', () => {
   ] as const) {
     it(`${label}: emits stale when meta.json does not exist`, () => {
       const metaPath = path.join(gitNexusDir, 'meta.json');
-      const hadMeta = fs.existsSync(metaPath);
-      if (hadMeta) fs.unlinkSync(metaPath);
+      try {
+        fs.unlinkSync(metaPath);
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ENOENT') throw error;
+      }
 
       try {
         const result = runHook(hookPath, {

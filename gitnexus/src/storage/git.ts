@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { readFileSync, statSync } from 'fs';
 import path from 'path';
 
@@ -182,11 +182,14 @@ export const getGitRoot = (fromPath: string): string | null => {
  */
 export const getCanonicalRepoRoot = (fromPath: string): string | null => {
   try {
-    const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
-      cwd: fromPath,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    })
+    const commonDir = execFileSync(
+      'git',
+      ['-C', fromPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      },
+    )
       .toString()
       .trim();
     if (!commonDir) return null;
@@ -257,15 +260,15 @@ export const findGitRootByDotGit = (fromPath: string): string | null => {
 
 const isValidDotGitEntry = (dotGitPath: string): boolean => {
   try {
-    const stat = statSync(dotGitPath);
-    if (stat.isDirectory()) {
-      statSync(path.join(dotGitPath, 'HEAD'));
-      return true;
-    }
-    if (stat.isFile()) {
-      return readFileSync(dotGitPath, 'utf8').trimStart().startsWith('gitdir:');
-    }
-    return false;
+    return readFileSync(dotGitPath, 'utf8').trimStart().startsWith('gitdir:');
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code !== 'EISDIR' && code !== 'EPERM') return false;
+  }
+
+  try {
+    readFileSync(path.join(dotGitPath, 'HEAD'), 'utf8');
+    return true;
   } catch {
     return false;
   }
