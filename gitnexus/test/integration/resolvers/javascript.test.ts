@@ -1,12 +1,11 @@
 /**
  * JavaScript: self/this resolution, parent resolution, super resolution
  */
-import { describe, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import path from 'path';
 import {
   FIXTURES,
   CROSS_FILE_FIXTURES,
-  createResolverParityIt,
   getRelationships,
   getNodesByLabel,
   getNodesByLabelFull,
@@ -15,12 +14,29 @@ import {
   type PipelineResult,
 } from './helpers.js';
 
-// Shadow vitest's `it` with the parity-gated runner so tests listed in
-// `LEGACY_RESOLVER_PARITY_EXPECTED_FAILURES.javascript` (helpers.ts) skip
-// under `REGISTRY_PRIMARY_JAVASCRIPT=0` (legacy DAG mode) and run normally
-// under the default registry-primary path. The scope-parity CI gate
-// requires this for the issue #1358 singleton describes below.
-const it = createResolverParityIt('javascript');
+// ---------------------------------------------------------------------------
+// Qualified (namespaced) base (#1951): `extends ns.Base` parses as a
+// class_heritage holding a member_expression (object: `ns`, property: `Base`).
+// An earlier synth (synthesizeJsInheritanceReferences) dropped member_expression
+// bases, emitting only for a direct identifier base, so production silently
+// omitted this EXTENDS edge. It is now resolved by the base's trailing
+// property_identifier (`Base`), matching the documented per-shape reduction.
+// `Plain extends Base` is the bare control (its simple-base handling is
+// unchanged). Scope-resolution owns these edges since #942.
+// ---------------------------------------------------------------------------
+
+describe('JavaScript qualified-base heritage resolution (#1951)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'javascript-qualified-base'), () => {});
+  }, 60000);
+
+  it('emits EXTENDS for the qualified base (ns.Base) and the bare control (Base)', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(edgeSet(extends_)).toEqual(['Plain → Base', 'Service → Base']);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // skipGraphPhases: verify pipeline works correctly when graph phases are skipped
@@ -516,7 +532,7 @@ describe('JavaScript method enrichment', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SM-9: lookupMethodByOwnerWithMRO — child.parentMethod() via first-wins walk
+// SM-9: inherited method resolution — child.parentMethod() via first-wins walk
 // ---------------------------------------------------------------------------
 
 describe('JavaScript Child extends Parent — inherited method resolution (SM-9)', () => {

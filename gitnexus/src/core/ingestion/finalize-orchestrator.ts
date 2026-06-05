@@ -121,7 +121,7 @@ export function finalizeScopeModel(
 
   // ── Step 3: MethodDispatchIndex. Today we lack per-language MRO
   // strategies wired into this orchestrator (that belongs with the
-  // HeritageMap bridge, a separate piece of work). Ship an EMPTY index
+  // MRO bridge, a separate piece of work). Ship an EMPTY index
   // so the bundle shape is consistent; the callbacks return `[]` for
   // every owner and `implementsOf` returns `[]`. Populating this
   // properly is tracked alongside the per-language provider hooks.
@@ -145,6 +145,10 @@ export function finalizeScopeModel(
     // consumes the bundle. Most languages leave it empty.
     bindingAugmentations: new Map(),
     workspaceFqnBindings: new Map(),
+    workspaceTypeBindings: new Map(),
+    namespaceFqnBindings: new Map(),
+    namespaceTypeBindings: new Map(),
+    accessibleNamespacesByScope: new Map(),
     referenceSites: Object.freeze([...allReferenceSites]),
     sccs: finalizeOut.sccs,
     stats: finalizeOut.stats,

@@ -115,6 +115,7 @@ describe('run-analyze module', () => {
         })),
         executeQuery: vi.fn(async () => [{ cnt: 0 }]),
         executeWithReusedStatement: vi.fn(async () => []),
+        loadFTSExtension: vi.fn(async () => true),
         closeLbug: vi.fn(async () => undefined),
         loadCachedEmbeddings: vi.fn(async () => ({ embeddingNodeIds: new Set(), embeddings: [] })),
         deleteNodesForFile: vi.fn(async () => undefined),

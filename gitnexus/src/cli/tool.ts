@@ -16,8 +16,8 @@
  */
 
 import { writeSync } from 'node:fs';
-import { LocalBackend } from '../mcp/local/local-backend.js';
-import { cliErrorKey } from './cli-message.js';
+import { LocalBackend, VALID_NODE_LABELS } from '../mcp/local/local-backend.js';
+import { cliErrorKey, cliWarnKey } from './cli-message.js';
 import { formatDetectChangesResult } from './detect-changes-format.js';
 
 let _backend: LocalBackend | null = null;
@@ -86,10 +86,15 @@ function nextActionForVerifyStaged(payload: any): string {
   return 'Review listed changes before commit.';
 }
 
-function normalizeVerifyStagedResult(result: any, options?: { repo?: string; cwd?: string; worktree?: string }) {
+function normalizeVerifyStagedResult(
+  result: any,
+  options?: { repo?: string; cwd?: string; worktree?: string },
+) {
   const summary = result?.summary ?? {};
   const changedSymbols = Array.isArray(result?.changed_symbols) ? result.changed_symbols : [];
-  const affectedProcesses = Array.isArray(result?.affected_processes) ? result.affected_processes : [];
+  const affectedProcesses = Array.isArray(result?.affected_processes)
+    ? result.affected_processes
+    : [];
   const metadata = result?.metadata ?? {};
   const status =
     metadata.stale === true
@@ -165,6 +170,11 @@ export async function contextCommand(
     content?: boolean;
   },
 ): Promise<void> {
+  // Reject a `--`-prefixed uid swallowed from a following flag (see impactCommand).
+  if (options?.uid?.startsWith('--')) {
+    cliErrorKey('tool.usage.context');
+    process.exit(1);
+  }
   if (!name?.trim() && !options?.uid) {
     cliErrorKey('tool.usage.context');
     process.exit(1);
@@ -182,10 +192,13 @@ export async function contextCommand(
 }
 
 export async function impactCommand(
-  target: string,
+  target?: string,
   options?: {
     direction?: string;
     repo?: string;
+    uid?: string;
+    file?: string;
+    kind?: string;
     depth?: string;
     includeTests?: boolean;
     limit?: string;
@@ -193,9 +206,24 @@ export async function impactCommand(
     summaryOnly?: boolean;
   },
 ): Promise<void> {
-  if (!target?.trim()) {
+  // A `--`-prefixed uid means Commander swallowed a following flag as the uid
+  // value (e.g. `impact --uid --file x` → uid === '--file'). Reject it rather
+  // than forwarding a garbage uid that would silently resolve to not-found.
+  if (options?.uid?.startsWith('--')) {
     cliErrorKey('tool.usage.impact');
     process.exit(1);
+  }
+  // Target is an optional positional: a uid alone is enough to resolve (parity
+  // with `context [name]`). Only error when neither a target nor a uid is given.
+  if (!target?.trim() && !options?.uid) {
+    cliErrorKey('tool.usage.impact');
+    process.exit(1);
+  }
+  // Soft-validate --kind: an unknown kind is a no-op hint (the backend scores
+  // it but it matches nothing), so warn and proceed rather than rejecting —
+  // parity with the lenient MCP surface and forward-compatible with new labels.
+  if (options?.kind && !VALID_NODE_LABELS.has(options.kind)) {
+    cliWarnKey('tool.warn.unknownKind', { kind: options.kind });
   }
 
   try {
@@ -205,7 +233,10 @@ export async function impactCommand(
     const parsedLimit = Number.isFinite(rawLimit) ? rawLimit : undefined;
     const parsedOffset = Number.isFinite(rawOffset) ? rawOffset : undefined;
     const result = await backend.callTool('impact', {
-      target,
+      target: target || undefined,
+      target_uid: options?.uid,
+      file_path: options?.file,
+      kind: options?.kind,
       direction: options?.direction || 'upstream',
       maxDepth: options?.depth ? parseInt(options.depth, 10) : undefined,
       includeTests: options?.includeTests ?? false,
@@ -291,10 +322,16 @@ export async function verifyStagedCommand(options?: {
     if (result && typeof result === 'object' && 'error' in result && (result as any).error) {
       process.exitCode = 1;
       const errorPayload = normalizeVerifyStagedError((result as any).error, options);
-      output(options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }));
+      output(
+        options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }),
+      );
       return;
     }
-    output(options?.json ? normalizeVerifyStagedResult(result, options) : formatDetectChangesResult(result));
+    output(
+      options?.json
+        ? normalizeVerifyStagedResult(result, options)
+        : formatDetectChangesResult(result),
+    );
   } catch (err) {
     process.exitCode = 1;
     const errorPayload = normalizeVerifyStagedError(err, options);

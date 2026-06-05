@@ -4,6 +4,8 @@ import path from 'node:path';
 import { getRuntimeCapabilities, getRuntimeFingerprint } from '../core/platform/capabilities.js';
 import { resolveEmbeddingConfig } from '../core/embeddings/config.js';
 import { isHttpMode } from '../core/embeddings/http-client.js';
+import { getLocalEmbeddingRuntimeBlocker } from '../core/embeddings/runtime-support.js';
+import { getExtensionInstallPolicy } from '../core/lbug/extension-loader.js';
 import { checkLbugNative, type NativeCheckResult } from '../core/lbug/native-check.js';
 import { hasIndex as hasRepoIndex } from '../storage/repo-manager.js';
 import { getGitRoot, isGitRepo } from '../storage/git.js';
@@ -86,6 +88,23 @@ export function displayWidth(value: string): number {
 
 export function padDisplayEnd(value: string, columns: number): string {
   return value + ' '.repeat(Math.max(0, columns - displayWidth(value)));
+}
+
+export function localEmbeddingDoctorStatus(opts: {
+  httpMode: boolean;
+  platform?: NodeJS.Platform;
+  arch?: NodeJS.Architecture;
+}): { status: string; detail: string | null } {
+  if (opts.httpMode) {
+    return { status: '✓ http endpoint configured', detail: null };
+  }
+  const platform = opts.platform ?? process.platform;
+  const arch = opts.arch ?? process.arch;
+  const blocker = getLocalEmbeddingRuntimeBlocker({ platform, arch });
+  if (blocker) {
+    return { status: `✗ local embeddings unavailable on ${platform}/${arch}`, detail: blocker };
+  }
+  return { status: '✓ local embeddings supported', detail: null };
 }
 
 const label = (key: Parameters<typeof t>[0], width: number): string => padDisplayEnd(t(key), width);
@@ -330,6 +349,12 @@ function printTextDoctor(result: DoctorResult): void {
   console.log(
     `  ${label('doctor.labels.subBatch', 12)}${t('doctor.chunks', { count: embeddingConfig.subBatchSize })}`,
   );
+  const support = localEmbeddingDoctorStatus({ httpMode: embeddings.backend === 'http' });
+  console.log(`  ${padDisplayEnd('Support:', 12)}${support.status}`);
+  if (support.detail) {
+    process.stderr.write(`\n${support.detail.replace(/^/gm, '  ')}\n\n`);
+  }
+  console.log(`  ${padDisplayEnd('Extensions:', 12)}${getExtensionInstallPolicy()}`);
 
   for (const check of result.checks) {
     if (['runtime', 'native-runtime', 'capabilities', 'embeddings'].includes(check.name)) continue;

@@ -13,10 +13,16 @@ This project uses the [PolyForm Noncommercial License 1.0.0](https://polyformpro
 
 ## Development setup
 
+**Prerequisites:** Node.js — `gitnexus/` requires `>=22.0.0` and `gitnexus-web/` requires `^20.19.0 || >=22.12.0` (enforced via the `engines` field in each package). Use `nvm install` to match the local version.
+
 1. Clone the repository.
 2. **CLI / MCP package:** `cd gitnexus && npm install && npm run build`
 3. **Web UI (if needed):** `cd gitnexus-web && npm install`
 4. Run tests as described in [TESTING.md](TESTING.md).
+
+### Containerized development (optional)
+
+If you prefer an isolated environment with Claude Code, OpenAI Codex CLI, and Cursor CLI pre-installed, open the repo in VS Code with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) and run **Dev Containers: Reopen in Container**. See [`.devcontainer/README.md`](.devcontainer/README.md) for first-time auth flows and Windows WSL2 setup.
 
 ## Branch and pull requests
 

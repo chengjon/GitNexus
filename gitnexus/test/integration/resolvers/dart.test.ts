@@ -476,7 +476,7 @@ describe.skipIf(!dartAvailable)('Dart interface dispatch (METHOD_IMPLEMENTS)', (
 });
 
 // ---------------------------------------------------------------------------
-// SM-9/SM-10: lookupMethodByOwnerWithMRO + D0 fast path — Dart first-wins
+// SM-9/SM-10: inherited method resolution — Dart first-wins inheritance walk
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!dartAvailable)(
@@ -577,5 +577,162 @@ describe.skipIf(!dartAvailable)('Dart widget-tree call resolution', () => {
     const calls = getRelationships(result, 'CALLS');
     const edge = calls.find((c) => c.source === 'buildPage' && c.target === 'buildFooter');
     expect(edge).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Implicit-constructor construction edge (PR #1970 review regression)
+// build() { return Widget(); } where Widget has only an implicit constructor.
+// Both the legacy DAG and the registry-primary path must emit a CALLS edge
+// from the enclosing function to the constructed Class.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!dartAvailable)('Dart implicit-constructor construction', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'dart-construct-cascade'), () => {});
+  }, 60000);
+
+  it('detects the Widget class and the build function', () => {
+    expect(getNodesByLabel(result, 'Class')).toContain('Widget');
+    expect(getNodesByLabel(result, 'Function')).toContain('build');
+  });
+
+  it('emits a CALLS edge build → Widget for the implicit-constructor call', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const ctorCall = calls.find((c) => c.source === 'build' && c.target === 'Widget');
+    expect(ctorCall).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F24 (issue #1926): member calls (obj.method()) in return / list-literal /
+// named-argument / arrow-body contexts. The legacy DAG (removed in #942) only
+// captured member calls under expression_statement /
+// initialized_variable_definition; scope-resolution now owns and resolves these
+// broader contexts.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!dartAvailable)('Dart member-call contexts (F24)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'dart-member-call-contexts'), () => {});
+  }, 60000);
+
+  it('resolves a member call in a return statement (svc.compute())', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const edge = calls.find((c) => c.source === 'inReturn' && c.target === 'compute');
+    expect(edge).toBeDefined();
+    expect(edge!.targetFilePath).toContain('models.dart');
+  });
+
+  it('resolves member calls inside a list literal', () => {
+    const calls = getRelationships(result, 'CALLS');
+    expect(calls.find((c) => c.source === 'inList' && c.target === 'first')).toBeDefined();
+    expect(calls.find((c) => c.source === 'inList' && c.target === 'second')).toBeDefined();
+  });
+
+  it('resolves a member call in a named argument', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const edge = calls.find((c) => c.source === 'inNamedArg' && c.target === 'load');
+    expect(edge).toBeDefined();
+  });
+
+  it('resolves a member call in an arrow body', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const edge = calls.find((c) => c.source === 'inArrow' && c.target === 'run');
+    expect(edge).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F25 (issue #1926): calls inside a constructor body are mis-attributed by the
+// legacy enclosing-function finder (it only unwraps function_signature, not the
+// constructor_signature whose body is a sibling of the wrapping method_signature).
+// The registry-primary scope path synthesizes a Function scope for the
+// constructor body, and the Constructor def is a valid caller anchor, so the
+// call attributes to the constructor. Registry-primary-only win.
+// (Getter/setter and operator bodies are out of scope: Property is not a caller
+// anchor, and the structure phase emits no Method node for operators — see the
+// helpers.ts expected-failures comment.)
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!dartAvailable)('Dart constructor body call attribution (F25)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'dart-constructor-body'), () => {});
+  }, 60000);
+
+  it('attributes a call inside a constructor body to the constructor', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const edge = calls.find((c) => c.target === 'setup' && c.sourceLabel === 'Constructor');
+    expect(edge).toBeDefined();
+    expect(edge!.source).toBe('Vector');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Named constructor with a body (PR #1970 tri-review P0 regression).
+// `class A { A.named() { ... } }` parses as a constructor_signature with
+// multiple name: fields, double-matching the scope query. Without dedup, two
+// identical-range Function scopes throw ScopeTreeInvariantError and the WHOLE
+// file is dropped from registry-primary resolution. Test 1 (parity) guards
+// against the file-drop in both modes; test 2 is the F25 constructor-attribution
+// win (registry-only, like the dart-constructor-body case).
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!dartAvailable)('Dart named-constructor body (no file drop)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(
+      path.join(FIXTURES, 'dart-named-constructor-body'),
+      () => {},
+    );
+  }, 60000);
+
+  it('still resolves other calls in a class that has a named constructor with a body', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const greetCall = calls.find((c) => c.source === 'greet' && c.target === 'setup');
+    expect(greetCall).toBeDefined();
+  });
+
+  it('attributes a call inside a named-constructor body to the constructor', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const ctorCall = calls.find((c) => c.target === 'setup' && c.sourceLabel === 'Constructor');
+    expect(ctorCall).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Heritage cross-file simple-name collision (PR #1970 tri-review P2).
+// console_logger.dart and file_logger.dart each declare `class Logger`; each
+// file's service `implements Logger`. emitDartHeritageEdges resolves the base
+// with same-file affinity, so each IMPLEMENTS edge must target its OWN file's
+// Logger (not a globally last-written one). Parity — both modes resolve same-file.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!dartAvailable)('Dart heritage cross-file name collision', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(
+      path.join(FIXTURES, 'dart-heritage-name-collision'),
+      () => {},
+    );
+  }, 60000);
+
+  it('resolves implements to the same-file class on a name collision', () => {
+    const impl = getRelationships(result, 'IMPLEMENTS');
+    const consoleEdge = impl.find((e) => e.source === 'ConsoleService' && e.target === 'Logger');
+    expect(consoleEdge).toBeDefined();
+    expect(consoleEdge!.targetFilePath).toContain('console_logger.dart');
+
+    const fileEdge = impl.find((e) => e.source === 'FileService' && e.target === 'Logger');
+    expect(fileEdge).toBeDefined();
+    expect(fileEdge!.targetFilePath).toContain('file_logger.dart');
   });
 });

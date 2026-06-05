@@ -1,13 +1,12 @@
 /**
  * TypeScript: heritage resolution + ambiguous symbol disambiguation
  */
-import { describe, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'node:fs';
 import os from 'node:os';
 import {
   FIXTURES,
-  createResolverParityIt,
   getRelationships,
   getNodesByLabel,
   getNodesByLabelFull,
@@ -16,13 +15,6 @@ import {
   type PipelineResult,
 } from './helpers.js';
 
-// Shadow vitest's `it` with the parity-gated runner so tests listed in
-// `LEGACY_RESOLVER_PARITY_EXPECTED_FAILURES.typescript` (helpers.ts) skip
-// under `REGISTRY_PRIMARY_TYPESCRIPT=0` (legacy DAG mode) and run normally
-// under the default registry-primary path. The scope-parity CI gate
-// requires this for the issue #1358 singleton describes below.
-const it = createResolverParityIt('typescript');
-
 function writeFixtureRepo(root: string, files: Record<string, string>): void {
   for (const [relPath, content] of Object.entries(files)) {
     const fullPath = path.join(root, relPath);
@@ -30,6 +22,58 @@ function writeFixtureRepo(root: string, files: Record<string, string>): void {
     fs.writeFileSync(fullPath, content, 'utf8');
   }
 }
+
+// ---------------------------------------------------------------------------
+// Generic-base heritage (#1951): extends Box<T> already worked (value: identifier
+// captures Base; type_args are a sibling), and `implements IFoo<T>` is resolved
+// to its bare name IFoo. Scope-resolution (the single path since #942) owns
+// these edges.
+// ---------------------------------------------------------------------------
+
+describe('TypeScript generic-base heritage resolution (#1951)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'typescript-generic-base'), () => {});
+  }, 60000);
+
+  it('emits EXTENDS Service → Box for a generic superclass (extends Box<string>)', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(edgeSet(extends_)).toEqual(['Service → Box']);
+  });
+
+  it('emits IMPLEMENTS Service → IFoo for a generic interface (implements IFoo<string>)', () => {
+    const implements_ = getRelationships(result, 'IMPLEMENTS');
+    expect(edgeSet(implements_)).toEqual(['Service → IFoo']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Qualified (namespaced) bases (#1956 tri-review U2): `extends ns.Box<string>`
+// + `implements ns.IFoo<string>` (qualified-generic, on Service) and `extends
+// ns.Base` + `implements ns.IBar` (qualified non-generic, on Plain). extends
+// uses a member_expression value; implements uses a nested_type_identifier
+// (plain) or a generic_type wrapping one. Scope-resolution resolves these by
+// their tail and owns these edges since #942.
+// ---------------------------------------------------------------------------
+
+describe('TypeScript qualified-base heritage resolution (#1956 U2)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'typescript-qualified-base'), () => {});
+  }, 60000);
+
+  it('emits EXTENDS for qualified and qualified-generic superclasses', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(edgeSet(extends_)).toEqual(['Plain → Base', 'Service → Box']);
+  });
+
+  it('emits IMPLEMENTS for qualified and qualified-generic interfaces', () => {
+    const implements_ = getRelationships(result, 'IMPLEMENTS');
+    expect(edgeSet(implements_)).toEqual(['Plain → IBar', 'Service → IFoo']);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Heritage: class extends + implements interface
@@ -379,14 +423,9 @@ describe('TypeScript named import disambiguation', () => {
 
 // ---------------------------------------------------------------------------
 // Side-effect imports: `import './polyfill'` produces an IMPORTS edge but
-// no local binding (parity with the legacy DAG, which counts side-effect
-// imports as module-reachability dependencies).
-//
-// This describe runs under both `REGISTRY_PRIMARY_TYPESCRIPT=0` (legacy
-// DAG) and `=1` (registry-primary) via the CI parity gate
-// (`.github/workflows/ci-scope-parity.yml`). Both modes must emit the
-// same IMPORTS edges; the registry-primary path emits no extra
-// `BindingRef`s for the side-effect kind.
+// no local binding (side-effect imports count as module-reachability
+// dependencies). The scope-resolution path emits no extra `BindingRef`s for
+// the side-effect kind.
 // ---------------------------------------------------------------------------
 
 describe('TypeScript side-effect imports', () => {
@@ -2657,7 +2696,7 @@ describe('TypeScript same-arity overload cross-file resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SM-9: lookupMethodByOwnerWithMRO — child.parentMethod() via first-wins walk
+// SM-9: inherited method resolution — child.parentMethod() via first-wins walk
 // ---------------------------------------------------------------------------
 
 describe('TypeScript Child extends Parent — inherited method resolution (SM-9)', () => {
@@ -2820,16 +2859,10 @@ describe('TypeScript literal dynamic import resolution (registry-primary)', () =
     const imports = getRelationships(result, 'IMPORTS').filter(
       (e) => e.sourceFilePath === 'src/app.ts',
     );
-    // Literal dynamic-import resolution is a registry-primary feature
-    // (interpreter emits `dynamic-resolved`, finalize pre-finalizes it
-    // as a file-level terminal). The legacy DAG path
-    // (`REGISTRY_PRIMARY_TYPESCRIPT=0`) does not link literal
-    // `import('…')` calls to a target file — accept that here so the
-    // CI parity gate stays green; the registry-primary path remains the
-    // authoritative guarantee.
-    if (process.env['REGISTRY_PRIMARY_TYPESCRIPT'] !== '0') {
-      expect(imports.map((e) => e.targetFilePath)).toContain('src/feature.ts');
-    }
+    // Literal dynamic-import resolution: the interpreter emits
+    // `dynamic-resolved` and finalize pre-finalizes it as a file-level
+    // terminal, linking literal `import('…')` calls to a target file.
+    expect(imports.map((e) => e.targetFilePath)).toContain('src/feature.ts');
   });
 });
 

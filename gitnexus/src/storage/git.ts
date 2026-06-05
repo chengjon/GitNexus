@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { readFileSync, statSync } from 'fs';
 import path from 'path';
 
@@ -182,11 +182,14 @@ export const getGitRoot = (fromPath: string): string | null => {
  */
 export const getCanonicalRepoRoot = (fromPath: string): string | null => {
   try {
-    const commonDir = execSync('git rev-parse --path-format=absolute --git-common-dir', {
-      cwd: fromPath,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    })
+    const commonDir = execFileSync(
+      'git',
+      ['-C', fromPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      },
+    )
       .toString()
       .trim();
     if (!commonDir) return null;
@@ -257,15 +260,15 @@ export const findGitRootByDotGit = (fromPath: string): string | null => {
 
 const isValidDotGitEntry = (dotGitPath: string): boolean => {
   try {
-    const stat = statSync(dotGitPath);
-    if (stat.isDirectory()) {
-      statSync(path.join(dotGitPath, 'HEAD'));
-      return true;
-    }
-    if (stat.isFile()) {
-      return readFileSync(dotGitPath, 'utf8').trimStart().startsWith('gitdir:');
-    }
-    return false;
+    return readFileSync(dotGitPath, 'utf8').trimStart().startsWith('gitdir:');
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code !== 'EISDIR' && code !== 'EPERM') return false;
+  }
+
+  try {
+    readFileSync(path.join(dotGitPath, 'HEAD'), 'utf8');
+    return true;
   } catch {
     return false;
   }
@@ -309,6 +312,35 @@ export const getRemoteOriginUrl = (repoPath: string): string | null => {
       .toString()
       .trim();
     return url || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Best-effort detection of the repository's default branch (#243).
+ *
+ * Reads `git symbolic-ref --short refs/remotes/origin/HEAD`, which resolves to
+ * the short ref `origin/<branch>` that the local `origin/HEAD` points at, and
+ * strips the `origin/` prefix. This is a purely local lookup — it never makes a
+ * network call. Returns `null` when there is no git repo, no `origin` remote, no
+ * `origin/HEAD` (e.g. it was never set by clone, or the repo is detached), or
+ * git is unavailable, so callers can fall back to a configured/default branch.
+ */
+export const getDefaultBranch = (repoPath: string): string | null => {
+  try {
+    const ref = execSync('git symbolic-ref --short refs/remotes/origin/HEAD', {
+      cwd: repoPath,
+      // Suppress stderr -- see getCurrentCommit comment and #1172. Without it,
+      // git prints "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref"
+      // to the user's terminal on repos that never set origin/HEAD.
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    })
+      .toString()
+      .trim();
+    if (!ref) return null;
+    return ref.startsWith('origin/') ? ref.slice('origin/'.length) : ref;
   } catch {
     return null;
   }

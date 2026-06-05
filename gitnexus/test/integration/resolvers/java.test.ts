@@ -1,12 +1,11 @@
 /**
  * Java: class extends + implements multiple interfaces + ambiguous package disambiguation
  */
-import { describe, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import path from 'path';
 import {
   FIXTURES,
   CROSS_FILE_FIXTURES,
-  createResolverParityIt,
   getRelationships,
   getNodesByLabel,
   getNodesByLabelFull,
@@ -14,8 +13,6 @@ import {
   runPipelineFromRepo,
   type PipelineResult,
 } from './helpers.js';
-
-const it = createResolverParityIt('java');
 
 // ---------------------------------------------------------------------------
 // Heritage: class extends + implements multiple interfaces
@@ -79,6 +76,104 @@ describe('Java heritage resolution', () => {
       const target = result.graph.getNode(edge.rel.targetId);
       expect(target).toBeDefined();
       expect(target!.label).not.toBe('Property');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Generic-base heritage (#1951): extends Box<T> + implements IFoo<T>. An
+// earlier query was type_identifier-only and matched 0 generic bases; the synth
+// resolves the generic base to its bare name. Scope-resolution (the single path
+// since #942) owns these edges.
+// ---------------------------------------------------------------------------
+
+describe('Java generic-base heritage resolution (#1951)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'java-generic-base'), () => {});
+  }, 60000);
+
+  it('emits EXTENDS Service → Box for a generic superclass (extends Box<String>)', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(edgeSet(extends_)).toEqual(['Service → Box']);
+  });
+
+  it('emits IMPLEMENTS Service → IFoo for a generic interface (implements IFoo<String>)', () => {
+    const implements_ = getRelationships(result, 'IMPLEMENTS');
+    expect(edgeSet(implements_)).toEqual(['Service → IFoo']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Qualified (namespaced) bases (#1956 tri-review U2). Three shapes:
+//   - Service: 3-segment generic (extends app.base.Box<T>, implements app.base.IFoo<T>)
+//   - Plain:   2-segment plain    (extends base.Base, implements base.IBar)
+//   - Two:     2-segment generic  (extends base.Box<T>, implements base.IFoo<T>)
+// Scope-resolution resolves each by its scoped-name tail (end-anchored
+// scoped_type_identifier handling). The 2-segment cases are the regression
+// guard: an un-anchored arm double-matches a 2-segment base (both segments are
+// direct type_identifier children) and emits a spurious prefix edge — this
+// asserts exactly one edge per base.
+// ---------------------------------------------------------------------------
+
+describe('Java qualified-base heritage resolution (#1956 U2)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'java-qualified-base'), () => {});
+  }, 60000);
+
+  it('emits exactly one EXTENDS per class, tail-resolved (no spurious prefix edge)', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(edgeSet(extends_)).toEqual(['Plain → Base', 'Service → Box', 'Two → Box']);
+  });
+
+  it('emits exactly one IMPLEMENTS per class, tail-resolved (no spurious prefix edge)', () => {
+    const implements_ = getRelationships(result, 'IMPLEMENTS');
+    expect(edgeSet(implements_)).toEqual(['Plain → IBar', 'Service → IFoo', 'Two → IFoo']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interface-to-interface EXTENDS (#1951): `interface IA extends IB, IC<String>`.
+// An earlier synth walked class_declaration ONLY, so it NEVER emitted
+// interface-to-interface heritage — production silently dropped these edges.
+// Widening the synth's traversal to also walk
+// interface_declaration > extends_interfaces > type_list closes it.
+// Both bases resolve to Interface symbols, so preEmitInheritanceEdges emits them
+// as IMPLEMENTS. IC<String> exercises the generic-base reduction (IC<String> ->
+// IC). Scope-resolution (the single resolution path since #942) owns these
+// edges.
+// ---------------------------------------------------------------------------
+
+describe('Java interface-extends-interface heritage resolution (#1951)', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'java-iface-extends'), () => {});
+  }, 60000);
+
+  it('detects 3 interfaces and no classes', () => {
+    expect(getNodesByLabel(result, 'Interface')).toEqual(['IA', 'IB', 'IC']);
+    expect(getNodesByLabel(result, 'Class')).toEqual([]);
+  });
+
+  it('emits IMPLEMENTS IA → IB and IA → IC for interface-to-interface extends', () => {
+    const implements_ = getRelationships(result, 'IMPLEMENTS');
+    expect(edgeSet(implements_)).toEqual(['IA → IB', 'IA → IC']);
+  });
+
+  it('emits no EXTENDS edges (interface bases resolve to Interface → IMPLEMENTS)', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    expect(extends_).toEqual([]);
+  });
+
+  it('all interface-heritage edges point to real Interface graph nodes', () => {
+    for (const edge of getRelationships(result, 'IMPLEMENTS')) {
+      const target = result.graph.getNode(edge.rel.targetId);
+      expect(target).toBeDefined();
+      expect(target!.properties.name).toBe(edge.target);
     }
   });
 });
@@ -516,11 +611,9 @@ describe('Java variadic call resolution', () => {
   });
 
   it('0-arg call to format(int, String...) still resolves in legacy mode (arity rejection is registry-only)', () => {
-    // In REGISTRY_PRIMARY_JAVA=1 mode, `requiredParameterCount = 1` causes
-    // `javaArityCompatibility` to return 'incompatible' for 0-arg calls,
-    // preventing the CALLS edge. In default (legacy) mode, arity is not
-    // enforced so the edge is created. This test documents the legacy
-    // behavior; the negative assertion is a flip-blocker for registry-primary.
+    // When `requiredParameterCount = 1`, `javaArityCompatibility` returns
+    // 'incompatible' for 0-arg calls, which would prevent the CALLS edge.
+    // This test documents the current resolution behavior for this shape.
     const calls = getRelationships(result, 'CALLS');
     const zeroArgFmtCall = calls.find((c) => c.target === 'format' && c.source === 'badCall');
     expect(zeroArgFmtCall).toBeDefined();
@@ -2217,8 +2310,8 @@ describe('Cross-class method chain resolution (Java) — #575', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SM-9: lookupMethodByOwnerWithMRO — class Child extends Parent
-// child.parentMethod() resolves to Parent#parentMethod via MRO parent walk.
+// SM-9: inherited method resolution — class Child extends Parent
+// child.parentMethod() resolves to Parent#parentMethod via the parent walk.
 // ---------------------------------------------------------------------------
 
 describe('Java Child extends Parent — inherited method resolution (SM-9)', () => {
