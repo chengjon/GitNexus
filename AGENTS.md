@@ -55,6 +55,23 @@ listed in [`pr-swarm-review/README.md`](pr-swarm-review/README.md); edit review 
 in the canonical files, never in the wrappers. The review is read-only — it never edits,
 commits, or posts.
 
+## Local GitNexus Embeddings
+
+To preserve semantic embeddings in this restricted local agent environment, use a writable `GITNEXUS_HOME` and keep the Ollama vector dimensions explicit:
+
+```bash
+GITNEXUS_HOME=/tmp/gitnexus-analyze-home \
+GITNEXUS_EMBEDDING_PROVIDER=ollama \
+GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 \
+GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b \
+GITNEXUS_EMBEDDING_DIMS=1024 \
+GITNEXUS_EMBEDDING_NODE_LIMIT=90000 \
+GITNEXUS_EMBEDDING_BATCH_SIZE=64 \
+node .gitnexus/run.cjs analyze --embeddings
+```
+
+`qwen3-embedding:0.6b` returns 1024-dimensional vectors. Keep `GITNEXUS_EMBEDDING_DIMS=1024` explicit so GitNexus does not fall back to the 384d local-transformers default.
+
 ## Changelog
 
 | Date | Version | Change |
@@ -78,8 +95,6 @@ commits, or posts.
 This project is indexed by GitNexus as **GitNexus** (35493 symbols, 54397 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
-> To preserve semantic embeddings in this restricted local agent environment, use a writable `GITNEXUS_HOME` and the verified Ollama dimensions:
-> `GITNEXUS_HOME=/tmp/gitnexus-analyze-home GITNEXUS_EMBEDDING_PROVIDER=ollama GITNEXUS_OLLAMA_BASE_URL=http://localhost:11434 GITNEXUS_OLLAMA_MODEL=qwen3-embedding:0.6b GITNEXUS_EMBEDDING_DIMS=1024 GITNEXUS_EMBEDDING_NODE_LIMIT=90000 GITNEXUS_EMBEDDING_BATCH_SIZE=64 node .gitnexus/run.cjs analyze --embeddings`.
 
 ## Always Do
 
