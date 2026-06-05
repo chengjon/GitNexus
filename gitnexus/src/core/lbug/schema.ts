@@ -450,9 +450,7 @@ const _rawEmbeddingDims =
   (_storedEmbeddingDims === undefined ? '384' : String(_storedEmbeddingDims));
 const _rawDims = parseInt(_rawEmbeddingDims, 10);
 if (Number.isNaN(_rawDims) || _rawDims <= 0) {
-  throw new Error(
-    `GITNEXUS_EMBEDDING_DIMS must be a positive integer, got "${_rawEmbeddingDims}"`,
-  );
+  throw new Error(`GITNEXUS_EMBEDDING_DIMS must be a positive integer, got "${_rawEmbeddingDims}"`);
 }
 export const EMBEDDING_DIMS = _rawDims;
 

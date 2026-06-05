@@ -86,10 +86,15 @@ function nextActionForVerifyStaged(payload: any): string {
   return 'Review listed changes before commit.';
 }
 
-function normalizeVerifyStagedResult(result: any, options?: { repo?: string; cwd?: string; worktree?: string }) {
+function normalizeVerifyStagedResult(
+  result: any,
+  options?: { repo?: string; cwd?: string; worktree?: string },
+) {
   const summary = result?.summary ?? {};
   const changedSymbols = Array.isArray(result?.changed_symbols) ? result.changed_symbols : [];
-  const affectedProcesses = Array.isArray(result?.affected_processes) ? result.affected_processes : [];
+  const affectedProcesses = Array.isArray(result?.affected_processes)
+    ? result.affected_processes
+    : [];
   const metadata = result?.metadata ?? {};
   const status =
     metadata.stale === true
@@ -317,10 +322,16 @@ export async function verifyStagedCommand(options?: {
     if (result && typeof result === 'object' && 'error' in result && (result as any).error) {
       process.exitCode = 1;
       const errorPayload = normalizeVerifyStagedError((result as any).error, options);
-      output(options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }));
+      output(
+        options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }),
+      );
       return;
     }
-    output(options?.json ? normalizeVerifyStagedResult(result, options) : formatDetectChangesResult(result));
+    output(
+      options?.json
+        ? normalizeVerifyStagedResult(result, options)
+        : formatDetectChangesResult(result),
+    );
   } catch (err) {
     process.exitCode = 1;
     const errorPayload = normalizeVerifyStagedError(err, options);

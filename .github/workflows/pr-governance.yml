@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pr-body-governance:
     runs-on: ubuntu-latest
@@ -16,6 +20,10 @@ jobs:
         with:
           fetch-depth: 0
       - name: Ensure PR base ref is available for governance diff
-        run: git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "${PR_BASE_REF}:refs/remotes/origin/${PR_BASE_REF}"
       - name: Validate PR body governance sections
-        run: node gitnexus/scripts/ci/repository-governance-check.mjs --mode pr-body --repo-root . --base-ref "origin/${{ github.base_ref }}" --event-path "$GITHUB_EVENT_PATH"
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+        run: node gitnexus/scripts/ci/repository-governance-check.mjs --mode pr-body --repo-root . --base-ref "origin/${PR_BASE_REF}" --event-path "$GITHUB_EVENT_PATH"
