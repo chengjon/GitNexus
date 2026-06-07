@@ -9,6 +9,7 @@ All notable changes to GitNexus will be documented in this file.
 - **Multi-repo MCP runtime** backed by the global `~/.gitnexus/registry.json` registry, so one `gitnexus mcp` server can serve multiple indexed repositories and lazily open each repo's graph store.
 - **Agent-safe staged verification** via `gitnexus verify-staged`, a bounded JSON wrapper around staged `detect_changes` for commit closeout workflows.
 - **Repository groups and contract-aware analysis** for cross-repo query, impact, API route, and response-shape workflows.
+- **Repository function tree** documenting active feature areas, closed Dependabot A/B/C dependency governance, and the #10 Dockerfile.test route 1 follow-up node.
 
 ### Changed
 
