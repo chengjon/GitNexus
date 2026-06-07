@@ -92,6 +92,8 @@ Enterprise includes:
 - [GUARDRAILS.md](GUARDRAILS.md) — safety rules and operational “Signs” for contributors and agents
 - [CONTRIBUTING.md](CONTRIBUTING.md) — license, setup, commits, and pull requests
 - [TESTING.md](TESTING.md) — test commands for `gitnexus` and `gitnexus-web`
+- [FUNCTION_TREE.md](FUNCTION_TREE.md) - repository function tree, durable governance notes, and closed dependency PR follow-up nodes
+- [docs/dependency-pr-evaluations/](docs/dependency-pr-evaluations/) - archived Dependabot A/B/C dependency PR readiness evidence
 
 ## CLI + MCP (recommended)
 
