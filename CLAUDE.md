@@ -1,10 +1,10 @@
-<!-- version: 1.3.0 -->
+<!-- version: 1.8.0 -->
 <!--
   Metadata: version, last reviewed, scope, model policy, reference docs, changelog.
-  Last updated: 2026-03-22
+  Last updated: 2026-07-16
 -->
 
-Last reviewed: 2026-04-13
+Last reviewed: 2026-07-16
 
 **Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
 
@@ -36,12 +36,18 @@ If always-on instructions grow, load deep conventions via conditional reads (e.g
 
 - **This repository:** [AGENTS.md](AGENTS.md) (Cursor + monorepo notes), [ARCHITECTURE.md](ARCHITECTURE.md), [CONTRIBUTING.md](CONTRIBUTING.md), [GUARDRAILS.md](GUARDRAILS.md).
 - **Call & inheritance resolution:** See ARCHITECTURE.md § Scope-Resolution Pipeline. Shared pipeline code in `gitnexus/src/core/ingestion/` must not name languages — use `LanguageProvider` / `ScopeResolver` hooks instead (see AGENTS.md). (The legacy call-resolution DAG was removed in #942.)
-- **GitNexus:** `.claude/skills/gitnexus/`; MCP and indexed-repo rules live only in [AGENTS.md](AGENTS.md) (`gitnexus:start` … `gitnexus:end`). See **GitNexus rules** below.
+- **GitNexus:** standard skills in `.claude/skills/gitnexus-*/`; MCP and indexed-repo rules live only in [AGENTS.md](AGENTS.md) (`gitnexus:start` … `gitnexus:end`). See **GitNexus rules** below.
+- **Engineering plans, execution & review:** `/gitnexus-plan <task>` (implementation-ready plans via GitNexus + statement-level PDG + source verification; Deepen mode for existing plans), `/gitnexus-work [plan]` (executes a plan as impact-checked, detect_changes-gated atomic commits), `/gitnexus-review [PR|branch|range|local]` (read-only graph-backed review), `/gitnexus-lfg <task>` (plan with depth asked up front → proceed/stop gate → work → review pipeline). Specs in `.claude/skills/gitnexus-{plan,work,review,lfg}/SKILL.md` (see AGENTS.md § Engineering planning & execution).
 
 ## Changelog
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-07-20 | 1.8.0 | The CI review agent runs `gitnexus-review` as a coordinated swarm — six `ci-personas/` lanes dispatched via the `Agent` tool with a bounded critic gate. |
+| 2026-07-16 | 1.7.0 | `/gitnexus-plan` asks depth up front in interactive runs; `/gitnexus-lfg` gate slimmed to proceed/stop. |
+| 2026-07-16 | 1.6.0 | Renamed `/gitnexus-pr-review` to `/gitnexus-review` and added PR, branch/range, and local-change targets. |
+| 2026-07-11 | 1.5.0 | Added `/gitnexus-work` and `/gitnexus-lfg` to the engineering plans & execution pointer. |
+| 2026-07-11 | 1.4.0 | Added `/gitnexus-plan` pointer to Reference Documentation. |
 | 2026-04-13 | 1.3.0 | Updated GitNexus index stats after DAG refactor. |
 | 2026-03-24 | 1.2.0 | Removed duplicated gitnexus:start block and scope table; replaced with pointers to AGENTS.md. |
 | 2026-03-23 | 1.1.0 | Updated agent instructions to match AGENTS.md. |
@@ -88,11 +94,11 @@ This project is indexed by GitNexus as **GitNexus** (35494 symbols, 54398 relati
 
 | Task | Read this skill file |
 |------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
