@@ -20,7 +20,16 @@ export {
   scopeResolutionPhase,
   type ScopeResolutionOutput,
 } from '../scope-resolution/pipeline/phase.js';
+export { springConfigPhase, type SpringConfigOutput } from './spring-config.js';
+export {
+  springAutoConfigurationPhase,
+  type SpringAutoConfigurationOutput,
+} from './spring-auto-configuration.js';
+export { pruneLocalSymbolsPhase, type PruneLocalSymbolsOutput } from './prune-local-symbols.js';
+export { taintSummariesPhase, type TaintSummariesOutput } from './taint-summaries.js';
+export { callSummariesPhase, type CallSummariesOutput } from './call-summaries.js';
 export { mroPhase, type MROOutput } from './mro.js';
+export { diPhase, type DIOutput } from './di.js';
 export { communitiesPhase, type CommunitiesOutput } from './communities.js';
 export { processesPhase, type ProcessesOutput } from './processes.js';
 export { styleImportsPhase, type StyleImportsOutput } from './style-imports.js';
@@ -30,3 +39,4 @@ export { styleImportsPhase, type StyleImportsOutput } from './style-imports.js';
 export { runPipeline } from './runner.js';
 export type { PipelinePhase, PipelineContext, PhaseResult } from './types.js';
 export { getPhaseOutput } from './types.js';
+export { PhaseRegistry, type RegisterPhaseOptions } from './registry.js';

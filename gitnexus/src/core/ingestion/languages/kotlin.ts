@@ -11,6 +11,8 @@ import { SupportedLanguages } from 'gitnexus-shared';
 import { createClassExtractor } from '../class-extractors/generic.js';
 import { kotlinClassConfig } from '../class-extractors/configs/jvm.js';
 import { defineLanguage } from '../language-provider.js';
+import { createLeadingDocDescriptionExtractor } from '../utils/ast-helpers.js';
+import { assertCloneable } from '../workers/clone-safety.js';
 import { kotlinTypeConfig } from '../type-extractors/jvm.js';
 import { kotlinExportChecker } from '../export-detection.js';
 import { createImportResolver } from '../import-resolvers/resolver-factory.js';
@@ -21,6 +23,7 @@ import type { AstFrameworkPatternConfig } from '../language-provider.js';
 import type { SyntaxNode } from '../utils/ast-helpers.js';
 import { createCallExtractor } from '../call-extractors/generic.js';
 import { kotlinCallConfig } from '../call-extractors/configs/jvm.js';
+import { createKotlinCfgVisitor } from '../cfg/visitors/kotlin.js';
 import { createFieldExtractor } from '../field-extractors/generic.js';
 import { kotlinConfig } from '../field-extractors/configs/jvm.js';
 import { createMethodExtractor } from '../method-extractors/generic.js';
@@ -28,6 +31,7 @@ import { kotlinMethodConfig } from '../method-extractors/configs/jvm.js';
 import { createVariableExtractor } from '../variable-extractors/generic.js';
 import { kotlinVariableConfig } from '../variable-extractors/configs/jvm.js';
 import {
+  collectKotlinCaptureSideChannel,
   emitKotlinScopeCaptures,
   interpretKotlinImport,
   interpretKotlinTypeBinding,
@@ -167,6 +171,10 @@ export const kotlinProvider = defineLanguage({
   variableExtractor: createVariableExtractor(kotlinVariableConfig),
   classExtractor: createClassExtractor(kotlinClassConfig),
   builtInNames: BUILT_INS,
+
+  // ── KDoc → description (issue #2270) ──
+  descriptionExtractor: createLeadingDocDescriptionExtractor(),
+
   labelOverride: (functionNode, defaultLabel) => {
     if (defaultLabel !== 'Function') return defaultLabel;
     if (isKotlinClassMethod(functionNode)) return 'Method';
@@ -175,6 +183,18 @@ export const kotlinProvider = defineLanguage({
 
   // ── RFC #909 Ring 3: scope-based resolution hooks ──
   emitScopeCaptures: emitKotlinScopeCaptures,
+  // ── #2195 PDG layer: Kotlin CFG visitor (vendored grammar) ──
+  cfgVisitor: createKotlinCfgVisitor(),
+  // Worker-side: snapshot companion-scope marks, package visibility, class
+  // annotations, and Spring DI facts `emitKotlinScopeCaptures` just populated
+  // into plain data on `ParsedFile.captureSideChannel`, so the main thread can
+  // restore them via `applyCaptureSideChannel` WITHOUT a re-parse (#1983). See
+  // `kotlin/capture-side-channel.ts`.
+  // `assertCloneable` is a runtime identity; it makes a future non-serializable
+  // value in the side-channel payload a compile error here, at the source, rather
+  // than a DataCloneError at the worker boundary (#2143).
+  collectCaptureSideChannel: (filePath) =>
+    assertCloneable(collectKotlinCaptureSideChannel(filePath)),
   interpretImport: interpretKotlinImport,
   interpretTypeBinding: interpretKotlinTypeBinding,
   bindingScopeFor: kotlinBindingScopeFor,

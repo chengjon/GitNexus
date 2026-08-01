@@ -13,6 +13,11 @@ import { PipelineResult } from '../types/pipeline.js';
 import { CommunityNode, CommunityMembership } from '../core/ingestion/community-processor.js';
 import { ProcessNode } from '../core/ingestion/process-processor.js';
 import { KnowledgeGraph } from '../core/graph/types.js';
+import { shouldMirrorSkillsToAgents } from './ai-context.js';
+
+const GENERATED_SKILL_PREFIX = 'gitnexus-area-';
+const MAX_SKILL_NAME_LENGTH = 64;
+const MAX_COMMUNITY_NAME_LENGTH = MAX_SKILL_NAME_LENGTH - GENERATED_SKILL_PREFIX.length;
 
 // ============================================================================
 // TYPES
@@ -68,7 +73,52 @@ export const generateSkillFiles = async (
   pipelineResult: PipelineResult,
 ): Promise<{ skills: GeneratedSkillInfo[]; outputPath: string }> => {
   const { communityResult, processResult, graph } = pipelineResult;
-  const outputDir = path.join(repoPath, '.claude', 'skills', 'generated');
+  const outputDir = path.join(repoPath, '.claude', 'skills');
+  const legacyOutputDir = path.join(outputDir, 'generated');
+  // Some agents prioritize repo-local .agents/skills over the global
+  // ~/.agents/skills install (see shouldMirrorSkillsToAgents). When .agents/
+  // exists, mirror the generated community skills there too so those agents
+  // serve the up-to-date copies.
+  const agentsOutputDir = path.join(repoPath, '.agents', 'skills');
+  let mirrorToAgents = await shouldMirrorSkillsToAgents(repoPath);
+
+  // Community skills used to live under an undiscoverable `generated/`
+  // grouping directory. Clear that GitNexus-owned legacy output and
+  // stale direct outputs in the reserved namespace, while preserving every
+  // unrelated project skill under .claude/skills/.
+  try {
+    const entries = await fs.readdir(outputDir, { withFileTypes: true });
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith(GENERATED_SKILL_PREFIX))
+        .map((entry) => fs.rm(path.join(outputDir, entry.name), { recursive: true, force: true })),
+    );
+  } catch {
+    /* output root may not exist yet */
+  }
+  try {
+    await fs.rm(legacyOutputDir, { recursive: true, force: true });
+  } catch {
+    /* legacy output may not exist */
+  }
+
+  // Mirror cleanup: clear only stale GitNexus-generated community skills under
+  // .agents/skills/ (reserved gitnexus-area-* namespace), preserving mirrored
+  // standard skills and any user-authored skills. Never clear the whole root.
+  if (mirrorToAgents) {
+    try {
+      const entries = await fs.readdir(agentsOutputDir, { withFileTypes: true });
+      await Promise.all(
+        entries
+          .filter((entry) => entry.isDirectory() && entry.name.startsWith(GENERATED_SKILL_PREFIX))
+          .map((entry) =>
+            fs.rm(path.join(agentsOutputDir, entry.name), { recursive: true, force: true }),
+          ),
+      );
+    } catch {
+      /* mirror root may not exist yet */
+    }
+  }
 
   if (!communityResult || !communityResult.memberships.length) {
     console.log('\n  Skills: no communities detected, skipping skill generation');
@@ -107,13 +157,23 @@ export const generateSkillFiles = async (
     communities,
   );
 
-  // Step 4: Clear and recreate output directory
-  try {
-    await fs.rm(outputDir, { recursive: true, force: true });
-  } catch {
-    /* may not exist */
-  }
+  // Step 4: Ensure the shared project-skill root exists. Never clear it: it
+  // also contains user-authored and standard GitNexus skills.
   await fs.mkdir(outputDir, { recursive: true });
+  // The .agents/ mirror is a side flow: keep it a weak dependency. If the
+  // mirror root cannot be created (e.g. `.agents/skills` exists as a file),
+  // warn and disable mirroring for this run instead of aborting canonical
+  // community-skill generation. Canonical writes below stay unaffected.
+  if (mirrorToAgents) {
+    try {
+      await fs.mkdir(agentsOutputDir, { recursive: true });
+    } catch (err) {
+      console.log(
+        `Warning: Could not create mirror root ${agentsOutputDir} — .agents/skills mirroring disabled for this run: ${err}`,
+      );
+      mirrorToAgents = false;
+    }
+  }
 
   // Step 5: Generate skill files
   const skills: GeneratedSkillInfo[] = [];
@@ -145,6 +205,7 @@ export const generateSkillFiles = async (
     // Generate kebab name
     const kebabName = toKebabName(community.label, usedNames);
     usedNames.add(kebabName);
+    const skillName = `${GENERATED_SKILL_PREFIX}${kebabName}`;
 
     // Generate SKILL.md content
     const content = renderSkillMarkdown(
@@ -155,16 +216,29 @@ export const generateSkillFiles = async (
       entryPoints,
       flows,
       connections,
-      kebabName,
+      skillName,
     );
 
     // Write file
-    const skillDir = path.join(outputDir, kebabName);
+    const skillDir = path.join(outputDir, skillName);
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
 
+    // Mirror to .agents/skills/ for agents that read repo-local skills
+    // (see mirrorToAgents above). Best-effort: a per-skill mirror failure
+    // must not abort canonical community-skill generation.
+    if (mirrorToAgents) {
+      try {
+        const agentsSkillDir = path.join(agentsOutputDir, skillName);
+        await fs.mkdir(agentsSkillDir, { recursive: true });
+        await fs.writeFile(path.join(agentsSkillDir, 'SKILL.md'), content, 'utf-8');
+      } catch (err) {
+        console.log(`Warning: Could not mirror skill ${skillName} to .agents/skills: ${err}`);
+      }
+    }
+
     const info: GeneratedSkillInfo = {
-      name: kebabName,
+      name: skillName,
       label: community.label,
       symbolCount: community.symbolCount,
       fileCount: files.length,
@@ -176,7 +250,14 @@ export const generateSkillFiles = async (
     );
   }
 
-  console.log(`\n  ${skills.length} skills generated \u2192 .claude/skills/generated/`);
+  console.log(
+    `\n  ${skills.length} skills generated \u2192 .claude/skills/${GENERATED_SKILL_PREFIX}*/`,
+  );
+  if (mirrorToAgents) {
+    console.log(
+      `  ${skills.length} skills mirrored \u2192 .agents/skills/${GENERATED_SKILL_PREFIX}*/ (.agents)`,
+    );
+  }
 
   return { skills, outputPath: outputDir };
 };
@@ -522,7 +603,7 @@ const gatherCrossConnections = (
  * @param {MemberSymbol[]} entryPoints - Exported entry point symbols
  * @param {ProcessNode[]} flows - Execution flows touching this community
  * @param {CrossConnection[]} connections - Cross-community connections
- * @param {string} kebabName - Kebab-case name for the skill
+ * @param {string} skillName - Namespaced kebab-case name for the skill
  * @returns {string} Full SKILL.md content
  */
 const renderSkillMarkdown = (
@@ -533,7 +614,7 @@ const renderSkillMarkdown = (
   entryPoints: MemberSymbol[],
   flows: ProcessNode[],
   connections: CrossConnection[],
-  kebabName: string,
+  skillName: string,
 ): string => {
   const cohesionPct = Math.round(community.cohesion * 100);
 
@@ -551,7 +632,7 @@ const renderSkillMarkdown = (
 
   // Frontmatter
   lines.push('---');
-  lines.push(`name: ${kebabName}`);
+  lines.push(`name: ${skillName}`);
   lines.push(
     `description: "Skill for the ${community.label} area of ${projectName}. ${community.symbolCount} symbols across ${files.length} files."`,
   );
@@ -649,11 +730,14 @@ const renderSkillMarkdown = (
         : community.label;
   lines.push('## How to Explore');
   lines.push('');
-  lines.push(`1. \`gitnexus_context({name: "${firstEntry}"})\` \u2014 see callers and callees`);
+  lines.push(`1. \`context({name: "${firstEntry}"})\` \u2014 see callers and callees`);
   lines.push(
-    `2. \`gitnexus_query({query: "${community.label.toLowerCase()}"})\` \u2014 find related execution flows`,
+    `2. \`query({search_query: "${community.label.toLowerCase()}"})\` \u2014 find related execution flows`,
   );
   lines.push('3. Read key files listed above for implementation details');
+  lines.push(
+    '4. `explain({target: "<file or symbol>"})` — persisted taint findings (source→sink data flows), when indexed with `--pdg`',
+  );
   lines.push('');
 
   return lines.join('\n');
@@ -667,21 +751,22 @@ const renderSkillMarkdown = (
  * @brief Convert a community label to a kebab-case directory name
  * @param {string} label - The community label
  * @param {Set<string>} usedNames - Already-used names for collision detection
- * @returns {string} Unique kebab-case name capped at 50 characters
+ * @returns {string} Unique kebab-case name that leaves room for the GitNexus prefix
  */
 const toKebabName = (label: string, usedNames: Set<string>): string => {
   let name = label
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
+    .slice(0, MAX_COMMUNITY_NAME_LENGTH);
 
   if (!name) name = 'skill';
 
   let candidate = name;
   let counter = 2;
   while (usedNames.has(candidate)) {
-    candidate = `${name}-${counter}`;
+    const suffix = `-${counter}`;
+    candidate = `${name.slice(0, MAX_COMMUNITY_NAME_LENGTH - suffix.length)}${suffix}`;
     counter++;
   }
 

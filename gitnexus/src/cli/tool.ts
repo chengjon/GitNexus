@@ -1,7 +1,7 @@
 /**
  * Direct CLI Tool Commands
  *
- * Exposes GitNexus tools (query, context, impact, cypher) as direct CLI commands.
+ * Exposes GitNexus tools (query, context, impact, cypher, check) as direct CLI commands.
  * Bypasses MCP entirely — invokes LocalBackend directly for minimal overhead.
  *
  * Usage:
@@ -56,6 +56,46 @@ function output(data: any): void {
     // Fallback: stderr (previous behavior, works on all platforms)
     process.stderr.write(text + '\n');
   }
+  // Backend failures come back as `{ error }` payloads rather than throws
+  // (#2469). Every tool command routes its result through here, so this is
+  // the one place that keeps scripted callers honest: print the payload,
+  // then exit non-zero.
+  if (
+    data &&
+    typeof data === 'object' &&
+    'error' in data &&
+    typeof data.error === 'string' &&
+    data.error.trim().length > 0
+  ) {
+    process.exitCode = 1;
+  }
+}
+
+/**
+ * Parse a `--limit` CLI option into a positive row cap, or `undefined` when the
+ * flag is absent, non-numeric, zero, or negative.
+ *
+ * Treating invalid / 0 / negative input as "no limit" — rather than the old
+ * `options.limit ? Math.max(0, parseInt(...)) : undefined` path, where a string
+ * like `"abc"` is truthy and yields `NaN`, then `slice(0, NaN)` silently EMPTIES
+ * the result with exit 0 — keeps the guardrail commands (impact / context /
+ * detect-changes) honest: a bad `--limit` shows everything, never nothing.
+ */
+function parseLimit(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * Parse an `--offset` CLI option into a non-negative pagination start, or
+ * `undefined` when the flag is absent or invalid. Mirrors {@link parseLimit};
+ * offset `0` is valid ("start at the beginning"), so the guard is `>= 0`.
+ */
+function parseOffset(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 function quoteCommandArg(value: string): string {
@@ -135,28 +175,33 @@ function normalizeVerifyStagedError(
 }
 
 export async function queryCommand(
-  queryText: string,
+  queryText: string | undefined,
   options?: {
+    query?: string;
     repo?: string;
+    branch?: string;
     context?: string;
     goal?: string;
     limit?: string;
     content?: boolean;
   },
 ): Promise<void> {
-  if (!queryText?.trim()) {
+  const resolvedQuery = queryText?.trim() || options?.query?.trim();
+  if (!resolvedQuery) {
     cliErrorKey('tool.usage.query');
     process.exit(1);
   }
 
   const backend = await getBackend();
   const result = await backend.callTool('query', {
-    query: queryText,
+    // #2175: canonical param is search_query; the backend still accepts legacy "query".
+    search_query: resolvedQuery,
     task_context: options?.context,
     goal: options?.goal,
-    limit: options?.limit ? parseInt(options.limit) : undefined,
+    limit: parseLimit(options?.limit),
     include_content: options?.content ?? false,
     repo: options?.repo,
+    branch: options?.branch,
   });
   output(result);
 }
@@ -165,8 +210,10 @@ export async function contextCommand(
   name: string,
   options?: {
     repo?: string;
+    branch?: string;
     file?: string;
     uid?: string;
+    limit?: string;
     content?: boolean;
   },
 ): Promise<void> {
@@ -180,6 +227,7 @@ export async function contextCommand(
     process.exit(1);
   }
 
+  const limit = parseLimit(options?.limit);
   const backend = await getBackend();
   const result = await backend.callTool('context', {
     name: name || undefined,
@@ -187,7 +235,26 @@ export async function contextCommand(
     file_path: options?.file,
     include_content: options?.content ?? false,
     repo: options?.repo,
+    branch: options?.branch,
   });
+  if (limit !== undefined) {
+    // Bound every array-valued category under incoming/outgoing (calls, accesses,
+    // imports, extends, uses, …) — categorize() buckets by relType, so the prior
+    // hardcoded calls/accesses missed the rest (e.g. incoming.accesses) — plus
+    // typed_properties and processes, so --limit caps the whole context payload.
+    for (const dir of [result.incoming, result.outgoing] as Array<
+      Record<string, unknown> | undefined
+    >) {
+      if (!dir) continue;
+      for (const key of Object.keys(dir)) {
+        const bucket = dir[key];
+        if (Array.isArray(bucket)) dir[key] = bucket.slice(0, limit);
+      }
+    }
+    if (Array.isArray(result.typed_properties))
+      result.typed_properties = result.typed_properties.slice(0, limit);
+    if (Array.isArray(result.processes)) result.processes = result.processes.slice(0, limit);
+  }
   output(result);
 }
 
@@ -195,7 +262,10 @@ export async function impactCommand(
   target?: string,
   options?: {
     direction?: string;
+    mode?: string;
+    line?: string;
     repo?: string;
+    branch?: string;
     uid?: string;
     file?: string;
     kind?: string;
@@ -228,23 +298,42 @@ export async function impactCommand(
 
   try {
     const backend = await getBackend();
-    const rawLimit = parseInt(options?.limit ?? '', 10);
-    const rawOffset = parseInt(options?.offset ?? '', 10);
-    const parsedLimit = Number.isFinite(rawLimit) ? rawLimit : undefined;
-    const parsedOffset = Number.isFinite(rawOffset) ? rawOffset : undefined;
+    const parsedLimit = parseLimit(options?.limit);
+    const parsedOffset = parseOffset(options?.offset);
+    // `--line` is a PDG-only statement anchor (1-based source line). Parse it to
+    // an integer when provided and thread it ONLY when present, so the backend's
+    // line-without-pdg / non-positive-integer validation fires on the real value
+    // rather than on a silently-dropped flag. A non-numeric `--line` parses to
+    // NaN, which the backend rejects as a non-positive integer (loud, not silent).
+    const parsedLine = options?.line !== undefined ? parseInt(options.line, 10) : undefined;
     const result = await backend.callTool('impact', {
       target: target || undefined,
       target_uid: options?.uid,
       file_path: options?.file,
       kind: options?.kind,
       direction: options?.direction || 'upstream',
+      // Forward the engine selector; backend validates the enum (callgraph/pdg)
+      // and treats the default 'callgraph' identically to an omitted mode.
+      mode: options?.mode,
+      // PDG-only statement anchor — forwarded only when --line was given.
+      ...(parsedLine !== undefined ? { line: parsedLine } : {}),
       maxDepth: options?.depth ? parseInt(options.depth, 10) : undefined,
       includeTests: options?.includeTests ?? false,
       repo: options?.repo,
+      branch: options?.branch,
       limit: parsedLimit,
       offset: parsedOffset,
       summaryOnly: options?.summaryOnly ?? undefined,
     });
+    // Client-side cap of the affected-list payload to --limit (parity with the
+    // other tool commands). The backend already paginates byDepth per level to
+    // the same limit, so byDepth needs no client-side re-slice.
+    if (parsedLimit !== undefined) {
+      if (Array.isArray(result.affected_processes))
+        result.affected_processes = result.affected_processes.slice(0, parsedLimit);
+      if (Array.isArray(result.affected_modules))
+        result.affected_modules = result.affected_modules.slice(0, parsedLimit);
+    }
     output(result);
   } catch (err: unknown) {
     // Belt-and-suspenders: catch infrastructure failures (getBackend, callTool transport)
@@ -264,6 +353,8 @@ export async function cypherCommand(
   query: string,
   options?: {
     repo?: string;
+    branch?: string;
+    limit?: string;
   },
 ): Promise<void> {
   if (!query?.trim()) {
@@ -271,11 +362,33 @@ export async function cypherCommand(
     process.exit(1);
   }
 
+  const limit = parseLimit(options?.limit);
   const backend = await getBackend();
   const result = await backend.callTool('cypher', {
-    query,
+    // #2175: canonical param is statement; the backend still accepts legacy "query".
+    statement: query,
     repo: options?.repo,
+    branch: options?.branch,
   });
+  if (limit !== undefined) {
+    if (Array.isArray(result)) {
+      // Non-tabular result: a raw row array.
+      result.splice(limit);
+    } else if (result && typeof result === 'object' && typeof result.row_count === 'number') {
+      // Tabular result: { markdown, row_count }. The markdown is a table built as
+      // [header, separator, ...dataRows].join('\n'), so slice it to `limit` data
+      // rows (keeping the 2 header lines) and report a row_count that matches what
+      // is actually printed — otherwise `--limit 2` over 50 rows prints all 50 but
+      // claims row_count: 2.
+      if (typeof result.markdown === 'string' && result.row_count > limit) {
+        result.markdown = result.markdown
+          .split('\n')
+          .slice(0, 2 + limit)
+          .join('\n');
+      }
+      result.row_count = Math.min(result.row_count, limit);
+    }
+  }
   output(result);
 }
 
@@ -285,7 +398,10 @@ export async function detectChangesCommand(options?: {
   repo?: string;
   cwd?: string;
   worktree?: string;
+  branch?: string;
+  limit?: string;
 }): Promise<void> {
+  const limit = parseLimit(options?.limit);
   const backend = await getBackend();
   try {
     const result = await backend.callTool('detect_changes', {
@@ -294,7 +410,14 @@ export async function detectChangesCommand(options?: {
       repo: options?.repo,
       cwd: options?.cwd,
       worktree: options?.worktree,
+      branch: options?.branch,
     });
+    if (limit !== undefined) {
+      if (Array.isArray(result.changed_symbols))
+        result.changed_symbols = result.changed_symbols.slice(0, limit);
+      if (Array.isArray(result.affected_processes))
+        result.affected_processes = result.affected_processes.slice(0, limit);
+    }
     output(formatDetectChangesResult(result));
   } catch (err) {
     process.exitCode = 1;
@@ -336,5 +459,116 @@ export async function verifyStagedCommand(options?: {
     process.exitCode = 1;
     const errorPayload = normalizeVerifyStagedError(err, options);
     output(options?.json ? errorPayload : formatDetectChangesResult({ error: errorPayload.error }));
+  }
+}
+
+export async function checkCommand(options?: {
+  cycles?: boolean;
+  json?: boolean;
+  repo?: string;
+  branch?: string;
+}): Promise<void> {
+  if (!options?.cycles) {
+    process.stderr.write('Usage: gitnexus check --cycles [--json]\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const backend = await getBackend();
+    const result = await backend.callTool('check', {
+      cycles: true,
+      repo: options.repo,
+      branch: options.branch,
+    });
+    if (result?.error) {
+      output(result);
+      process.exitCode = 1;
+      return;
+    }
+    if (options.json) {
+      output(result);
+    } else if (result.cycleCount === 0) {
+      output('No circular imports found.');
+    } else {
+      output(
+        result.cycles.map((cycle: { files: string[] }) => cycle.files.join(' -> ')).join('\n'),
+      );
+    }
+    if (result.cycleCount > 0) process.exitCode = 1;
+  } catch (error) {
+    output({ error: error instanceof Error ? error.message : String(error) });
+    process.exitCode = 1;
+  }
+}
+
+export async function traceCommand(
+  from?: string,
+  to?: string,
+  options?: {
+    fromUid?: string;
+    file?: string;
+    fromFile?: string;
+    toUid?: string;
+    toFile?: string;
+    depth?: string;
+    repo?: string;
+    branch?: string;
+    includeTests?: boolean;
+  },
+): Promise<void> {
+  if (options?.fromUid?.startsWith('--') || options?.toUid?.startsWith('--')) {
+    cliErrorKey('tool.usage.trace');
+    process.exit(1);
+  }
+  if (
+    options?.file !== undefined &&
+    options?.fromFile !== undefined &&
+    options.file !== options.fromFile
+  ) {
+    cliErrorKey('tool.usage.trace');
+    process.exit(1);
+  }
+  if ((!from?.trim() && !options?.fromUid) || (!to?.trim() && !options?.toUid)) {
+    cliErrorKey('tool.usage.trace');
+    process.exit(1);
+  }
+  // Reject a non-numeric / non-positive --depth up front rather than forwarding
+  // NaN (which the backend would silently treat as the default).
+  if (options?.depth !== undefined) {
+    const parsedDepth = Number(options.depth);
+    if (!Number.isInteger(parsedDepth) || parsedDepth < 1) {
+      cliErrorKey('tool.usage.trace');
+      process.exit(1);
+    }
+  }
+
+  try {
+    const backend = await getBackend();
+    const fromFile = options?.fromFile ?? options?.file;
+    const result = await backend.callTool('trace', {
+      from: from || undefined,
+      from_uid: options?.fromUid,
+      from_file: fromFile,
+      to: to || undefined,
+      to_uid: options?.toUid,
+      to_file: options?.toFile,
+      maxDepth: options?.depth ? parseInt(options.depth, 10) : undefined,
+      includeTests: options?.includeTests ?? false,
+      repo: options?.repo,
+      branch: options?.branch,
+    });
+    output(result);
+  } catch (err: unknown) {
+    output({
+      status: 'error',
+      error:
+        (err instanceof Error ? err.message : String(err)) || 'Trace analysis failed unexpectedly',
+      from: { name: from },
+      to: { name: to },
+      suggestion:
+        'Try gitnexus context <symbol> to see connections, or check if an interface bridges them.',
+    });
+    process.exit(1);
   }
 }

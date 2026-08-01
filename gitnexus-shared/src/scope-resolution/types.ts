@@ -33,14 +33,27 @@ export type ScopeId = string;
 /** Stable symbol-definition identifier (graph nodeId). */
 export type DefId = string;
 
-/** Kinds of lexical scope a `Scope` node can represent. */
+/**
+ * Kinds of lexical scope a `Scope` node can represent.
+ *
+ * `Object` is a hoist boundary ONLY: an object/record literal body
+ * (TS/JS `{...}`, Kotlin anonymous `object {...}`). Members are
+ * reachable via property access, never as bare identifiers, so
+ * scope-chain walkers (`scope/walkers.ts`) must skip an `Object`
+ * scope's own bindings while still traversing past it to the parent
+ * (#2545/#2551) -- unlike `Block`, where a nested closure legitimately
+ * DOES see a sibling `let`/`const` from an enclosing `if`/`for`/`while`,
+ * a nested closure inside an object literal must NOT see a sibling
+ * property's name as a free identifier.
+ */
 export type ScopeKind =
   | 'Module' // file root
   | 'Namespace' // C++ namespace, C# namespace, Kotlin package-object, Rust mod
   | 'Class' // class/struct/trait/interface body
   | 'Function' // function/method/closure/lambda body
   | 'Block' // { ... }, if-body, for-body, with-body, match arms
-  | 'Expression'; // comprehensions, for-init, pattern bindings, lambda param lists
+  | 'Expression' // comprehensions, for-init, pattern bindings, lambda param lists
+  | 'Object'; // object/record literal body -- see doc comment above
 
 // ─── Range + Capture (parser-agnostic) ──────────────────────────────────────
 
@@ -105,6 +118,16 @@ export type ParsedImport =
       readonly localName: string;
       readonly importedName: string;
       readonly targetRaw: string;
+      /** Provider-specific imported symbol category when module and symbol
+       * namespaces have distinct resolution rules (for example PHP). */
+      readonly importedSymbolKind?: 'type' | 'function' | 'const';
+      /**
+       * Set by providers when `targetRaw` already names the imported symbol
+       * rather than only its containing module. Consumers that compose
+       * `<local>.<member>` paths can then use `targetRaw.<member>` instead of
+       * duplicating `importedName`.
+       */
+      readonly targetIncludesImportedName?: boolean;
     }
   /**
    * Per-name import with rename.
@@ -119,6 +142,10 @@ export type ParsedImport =
       readonly importedName: string;
       readonly alias: string;
       readonly targetRaw: string;
+      /** See the same field on the `named` variant. */
+      readonly importedSymbolKind?: 'type' | 'function' | 'const';
+      /** See the same field on the `named` variant. */
+      readonly targetIncludesImportedName?: boolean;
     }
   /**
    * Qualified module handle, with or without rename. `importedName` is the
@@ -324,6 +351,11 @@ export interface BindingRef {
   readonly origin: 'local' | 'import' | 'namespace' | 'wildcard' | 'reexport';
   /** Non-null for non-local origins; carries the `ImportEdge` that brought the name into this scope. */
   readonly via?: ImportEdge;
+  /**
+   * Optional semantic visibility evidence supplied by a language hook.
+   * Shared resolution consumes this without inspecting language syntax.
+   */
+  readonly visibility?: 'static-member-import';
 }
 
 // ─── §2.5 TypeRef ───────────────────────────────────────────────────────────
@@ -382,6 +414,25 @@ export interface Scope {
 
   /** Local type facts visible from this scope (parameter annotations, `self` binding, etc.). */
   readonly typeBindings: ReadonlyMap<string, TypeRef>;
+
+  /** Lexically bound names that may have no definition or type fact of their
+   * own (for example, an untyped function parameter). Consumers use this only
+   * as a shadowing barrier; it never resolves a symbol by itself. */
+  readonly lexicalNames?: ReadonlySet<string>;
+
+  /** Receiver names this scope BINDS rather than inherits — `this`, `self`, … (#2701).
+   *
+   *  A receiver walk (`findReceiverTypeBinding`) that reaches such a scope
+   *  without finding the name in `typeBindings` stops here and reports the
+   *  receiver unresolved, instead of continuing up and borrowing an enclosing
+   *  scope's binding. In JavaScript/TypeScript an ordinary `function` binds its
+   *  own `this` (ECMA-262 `[[ThisMode]]`) while an arrow inherits one, so
+   *  `this.m()` inside a nested `function` must NOT reach the enclosing class.
+   *
+   *  Left unset by every language whose closures capture the receiver
+   *  lexically, which is nearly all of them — the walk is unchanged there.
+   *  Populated from `LanguageProvider.scopeOwnsReceivers`. */
+  readonly ownsReceivers?: ReadonlySet<string>;
 }
 
 // ─── §2.6 Resolution + ResolutionEvidence ───────────────────────────────────
@@ -439,7 +490,15 @@ export interface Reference {
   readonly toDef: DefId;
   /** Location of the reference in source. */
   readonly atRange: Range;
-  readonly kind: 'call' | 'read' | 'write' | 'type-reference' | 'inherits' | 'import-use' | 'macro';
+  readonly kind:
+    | 'call'
+    | 'read'
+    | 'write'
+    | 'type-reference'
+    | 'inherits'
+    | 'import-use'
+    | 'value-ref'
+    | 'macro';
   readonly confidence: number;
   readonly evidence: readonly ResolutionEvidence[];
 }

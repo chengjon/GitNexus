@@ -11,8 +11,11 @@
  *   Child -> Parent: { type: 'error', message: string }
  */
 
-import { runFullAnalysis, type AnalyzeOptions, type AnalyzeResult } from '../core/run-analyze.js';
-import { closeLbug } from '../core/lbug/lbug-adapter.js';
+import type { AnalyzeOptions } from '../core/run-analyze.js';
+import { type AnalyzeResultIpc } from './analyze-worker-ipc.js';
+import { runWorkerAnalysis, createTerminalClaim } from './analyze-worker-core.js';
+type BoundedCheckpointBeforeExit =
+  typeof import('../core/lbug/shutdown-helpers.js').boundedCheckpointBeforeExit;
 
 interface StartMessage {
   type: 'start';
@@ -20,47 +23,100 @@ interface StartMessage {
   options: AnalyzeOptions;
 }
 
-interface ProgressMessage {
+export interface ProgressMessage {
   type: 'progress';
   phase: string;
   percent: number;
   message: string;
 }
 
-interface CompleteMessage {
+export interface CompleteMessage {
   type: 'complete';
-  result: AnalyzeResult;
+  // JSON-safe projection (no `pipelineResult` / live KnowledgeGraph). This
+  // channel is default-JSON child_process IPC — see analyze-worker-ipc.ts.
+  result: AnalyzeResultIpc;
 }
 
-interface ErrorMessage {
+export interface ErrorMessage {
   type: 'error';
   message: string;
+  /**
+   * Machine-readable failure code for a parent that wants to branch instead of
+   * only surfacing the string. `index-lock-timeout` (#2658 review M2) means
+   * another analyze held the single-writer lock past the wait ceiling — a
+   * transient, retryable condition, not a broken build. Absent for a generic
+   * failure.
+   */
+  code?: 'index-lock-timeout';
+  /** True when the failure is expected to clear on retry (e.g. lock contention). */
+  retryable?: boolean;
 }
 
-type WorkerMessage = ProgressMessage | CompleteMessage | ErrorMessage;
+/** Child → parent IPC messages. Shared with the parent-side launcher. */
+export type WorkerMessage = ProgressMessage | CompleteMessage | ErrorMessage;
 
 function send(msg: WorkerMessage) {
+  // No try/catch: if the IPC channel is gone, process.send throws
+  // (ERR_IPC_CHANNEL_CLOSED) and that failure must NOT be swallowed. Every caller
+  // schedules its process.exit inside a `finally`, so a throw here still tears the
+  // worker down deterministically instead of wedging the event loop (#2264 P3).
   process.send?.(msg);
 }
 
-// Catch uncaught exceptions and unhandled rejections — report to parent
-process.on('uncaughtException', (err) => {
-  send({ type: 'error', message: err?.message || 'Uncaught exception in worker' });
-  setTimeout(() => process.exit(1), 500);
-});
+// Single terminal-outcome slot shared by the message handler and the SIGTERM
+// handler: whoever claims it first reports its complete/error; the other skips its
+// terminal send, so a cancel near the finish line can't also report success and a
+// late SIGTERM can't flip an already-reported job (#2264 P3).
+const claimTerminal = createTerminalClaim();
+let boundedCheckpointBeforeExit: BoundedCheckpointBeforeExit | null = null;
 
-process.on('unhandledRejection', (reason: any) => {
-  send({ type: 'error', message: reason?.message || 'Unhandled rejection in worker' });
-  setTimeout(() => process.exit(1), 500);
-});
-
-// Handle graceful shutdown — notify parent before exit
-process.on('SIGTERM', async () => {
-  send({ type: 'error', message: 'Analysis cancelled (worker received SIGTERM)' });
+// Catch uncaught exceptions and unhandled rejections — report them to the parent
+// over IPC (the same channel the analysis path uses), then exit. The report runs
+// in `try` and the exit in `finally` so a throw from send() on a closed channel
+// can't skip the exit and leave the worker wedged (#2264 review P3).
+process.on('uncaughtException', (err: unknown) => {
   try {
-    await closeLbug();
-  } catch {}
-  process.exit(0);
+    const message = err instanceof Error ? err.message : 'Uncaught exception in worker';
+    send({ type: 'error', message });
+  } finally {
+    setTimeout(() => process.exit(1), 500);
+  }
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  try {
+    const message = reason instanceof Error ? reason.message : 'Unhandled rejection in worker';
+    send({ type: 'error', message });
+  } finally {
+    setTimeout(() => process.exit(1), 500);
+  }
+});
+
+// Handle cancellation / timeout shutdown (analyze-job.ts `cancelJob` sends
+// SIGTERM). Bounded CHECKPOINT-then-exit shared with the CLI SIGINT path (#2264):
+// skip the native close (the LadybugDB destructor can double-free after --pdg
+// writes), but don't block behind the in-flight COPY's connection lock — so a
+// single cancel can't abort or hang the worker. A CHECKPOINT failure is reported
+// to the parent over IPC, not swallowed; the exit always fires.
+process.on('SIGTERM', () => {
+  // Only report the cancellation if the analysis hasn't already reported a
+  // terminal outcome (#2264 P3) — otherwise this would flip an already-complete
+  // job to failed. The cleanup + exit below run regardless.
+  if (claimTerminal()) {
+    send({ type: 'error', message: 'Analysis cancelled (worker received SIGTERM)' });
+  }
+  if (!boundedCheckpointBeforeExit) {
+    process.exit(0);
+    return;
+  }
+  void boundedCheckpointBeforeExit({
+    exitCode: 0,
+    onFlushError: (err: unknown) => {
+      const message =
+        err instanceof Error ? err.message : 'Worker checkpoint failed during SIGTERM';
+      send({ type: 'error', message });
+    },
+  });
 });
 
 // Listen for start command from parent — guarded against re-entry
@@ -70,21 +126,48 @@ process.on('message', async (msg: StartMessage) => {
   started = true;
 
   try {
-    const result = await runFullAnalysis(msg.repoPath, msg.options, {
-      onProgress: (phase, percent, message) => {
-        send({ type: 'progress', phase, percent, message });
+    // Capture the complete build/dependency receipt before evaluating the
+    // analyzer graph or loading LadybugDB. A replacement racing this boundary
+    // is compared against this receipt again immediately before metadata commit.
+    const identityModule = await import('../core/analyzer-identity.js');
+    const prepared = await identityModule.captureAnalyzerIdentityBeforeLoad(
+      import.meta.url,
+      async () => {
+        const [analysisModule, repoManager, shutdownHelpers] = await Promise.all([
+          import('../core/run-analyze.js'),
+          import('../storage/repo-manager.js'),
+          import('../core/lbug/shutdown-helpers.js'),
+        ]);
+        return { analysisModule, repoManager, shutdownHelpers };
       },
-      onLog: (message) => {
-        send({ type: 'progress', phase: 'log', percent: -1, message });
+    );
+    boundedCheckpointBeforeExit = prepared.loaded.shutdownHelpers.boundedCheckpointBeforeExit;
+    // The run → finalize → report contract lives in the side-effect-free
+    // analyze-worker-core seam (unit-testable without this entry module's
+    // process.on side effects). It reports exactly one terminal message and
+    // never throws.
+    await runWorkerAnalysis(
+      msg.repoPath,
+      msg.options,
+      {
+        runFullAnalysis: prepared.loaded.analysisModule.runFullAnalysis,
+        assertAnalysisFinalized: prepared.loaded.repoManager.assertAnalysisFinalized,
+        send,
+        claimTerminal,
       },
-    });
-
-    send({ type: 'complete', result });
-  } catch (err: any) {
-    send({ type: 'error', message: err?.message || 'Analysis failed' });
+      prepared.runnerIdentity,
+    );
+  } catch (error) {
+    if (claimTerminal()) {
+      send({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Analysis worker bootstrap failed',
+      });
+    }
+  } finally {
+    // LadybugDB's native module prevents clean exit — force it (same reason the
+    // CLI uses process.exit(0)). In `finally` so the exit still fires even if the
+    // report above throws on a closed IPC channel (#2264 review P3).
+    setTimeout(() => process.exit(0), 500);
   }
-
-  // LadybugDB's native module prevents clean exit — force it
-  // (same reason the CLI uses process.exit(0))
-  setTimeout(() => process.exit(0), 500);
 });

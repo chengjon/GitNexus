@@ -174,7 +174,7 @@ describe('generateSkillFiles — return values', () => {
     );
 
     expect(result.skills).toEqual([]);
-    expect(result.outputPath).toBe(path.join(tmpDir, '.claude', 'skills', 'generated'));
+    expect(result.outputPath).toBe(path.join(tmpDir, '.claude', 'skills'));
   });
 
   /**
@@ -252,7 +252,7 @@ describe('generateSkillFiles — return values', () => {
     expect(result.skills[0].label).toBe('Auth');
     expect(result.skills[0].symbolCount).toBe(5);
     expect(result.skills[0].fileCount).toBe(2);
-    expect(result.skills[0].name).toBe('auth');
+    expect(result.skills[0].name).toBe('gitnexus-area-auth');
   });
 
   /**
@@ -573,10 +573,10 @@ describe('generateSkillFiles — file output', () => {
   }
 
   /**
-   * Verify that each community produces a directory under generated/
+   * Verify that each community produces a namespaced directory directly under .claude/skills/
    * containing a SKILL.md file.
    */
-  it('creates generated/{name}/SKILL.md for each community', async () => {
+  it('creates {name}/SKILL.md as a direct project skill for each community (#2433)', async () => {
     const { graph, communities, memberships } = twoCommSetup();
 
     await generateSkillFiles(
@@ -590,11 +590,317 @@ describe('generateSkillFiles — file output', () => {
       }),
     );
 
-    const outputDir = path.join(tmpDir, '.claude', 'skills', 'generated');
-    const alphaSkill = await fs.readFile(path.join(outputDir, 'alpha', 'SKILL.md'), 'utf-8');
-    const betaSkill = await fs.readFile(path.join(outputDir, 'beta', 'SKILL.md'), 'utf-8');
+    const outputDir = path.join(tmpDir, '.claude', 'skills');
+    const alphaSkill = await fs.readFile(
+      path.join(outputDir, 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    const betaSkill = await fs.readFile(
+      path.join(outputDir, 'gitnexus-area-beta', 'SKILL.md'),
+      'utf-8',
+    );
     expect(alphaSkill.length).toBeGreaterThan(0);
     expect(betaSkill.length).toBeGreaterThan(0);
+  });
+
+  it('uses an owned namespace and removes only prior GitNexus-generated outputs (#2433)', async () => {
+    const graph = createKnowledgeGraph();
+    for (let i = 0; i < 4; i++) {
+      graph.addNode(
+        makeNode(`fn:cli${i}`, `cliFn${i}`, 'Function', `${tmpDir}/src/cli/f${i}.ts`, 1, true),
+      );
+    }
+    const skillsRoot = path.join(tmpDir, '.claude', 'skills');
+    const standardSkill = path.join(skillsRoot, 'gitnexus-cli', 'SKILL.md');
+    const userSkill = path.join(skillsRoot, 'auth', 'SKILL.md');
+    const legacyGenerated = path.join(skillsRoot, 'generated', 'old', 'SKILL.md');
+    const staleGenerated = path.join(skillsRoot, 'gitnexus-area-old', 'SKILL.md');
+    for (const file of [standardSkill, userSkill, legacyGenerated, staleGenerated]) {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, file, 'utf-8');
+    }
+
+    const result = await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({
+        graph,
+        repoPath: tmpDir,
+        communities: [makeCommunity('c1', 'Cli', 4)],
+        memberships: [0, 1, 2, 3].map((i) => makeMembership(`fn:cli${i}`, 'c1')),
+      }),
+    );
+
+    expect(result.skills[0].name).toBe('gitnexus-area-cli');
+    const generatedContent = await fs.readFile(
+      path.join(skillsRoot, 'gitnexus-area-cli', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(generatedContent).toContain('name: gitnexus-area-cli');
+    await expect(fs.readFile(standardSkill, 'utf-8')).resolves.toBe(standardSkill);
+    await expect(fs.readFile(userSkill, 'utf-8')).resolves.toBe(userSkill);
+    await expect(fs.access(path.join(skillsRoot, 'generated'))).rejects.toThrow();
+    await expect(fs.access(path.join(skillsRoot, 'gitnexus-area-old'))).rejects.toThrow();
+  });
+
+  /**
+   * When the repo contains an .agents/ directory, generated community skills
+   * must be mirrored to .agents/skills/ (flat gitnexus-area-* layout, #2434)
+   * so agents that prefer repo-local .agents/skills over the global
+   * ~/.agents/skills install serve the up-to-date set. The mirror content must
+   * match the .claude copy.
+   */
+  it('mirrors generated skills to .agents/skills/ when .agents/ exists', async () => {
+    const { graph, communities, memberships } = twoCommSetup();
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({
+        graph,
+        repoPath: tmpDir,
+        communities,
+        memberships,
+      }),
+    );
+
+    const claudeAlpha = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    const agentsAlpha = await fs.readFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    const agentsBeta = await fs.readFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-beta', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(agentsAlpha).toBe(claudeAlpha);
+    expect(agentsBeta.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Without an .agents/ opt-in, no .agents/skills/ tree should be created —
+   * only the canonical .claude/skills/ copy is written.
+   */
+  it('does not mirror generated skills to .agents/ when the directory is absent', async () => {
+    const { graph, communities, memberships } = twoCommSetup();
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({
+        graph,
+        repoPath: tmpDir,
+        communities,
+        memberships,
+      }),
+    );
+
+    // Canonical copy exists, mirror does not.
+    const claudeAlpha = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(claudeAlpha.length).toBeGreaterThan(0);
+    await expect(fs.access(path.join(tmpDir, '.agents'))).rejects.toThrow();
+  });
+
+  /**
+   * MEDIUM 1 (reviewer repro): when `.agents/skills` exists as a regular file,
+   * the mirror root mkdir fails. Mirroring must degrade gracefully (warn +
+   * disable) and the canonical community skills under .claude/skills/ must
+   * still be written in full — never deleted-then-not-rewritten.
+   */
+  it('keeps canonical skills intact when .agents/skills is a file (mirror root mkdir fails)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { graph, communities, memberships } = twoCommSetup();
+    // .agents/ exists, but .agents/skills is a file — mkdir will EEXIST.
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.agents', 'skills'), 'not a directory');
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    // Canonical skills are fully present.
+    const claudeAlpha = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    const claudeBeta = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-beta', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(claudeAlpha.length).toBeGreaterThan(0);
+    expect(claudeBeta.length).toBeGreaterThan(0);
+    // Mirror was disabled with a warning, not a thrown error.
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  /**
+   * MEDIUM 1 per-skill: the mirror root is writable, but an individual skill's
+   * mirror write fails. The failure must be warned and contained — other
+   * communities' canonical AND mirror writes still succeed.
+   */
+  it('isolates a per-skill mirror write failure to that skill (best-effort)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { graph, communities, memberships } = twoCommSetup();
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+
+    // Sabotage only the alpha mirror dir: make it a read-only file so the
+    // per-skill mkdir(agentsSkillDir) throws EEXIST (not a dir) and is caught.
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-alpha'),
+      'file blocks dir',
+    );
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    // Canonical for both communities is intact.
+    await expect(
+      fs.readFile(
+        path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+        'utf-8',
+      ),
+    ).resolves.toHaveProperty('length');
+    const claudeBeta = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-beta', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(claudeBeta.length).toBeGreaterThan(0);
+    // Beta mirror still written (alpha failure did not abort the loop).
+    const agentsBeta = await fs.readFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-beta', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(agentsBeta).toBe(claudeBeta);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  /**
+   * MEDIUM 1 delete-then-rewrite ordering: the canonical gitnexus-area-*
+   * cleanup runs before the mirror writes. A mirror failure after cleanup
+   * must not leave canonical missing — canonical is rewritten regardless.
+   */
+  it('rewrites canonical skills after cleanup even when mirroring fails', async () => {
+    const { graph, communities, memberships } = twoCommSetup();
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+
+    // First run: write canonical + mirror normally.
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+    const firstAlpha = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+
+    // Second run with mirror broken: .agents/skills becomes a file.
+    await fs.rm(path.join(tmpDir, '.agents', 'skills'), { recursive: true, force: true });
+    await fs.writeFile(path.join(tmpDir, '.agents', 'skills'), 'now a file');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    // Canonical alpha is still present and content is stable (cleanup deleted
+    // the old dir, then canonical rewrote it — not lost).
+    const secondAlpha = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(secondAlpha).toBe(firstAlpha);
+  });
+
+  /**
+   * Mirror cleanup is namespace-scoped: only stale gitnexus-area-* mirror
+   * dirs are removed; mirrored standard skills and user-authored skills under
+   * .agents/skills/ survive a re-run.
+   */
+  it('clears only stale gitnexus-area-* mirror dirs, preserving others', async () => {
+    const { graph, communities, memberships } = twoCommSetup();
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+    // Pre-existing non-community content that must survive.
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'gitnexus-cli'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-cli', 'SKILL.md'),
+      'standard',
+    );
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'user-author'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.agents', 'skills', 'user-author', 'SKILL.md'), 'mine');
+    // Stale community mirror from a prior run.
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-old'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-old', 'SKILL.md'),
+      'stale',
+    );
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    // Stale community mirror gone; non-community content preserved.
+    await expect(
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-old')),
+    ).rejects.toThrow();
+    expect(
+      await fs.readFile(
+        path.join(tmpDir, '.agents', 'skills', 'gitnexus-cli', 'SKILL.md'),
+        'utf-8',
+      ),
+    ).toBe('standard');
+    expect(
+      await fs.readFile(path.join(tmpDir, '.agents', 'skills', 'user-author', 'SKILL.md'), 'utf-8'),
+    ).toBe('mine');
+    // Fresh community mirrors written.
+    await expect(
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-alpha', 'SKILL.md')),
+    ).resolves.toBeUndefined();
+  });
+
+  /**
+   * Empty edge case: no significant communities + .agents/ present must not
+   * write or mirror anything, and must not throw.
+   */
+  it('writes nothing when no communities are significant, even with .agents/ present', async () => {
+    await fs.mkdir(path.join(tmpDir, '.agents'), { recursive: true });
+    const graph = createKnowledgeGraph();
+    // 2-symbol community — below the 3-symbol threshold.
+    for (let i = 0; i < 2; i++) {
+      graph.addNode(makeNode(`fn:n${i}`, `n${i}`, 'Function', `${tmpDir}/f${i}.ts`, 1, false));
+    }
+    const communities = [makeCommunity('c1', 'Tiny', 2)];
+    const memberships = [makeMembership('fn:n0', 'c1'), makeMembership('fn:n1', 'c1')];
+
+    const result = await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    expect(result.skills).toEqual([]);
+    await expect(
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'gitnexus-area-tiny')),
+    ).rejects.toThrow();
   });
 
   /**
@@ -616,12 +922,43 @@ describe('generateSkillFiles — file output', () => {
     );
 
     const content = await fs.readFile(
-      path.join(tmpDir, '.claude', 'skills', 'generated', 'alpha', 'SKILL.md'),
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
       'utf-8',
     );
     expect(content.startsWith('---')).toBe(true);
     expect(content).toContain('name:');
     expect(content).toContain('description:');
+  });
+
+  /**
+   * The "How to Explore" section must reference MCP tools by their registered
+   * (unprefixed) names — the server registers `context`/`query`, not
+   * `gitnexus_context`/`gitnexus_query`, so the prefixed form points agents at
+   * tools that do not exist (#2059).
+   */
+  it('references MCP tools by their registered (unprefixed) names (#2059)', async () => {
+    const { graph, communities, memberships } = twoCommSetup();
+
+    await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({
+        graph,
+        repoPath: tmpDir,
+        communities,
+        memberships,
+      }),
+    );
+
+    const content = await fs.readFile(
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(content).not.toMatch(/gitnexus_(context|query|impact|detect_changes|rename|cypher)/);
+    expect(content).toContain('context({name:');
+    // #2175: advertise the renamed param, not the legacy "query" key.
+    expect(content).toContain('query({search_query:');
+    expect(content).not.toContain('query({query:');
   });
 
   /**
@@ -669,7 +1006,7 @@ describe('generateSkillFiles — file output', () => {
     );
 
     const content = await fs.readFile(
-      path.join(tmpDir, '.claude', 'skills', 'generated', 'alpha', 'SKILL.md'),
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-alpha', 'SKILL.md'),
       'utf-8',
     );
 
@@ -706,7 +1043,7 @@ describe('generateSkillFiles — file output', () => {
     );
 
     const content = await fs.readFile(
-      path.join(tmpDir, '.claude', 'skills', 'generated', 'isolated', 'SKILL.md'),
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-isolated', 'SKILL.md'),
       'utf-8',
     );
 
@@ -739,9 +1076,9 @@ describe('generateSkillFiles — file output', () => {
       }),
     );
 
-    const outputDir = path.join(tmpDir, '.claude', 'skills', 'generated');
+    const outputDir = path.join(tmpDir, '.claude', 'skills');
     const firstRunDirs = await fs.readdir(outputDir);
-    expect(firstRunDirs).toContain('first');
+    expect(firstRunDirs).toContain('gitnexus-area-first');
 
     // Second run with different community
     const graph2 = createKnowledgeGraph();
@@ -763,8 +1100,8 @@ describe('generateSkillFiles — file output', () => {
     );
 
     const secondRunDirs = await fs.readdir(outputDir);
-    expect(secondRunDirs).toContain('second');
-    expect(secondRunDirs).not.toContain('first');
+    expect(secondRunDirs).toContain('gitnexus-area-second');
+    expect(secondRunDirs).not.toContain('gitnexus-area-first');
   });
 
   /**
@@ -794,7 +1131,7 @@ describe('generateSkillFiles — file output', () => {
     );
 
     const content = await fs.readFile(
-      path.join(tmpDir, '.claude', 'skills', 'generated', 'stats', 'SKILL.md'),
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-stats', 'SKILL.md'),
       'utf-8',
     );
 
@@ -831,16 +1168,52 @@ describe('generateSkillFiles — file output', () => {
     // The kebab name should only contain lowercase alphanumerics and dashes
     expect(result.skills[0].name).toMatch(/^[a-z0-9-]+$/);
 
-    const skillPath = path.join(
-      tmpDir,
-      '.claude',
-      'skills',
-      'generated',
-      result.skills[0].name,
-      'SKILL.md',
-    );
+    const skillPath = path.join(tmpDir, '.claude', 'skills', result.skills[0].name, 'SKILL.md');
     const content = await fs.readFile(skillPath, 'utf-8');
     expect(content.length).toBeGreaterThan(0);
+  });
+
+  it("keeps colliding names within Claude Code's 64-character limit", async () => {
+    const graph = createKnowledgeGraph();
+    for (let i = 0; i < 8; i++) {
+      graph.addNode(
+        makeNode(
+          `fn:long${i}`,
+          `longFunc${i}`,
+          'Function',
+          `${tmpDir}/src/long/f${i}.ts`,
+          1,
+          false,
+        ),
+      );
+    }
+
+    const sharedPrefix = 'a'.repeat(60);
+    const communities = [
+      makeCommunity('c1', `${sharedPrefix}one`, 4),
+      makeCommunity('c2', `${sharedPrefix}two`, 4),
+    ];
+    const memberships = [
+      ...[0, 1, 2, 3].map((i) => makeMembership(`fn:long${i}`, 'c1')),
+      ...[4, 5, 6, 7].map((i) => makeMembership(`fn:long${i}`, 'c2')),
+    ];
+
+    const result = await generateSkillFiles(
+      tmpDir,
+      'TestProject',
+      buildPipelineResult({ graph, repoPath: tmpDir, communities, memberships }),
+    );
+
+    expect(result.skills).toHaveLength(2);
+    expect(new Set(result.skills.map((skill) => skill.name)).size).toBe(2);
+    for (const skill of result.skills) {
+      expect(skill.name.length).toBeLessThanOrEqual(64);
+      const content = await fs.readFile(
+        path.join(tmpDir, '.claude', 'skills', skill.name, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content).toContain(`name: ${skill.name}`);
+    }
   });
 
   /**
@@ -902,7 +1275,7 @@ describe('generateSkillFiles — file output', () => {
     expect(result.skills).toHaveLength(1);
 
     const content = await fs.readFile(
-      path.join(tmpDir, '.claude', 'skills', 'generated', 'win', 'SKILL.md'),
+      path.join(tmpDir, '.claude', 'skills', 'gitnexus-area-win', 'SKILL.md'),
       'utf-8',
     );
 

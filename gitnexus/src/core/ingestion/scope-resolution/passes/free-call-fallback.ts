@@ -18,6 +18,7 @@
  */
 
 import type {
+  DefId,
   ParameterTypeClass,
   ParsedFile,
   Reference,
@@ -35,11 +36,15 @@ import type {
   ResolutionSuppressionReason,
 } from '../resolution-outcome.js';
 import { resolveCallerGraphId, resolveDefGraphId } from '../graph-bridge/ids.js';
+import type { CalleeIdSink } from '../graph-bridge/callee-id-sink.js';
 import {
+  findAllCallableBindingCandidatesInScope,
   findAllCallableBindingsInScope,
   findCallableBindingInScope,
   findCallableBindingsAndAdlBlocker,
-  findClassBindingInScope,
+  findEnclosingClassDef,
+  resolveInheritanceBaseInScope,
+  type CallableBindingCandidate,
 } from '../scope/walkers.js';
 import {
   isOverloadAmbiguousAfterNormalization,
@@ -79,14 +84,35 @@ export function emitFreeCallFallback(
       scopes: ScopeResolutionIndexes,
       parsedFiles: readonly ParsedFile[],
     ) => readonly SymbolDefinition[] | undefined;
+    /** Module-qualified free-call resolver (#2730) — see
+     *  `ScopeResolver.resolveQualifiedFreeCall`. */
+    readonly resolveQualifiedFreeCall?: ScopeResolver['resolveQualifiedFreeCall'];
     readonly conversionRankFn?: ConversionRankFn;
+    readonly conversionOnlyArgTypePrefixes?: readonly string[];
     /** Optional per-language constraint hook threaded into
      *  `narrowOverloadCandidates`. Drops candidates whose template
      *  constraints (e.g. C++ `enable_if_t`, C++20 `requires`) provably
      *  fail at the call site. Three-valued; `'unknown'` keeps the
      *  candidate (monotonicity). */
     readonly constraintCompatibility?: ScopeResolver['constraintCompatibility'];
+    /** Platform/language built-in names (e.g. `fetch`, `setTimeout`) that
+     *  are never real repository declarations. Gates the finalize-bucket
+     *  guard below (#2545) -- see `hasGenuineLexicalBinding`. */
+    readonly isBuiltInName?: (name: string) => boolean;
+    /** Instance-ownership gate (#2550): a free call may resolve to a
+     *  `Method` only when the caller's enclosing class chain (self + MRO)
+     *  contains the method's owner. See
+     *  `ScopeResolver.freeCallsRequireInstanceOwnership`. */
+    readonly freeCallsRequireInstanceOwnership?: boolean;
     readonly recordResolutionOutcome?: ResolutionOutcomeRecorder;
+    /** Call sites owned by a later precise pass (for example callable-value-flow). */
+    readonly skipSites?: ReadonlySet<string>;
+    /** Resolved-callee-id capture sink (#2227 U2). Threaded in under `--pdg`
+     *  OR for callable-flow's direct-target index (#2437, position-filtered);
+     *  `undefined` ⇒ zero overhead, byte-identity (R4). Captured at the CALLS
+     *  emit below BEFORE the collapsed `seen` dedup (KTD6) so same-target
+     *  multi-line calls are still recorded per site. */
+    readonly calleeIdSink?: CalleeIdSink;
   } = {},
 ): number {
   let emitted = 0;
@@ -102,11 +128,65 @@ export function emitFreeCallFallback(
   // defs.byId.values() at every constructor call. Same simple-name keying
   // and class-like kind filter the previous per-site scan applied.
   const globalClassesBySimpleName = buildGlobalClassIndex(scopes);
+  // Workspace file-path set for `resolveQualifiedFreeCall` (a module path maps
+  // to a file by language convention). Built lazily and once: languages without
+  // the hook never pay for it.
+  let allFilePathsMemo: ReadonlySet<string> | undefined;
+  const allFilePaths = (): ReadonlySet<string> =>
+    (allFilePathsMemo ??= new Set(parsedFiles.map((p) => p.filePath)));
+  // Per-pass memo of pickUniqueGlobalCallable's post-filter candidate list,
+  // keyed (simpleName, callerFilePath). Only created when no per-caller
+  // visibility filter applies (the list is then a pure function of name+file —
+  // see pickUniqueGlobalCallable). Lets repeated free calls of the same name
+  // from one file reuse the same-name-bucket scan instead of re-walking it.
+  const scopeDefsCache =
+    options.isCallableVisibleFromCaller === undefined
+      ? new Map<string, readonly SymbolDefinition[]>()
+      : undefined;
+  const enclosingInstanceOwnerByScope =
+    options.freeCallsRequireInstanceOwnership === true
+      ? new Map<ScopeId, SymbolDefinition | null>()
+      : undefined;
+  const reachableInstanceOwnersByOwner =
+    options.freeCallsRequireInstanceOwnership === true
+      ? new Map<string, ReadonlySet<string>>()
+      : undefined;
+  const instanceOwnerKey = (ownerId: string): string => {
+    const owner = scopes.defs.get(ownerId as DefId);
+    const qualifiedName = owner?.qualifiedName;
+    if (qualifiedName === undefined || qualifiedName === '') return ownerId;
+    const namespacePrefix = owner.namespacePrefix ?? '';
+    return `${namespacePrefix.length}:${namespacePrefix}:${qualifiedName}`;
+  };
+  const isReachableInstanceOwner = (scopeId: ScopeId, ownerId: string): boolean => {
+    let enclosing = enclosingInstanceOwnerByScope?.get(scopeId);
+    if (enclosing === undefined) {
+      enclosing = findEnclosingClassDef(scopeId, scopes) ?? null;
+      enclosingInstanceOwnerByScope?.set(scopeId, enclosing);
+    }
+    if (enclosing === null) return false;
+
+    let owners = reachableInstanceOwnersByOwner?.get(enclosing.nodeId);
+    if (owners === undefined) {
+      const mutableOwners = new Set<string>([instanceOwnerKey(enclosing.nodeId)]);
+      for (const inheritedOwnerId of scopes.methodDispatch.mroFor(enclosing.nodeId)) {
+        mutableOwners.add(instanceOwnerKey(inheritedOwnerId));
+      }
+      owners = mutableOwners;
+      reachableInstanceOwnersByOwner?.set(enclosing.nodeId, owners);
+    }
+    return owners.has(instanceOwnerKey(ownerId));
+  };
 
   for (const parsed of parsedFiles) {
+    const bindingCandidatesByScope =
+      options.freeCallsRequireInstanceOwnership === true
+        ? new Map<ScopeId, Map<string, readonly CallableBindingCandidate[]>>()
+        : undefined;
     for (const site of parsed.referenceSites) {
       if (site.kind !== 'call') continue;
       if (site.explicitReceiver !== undefined) continue;
+      if (options.skipSites?.has(siteKey(parsed.filePath, site)) === true) continue;
 
       // Constructor form (`new User(...)`): resolve the class, then
       // emit CALLS to its explicit Constructor def (when present) or
@@ -114,8 +194,13 @@ export function emitFreeCallFallback(
       // the same two targets; see test expectations.
       let fnDef: SymbolDefinition | undefined;
       if (site.callForm === 'constructor') {
-        const classDef = findClassBindingInScope(site.inScope, site.name, scopes);
-        if (classDef !== undefined) {
+        const classDef = resolveInheritanceBaseInScope(
+          site.inScope,
+          site.name,
+          scopes,
+          site.rawQualifiedName,
+        );
+        if (classDef !== undefined && classDef.type !== 'Interface') {
           // Most languages link `Type(...)` to the explicit Constructor def
           // when one exists (else the Class). Languages that model the call
           // as a reference to the type itself opt into
@@ -123,7 +208,7 @@ export function emitFreeCallFallback(
           fnDef =
             options.constructorCallTargetsClass === true
               ? classDef
-              : pickConstructorOrClass(classDef, workspaceIndex, scopes);
+              : pickConstructorOrClass(classDef, workspaceIndex, scopes, site.arity);
         } else if (options.allowGlobalFallback === true) {
           // The constructed type may live in a sibling/imported file that is
           // not in the call-site's lexical scope-chain bindings. Fall back to
@@ -133,11 +218,33 @@ export function emitFreeCallFallback(
           const globalClass = pickUniqueGlobalClass(site.name, globalClassesBySimpleName);
           if (globalClass !== undefined) {
             fnDef =
-              options.constructorCallTargetsClass === true
-                ? globalClass
-                : pickConstructorOrClass(globalClass, workspaceIndex, scopes);
+              globalClass.type === 'Interface'
+                ? undefined
+                : options.constructorCallTargetsClass === true
+                  ? globalClass
+                  : pickConstructorOrClass(globalClass, workspaceIndex, scopes, site.arity);
           }
         }
+      }
+      // Module-qualified free call (`mod::fn()`): the source named the module
+      // explicitly, so that path outranks every lexical tier below — otherwise
+      // the scope-chain walk binds the bare tail to a same-named definition in
+      // the caller's own file and emits a self-loop instead of the real
+      // cross-module edge (#2730). Only fires when the language populated
+      // `rawQualifiedName` AND provides the hook; `undefined` falls through to
+      // the unchanged chain, so this tier is strictly additive.
+      if (
+        fnDef === undefined &&
+        options.resolveQualifiedFreeCall !== undefined &&
+        site.rawQualifiedName !== undefined
+      ) {
+        fnDef = options.resolveQualifiedFreeCall(
+          site,
+          parsed,
+          scopes,
+          workspaceIndex,
+          allFilePaths(),
+        );
       }
       // Implicit-this overload narrowing: an unqualified call inside
       // a method body might be calling a sibling overload on the
@@ -148,6 +255,7 @@ export function emitFreeCallFallback(
       if (fnDef === undefined) {
         fnDef = pickImplicitThisOverload(site, scopes, workspaceIndex, model, {
           conversionRankFn: options.conversionRankFn,
+          conversionOnlyArgTypePrefixes: options.conversionOnlyArgTypePrefixes,
           constraintCompatibility: options.constraintCompatibility,
         });
         fnDefFromImplicitThis = fnDef !== undefined;
@@ -164,9 +272,96 @@ export function emitFreeCallFallback(
           // (local shadows import). When a conversion-rank function is
           // available AND the binding scope contains multiple overloads,
           // refine with narrowOverloadCandidates (#1578).
-          fnDef = findCallableBindingInScope(site.inScope, site.name, scopes);
-          if (fnDef !== undefined && options.conversionRankFn !== undefined) {
-            const allCallables = findAllCallableBindingsInScope(site.inScope, site.name, scopes);
+          let bindingCandidates: readonly CallableBindingCandidate[] | undefined;
+          if (bindingCandidatesByScope !== undefined) {
+            let byName = bindingCandidatesByScope.get(site.inScope);
+            if (byName === undefined) {
+              byName = new Map();
+              bindingCandidatesByScope.set(site.inScope, byName);
+            }
+            bindingCandidates = byName.get(site.name);
+            if (bindingCandidates === undefined) {
+              bindingCandidates = findAllCallableBindingCandidatesInScope(
+                site.inScope,
+                site.name,
+                scopes,
+              );
+              byName.set(site.name, bindingCandidates);
+            }
+          }
+          let eligibleBindingCandidates: readonly CallableBindingCandidate[] | undefined;
+          if (bindingCandidates === undefined) {
+            fnDef = findCallableBindingInScope(site.inScope, site.name, scopes);
+          } else {
+            eligibleBindingCandidates = bindingCandidates.filter((candidate) => {
+              const def = candidate.def;
+              if (
+                def.type !== 'Method' ||
+                def.ownerId === undefined ||
+                def.filePath !== parsed.filePath
+              ) {
+                return true;
+              }
+              const ownerReachable = isReachableInstanceOwner(site.inScope, def.ownerId);
+              const staticallyImported = candidate.bindings.some(
+                (binding) => binding.visibility === 'static-member-import',
+              );
+              return ownerReachable || staticallyImported;
+            });
+            fnDef = eligibleBindingCandidates[0]?.def;
+            if (fnDef === undefined && bindingCandidates.length > 0) {
+              recordSuppressedOutcome(options.recordResolutionOutcome, {
+                phase: 'free-call-fallback',
+                filePath: parsed.filePath,
+                name: site.name,
+                range: site.atRange,
+                reason: 'free-call-instance-ownership',
+                candidates: bindingCandidates.map((candidate) => candidate.def),
+              });
+            }
+          }
+          if (
+            fnDef !== undefined &&
+            options.isBuiltInName?.(site.name) === true &&
+            fnDef.filePath === parsed.filePath &&
+            eligibleBindingCandidates?.some((candidate) =>
+              candidate.bindings.some((binding) => binding.visibility === 'static-member-import'),
+            ) !== true &&
+            !hasGenuineLexicalBinding(site.inScope, site.name, scopes)
+          ) {
+            // A platform/language built-in (e.g. `fetch`, `setTimeout`)
+            // with no binding reachable via the TRUE lexical scope chain
+            // (Scope.bindings only) -- the match came solely from
+            // finalize's per-file "local + imports + wildcards" bucket,
+            // which flattens every declaration in the file onto the
+            // module scope regardless of true nesting depth
+            // (gitnexus-shared's `materializeBindings`). That flattening
+            // is correct for its purpose (cross-file import targets) but
+            // over-matches same-file built-in-shadowing declarations that
+            // were never really module-scope-visible -- e.g. a Cloudflare
+            // Worker's `export default { fetch(req) {} }` handler (#2545).
+            // Leave the call unresolved rather than emit a false edge.
+            //
+            // `fnDef.filePath === parsed.filePath` is the load-bearing
+            // guard against a real regression: `materializeBindings`'s
+            // flat bucket is per-file, so the leak this guard targets is
+            // ALWAYS same-file. A cross-file match at this point can only
+            // come from a genuine import/namespace/workspace-FQN channel
+            // (the separate, gated `pickUniqueGlobalCallable` global
+            // fallback runs later and isn't what populated `fnDef` here)
+            // -- e.g. `import { fetch } from './fetch-polyfill'` must
+            // keep resolving. Without this check, that import silently
+            // stopped resolving (verified via a scratch probe fixture).
+            fnDef = undefined;
+          }
+          if (
+            fnDef !== undefined &&
+            (options.conversionRankFn !== undefined || bindingCandidates !== undefined)
+          ) {
+            const allCallables =
+              eligibleBindingCandidates === undefined
+                ? findAllCallableBindingsInScope(site.inScope, site.name, scopes)
+                : eligibleBindingCandidates.map((candidate) => candidate.def);
             if (allCallables.length > 1) {
               const narrowed = narrowOverloadCandidates(
                 allCallables,
@@ -175,6 +370,7 @@ export function emitFreeCallFallback(
                 {
                   argumentTypeClasses: site.argumentTypeClasses,
                   conversionRankFn: options.conversionRankFn,
+                  conversionOnlyArgTypePrefixes: options.conversionOnlyArgTypePrefixes,
                   constraintCompatibility: options.constraintCompatibility,
                 },
               );
@@ -261,6 +457,7 @@ export function emitFreeCallFallback(
               const narrowed = narrowOverloadCandidates(ordinary, site.arity, site.argumentTypes, {
                 argumentTypeClasses: site.argumentTypeClasses,
                 conversionRankFn: options.conversionRankFn,
+                conversionOnlyArgTypePrefixes: options.conversionOnlyArgTypePrefixes,
                 constraintCompatibility: options.constraintCompatibility,
               });
               if (narrowed.length === 1) {
@@ -308,6 +505,7 @@ export function emitFreeCallFallback(
             const narrowed = narrowOverloadCandidates(merged, site.arity, site.argumentTypes, {
               argumentTypeClasses: site.argumentTypeClasses,
               conversionRankFn: options.conversionRankFn,
+              conversionOnlyArgTypePrefixes: options.conversionOnlyArgTypePrefixes,
               constraintCompatibility: options.constraintCompatibility,
             });
             if (narrowed.length === 1) {
@@ -363,9 +561,23 @@ export function emitFreeCallFallback(
           site.argumentTypes,
           site.argumentTypeClasses,
           options.conversionRankFn,
+          scopeDefsCache,
+          options.conversionOnlyArgTypePrefixes,
         );
       }
       if (fnDef === undefined) continue;
+      if (fnDef.isDeleted === true) {
+        recordSuppressedOutcome(options.recordResolutionOutcome, {
+          phase: 'free-call-fallback',
+          filePath: parsed.filePath,
+          name: site.name,
+          range: site.atRange,
+          reason: 'selected-callable-deleted',
+          candidates: [fnDef],
+        });
+        handledSites.add(siteKey(parsed.filePath, site));
+        continue;
+      }
       if (
         (fnDefFromImplicitThis || fnDef.type === 'Method' || fnDef.type === 'Constructor') &&
         options.isCallableVisibleFromCaller !== undefined &&
@@ -379,7 +591,7 @@ export function emitFreeCallFallback(
         handledSites.add(siteKey(parsed.filePath, site));
         continue;
       }
-      const callerGraphId = resolveCallerGraphId(site.inScope, scopes, nodeLookup);
+      const callerGraphId = resolveCallerGraphId(site.inScope, scopes, nodeLookup, site.atRange);
       if (callerGraphId === undefined) continue;
       const tgtGraphId = resolveDefGraphId(fnDef.filePath, fnDef, nodeLookup);
       if (tgtGraphId === undefined) continue;
@@ -387,6 +599,18 @@ export function emitFreeCallFallback(
       // means we don't add a new edge — so `emit-references` skips its
       // potentially-wrong fallback for the same site.
       handledSites.add(siteKey(parsed.filePath, site));
+      // Resolved-callee-id capture (#2227 U2/KTD6/R8): record this CALLS site's
+      // resolved target BEFORE the collapsed `seen` dedup. The free-call dedup
+      // key drops the line (one edge per caller→target), so capturing after
+      // `seen.has` would lose every same-target call past the first — capture
+      // here, per site, keyed on `site.atRange` (byte-equal to U1's
+      // SiteRecord.at: 1-based line / 0-based col).
+      options.calleeIdSink?.add(
+        parsed.filePath,
+        site.atRange.startLine,
+        site.atRange.startCol,
+        tgtGraphId,
+      );
       const relId = `rel:CALLS:${callerGraphId}->${tgtGraphId}`;
       if (seen.has(relId)) continue;
       seen.add(relId);
@@ -468,8 +692,11 @@ function recordSuppressedOutcome(
  * (falling back to the qualifiedName itself when undotted). Used by
  * `pickUniqueGlobalCallable` so every free-call fallback site is O(1)
  * instead of O(|defs|).
+ *
+ * Exported for unit testing — language-agnostic logic, exercised via synthetic
+ * stubs in `pick-unique-global-callable.test.ts`.
  */
-function buildGlobalCallableIndex(
+export function buildGlobalCallableIndex(
   scopes: ScopeResolutionIndexes,
 ): ReadonlyMap<string, readonly SymbolDefinition[]> {
   const out = new Map<string, SymbolDefinition[]>();
@@ -526,7 +753,13 @@ export function buildGlobalClassIndex(
   return out;
 }
 
-function pickUniqueGlobalCallable(
+/**
+ * Resolve a free (unqualified, receiver-less) call to a globally-unique
+ * callable def by simple name. See the in-body comments for the narrowing
+ * order. Exported for unit testing — the `scopeDefsCache` equivalence is
+ * exercised via synthetic stubs in `pick-unique-global-callable.test.ts`.
+ */
+export function pickUniqueGlobalCallable(
   name: string,
   model: SemanticModel,
   globalCallablesBySimpleName: ReadonlyMap<string, readonly SymbolDefinition[]>,
@@ -537,26 +770,50 @@ function pickUniqueGlobalCallable(
   callArgTypes?: readonly string[],
   callArgTypeClasses?: readonly ParameterTypeClass[],
   conversionRankFn?: ConversionRankFn,
+  scopeDefsCache?: Map<string, readonly SymbolDefinition[]>,
+  conversionOnlyArgTypePrefixes?: readonly string[],
 ): SymbolDefinition | undefined {
-  const scopeDefs: SymbolDefinition[] = [];
-  const scopeSeen = new Set<string>();
-  for (const def of globalCallablesBySimpleName.get(name) ?? []) {
-    // Skip file-local defs (e.g. C `static` functions) that live in a
-    // different file from the caller — they are logically invisible.
-    if (isFileLocalDef !== undefined && def.filePath !== callerFilePath && isFileLocalDef(def)) {
-      continue;
+  // The scope-index candidate list is a pure function of (name, callerFilePath):
+  // the same-name bucket is fixed for the pass, the file-local filter depends
+  // only on the candidate + callerFilePath, and the logical-key dedup is
+  // deterministic. When no per-caller visibility filter applies, memoize it so
+  // repeated free calls of the same name from one file — the kernel's hot
+  // pattern (e.g. `kmalloc` across hundreds of `drivers/` sites, where the
+  // same-name bucket has thousands of defs) — reuse the bucket scan instead of
+  // re-walking it per site. The cached array is only ever READ by the arity /
+  // overload narrowers below (both `.filter()`-based — they never mutate it),
+  // so one shared instance across call sites is safe. The cache is bypassed
+  // when a visibility filter is present (`isCallerVisible !== undefined`),
+  // because the list would then depend on the caller's scope, not just its file.
+  const cacheKey =
+    scopeDefsCache !== undefined && isCallerVisible === undefined
+      ? `${name} ${callerFilePath}`
+      : undefined;
+  let scopeDefs: readonly SymbolDefinition[] | undefined =
+    cacheKey !== undefined ? scopeDefsCache!.get(cacheKey) : undefined;
+  if (scopeDefs === undefined) {
+    const built: SymbolDefinition[] = [];
+    const scopeSeen = new Set<string>();
+    for (const def of globalCallablesBySimpleName.get(name) ?? []) {
+      // Skip file-local defs (e.g. C `static` functions) that live in a
+      // different file from the caller — they are logically invisible.
+      if (isFileLocalDef !== undefined && def.filePath !== callerFilePath && isFileLocalDef(def)) {
+        continue;
+      }
+      // Caller-side visibility filter (e.g., PHP namespace + use-function
+      // import gating). When defined, blocks candidates the caller cannot
+      // legally reach. Languages without namespace-scoped function resolution
+      // leave this undefined → no filtering.
+      if (isCallerVisible !== undefined && !isCallerVisible(def)) {
+        continue;
+      }
+      const key = logicalCallableKey(def);
+      if (scopeSeen.has(key)) continue;
+      scopeSeen.add(key);
+      built.push(def);
     }
-    // Caller-side visibility filter (e.g., PHP namespace + use-function
-    // import gating). When defined, blocks candidates the caller cannot
-    // legally reach. Languages without namespace-scoped function resolution
-    // leave this undefined → no filtering.
-    if (isCallerVisible !== undefined && !isCallerVisible(def)) {
-      continue;
-    }
-    const key = logicalCallableKey(def);
-    if (scopeSeen.has(key)) continue;
-    scopeSeen.add(key);
-    scopeDefs.push(def);
+    scopeDefs = built;
+    if (cacheKey !== undefined) scopeDefsCache!.set(cacheKey, built);
   }
   if (scopeDefs.length === 1) return scopeDefs[0];
 
@@ -576,6 +833,7 @@ function pickUniqueGlobalCallable(
     const narrowed = narrowOverloadCandidates(scopeDefs, callArity, callArgTypes, {
       argumentTypeClasses: callArgTypeClasses,
       conversionRankFn,
+      conversionOnlyArgTypePrefixes,
     });
     if (narrowed.length === 1) return narrowed[0];
   }
@@ -617,6 +875,7 @@ function pickUniqueGlobalCallable(
     const narrowed = narrowOverloadCandidates(defs, callArity, callArgTypes, {
       argumentTypeClasses: callArgTypeClasses,
       conversionRankFn,
+      conversionOnlyArgTypePrefixes,
     });
     if (narrowed.length === 1) return narrowed[0];
   }
@@ -662,22 +921,29 @@ function pickConstructorOrClass(
   classDef: SymbolDefinition,
   workspaceIndex: WorkspaceResolutionIndex,
   scopes?: ScopeResolutionIndexes,
+  callArity?: number,
 ): SymbolDefinition {
   const classScope = workspaceIndex.classScopeByDefId.get(classDef.nodeId);
   if (classScope === undefined) return classDef;
+  const ctors: SymbolDefinition[] = [];
   for (const def of classScope.ownedDefs) {
-    if (def.type === 'Constructor') return def;
+    if (def.type === 'Constructor') ctors.push(def);
   }
   if (scopes !== undefined) {
     for (const childId of scopes.scopeTree.getChildren(classScope.id)) {
       const childScope = scopes.scopeTree.getScope(childId);
       if (childScope === undefined || childScope.kind === 'Class') continue;
       for (const def of childScope.ownedDefs) {
-        if (def.type === 'Constructor') return def;
+        if (def.type === 'Constructor') ctors.push(def);
       }
     }
   }
-  return classDef;
+  if (ctors.length === 0) return classDef;
+  if (callArity !== undefined) {
+    const narrowed = narrowByArity(ctors, callArity);
+    if (narrowed !== undefined) return narrowed;
+  }
+  return ctors[0]!;
 }
 
 /** Find a unique workspace-wide class-like def by simple name, for a
@@ -740,6 +1006,7 @@ export function pickImplicitThisOverload(
   model: SemanticModel,
   hookCtx?: {
     readonly conversionRankFn?: ConversionRankFn;
+    readonly conversionOnlyArgTypePrefixes?: readonly string[];
     readonly constraintCompatibility?: ScopeResolver['constraintCompatibility'];
   },
 ): SymbolDefinition | undefined {
@@ -772,8 +1039,39 @@ export function pickImplicitThisOverload(
   const candidates = narrowOverloadCandidates(overloads, site.arity, site.argumentTypes, {
     argumentTypeClasses: site.argumentTypeClasses,
     conversionRankFn: hookCtx?.conversionRankFn,
+    conversionOnlyArgTypePrefixes: hookCtx?.conversionOnlyArgTypePrefixes,
     constraintCompatibility: hookCtx?.constraintCompatibility,
   });
   if (candidates.length !== 1) return undefined;
   return candidates[0];
+}
+
+/**
+ * True when `name` is bound somewhere along the TRUE lexical scope
+ * chain from `startScope` -- i.e. via `Scope.bindings` (the raw,
+ * nesting-aware per-scope map built during extraction), NOT via
+ * finalize's `indexes.bindings` module-scope bucket (which flattens
+ * every declaration in the file onto the module scope regardless of
+ * true nesting -- see `hasGenuineLexicalBinding`'s caller for why that
+ * distinction matters, #2545).
+ */
+function hasGenuineLexicalBinding(
+  startScope: ScopeId,
+  name: string,
+  scopes: ScopeResolutionIndexes,
+): boolean {
+  let currentId: ScopeId | null = startScope;
+  const visited = new Set<ScopeId>();
+  while (currentId !== null) {
+    if (visited.has(currentId)) return false;
+    visited.add(currentId);
+    const scope = scopes.scopeTree.getScope(currentId);
+    if (scope === undefined) return false;
+    // `Object` scopes (object/record literal bodies) are a hoist
+    // boundary only -- never a genuine lexical binding, not even to
+    // their own nested children (#2551, mirrors scope/walkers.ts).
+    if (scope.kind !== 'Object' && scope.bindings.get(name) !== undefined) return true;
+    currentId = scope.parent;
+  }
+  return false;
 }

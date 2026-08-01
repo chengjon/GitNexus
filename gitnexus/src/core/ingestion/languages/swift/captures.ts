@@ -49,9 +49,25 @@ import { getSwiftParser, getSwiftScopeQuery } from './query.js';
 import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
 
 /** Declaration anchors that carry function-like arity metadata. */
 const FUNCTION_DECL_TAGS = ['@declaration.method', '@declaration.constructor'] as const;
+
+const SWIFT_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set(['function_declaration', 'lambda_literal']),
+  callNodeTypes: new Set(['call_expression']),
+  parameterListNodeTypes: new Set(['value_arguments']),
+  parameterNodeTypes: new Set(['parameter']),
+  bindingNodeTypes: new Set(['property_declaration']),
+  assignmentNodeTypes: new Set(['assignment']),
+  identifierNodeTypes: new Set(['simple_identifier', 'type_identifier']),
+  extractFunctionParameters: (node: SyntaxNode) =>
+    node.namedChildren.filter(
+      (child): child is SyntaxNode => child !== null && child.type === 'parameter',
+    ),
+} as const;
 
 /** tree-sitter-swift node types that carry arity. */
 const FUNCTION_NODE_TYPES = [
@@ -114,6 +130,12 @@ export function emitSwiftScopeCaptures(
           continue;
         }
       }
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped); // defensive fallback
       continue;
     }
@@ -159,6 +181,12 @@ export function emitSwiftScopeCaptures(
       const span = `${navNode.startIndex}-${navNode.endIndex}`;
       if (seenReadSpans.has(span)) continue;
       seenReadSpans.add(span);
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       continue;
     }
@@ -221,6 +249,12 @@ export function emitSwiftScopeCaptures(
         ...FUNCTION_NODE_TYPES,
       );
       if (fnNodeForArity !== null) attachArityMetadata(grouped, fnNodeForArity);
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
 
       const recvNode = nodeIfType(nodeMap['@scope.function'], ...RECEIVER_NODE_TYPES);
@@ -281,6 +315,12 @@ export function emitSwiftScopeCaptures(
       }
     }
 
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
     out.push(grouped);
   }
 
@@ -292,6 +332,7 @@ export function emitSwiftScopeCaptures(
   // legacy heritage-capture leg (removed in #942), which the worker pipeline
   // drops for registry-primary languages (issue #1951).
   out.push(...synthesizeSwiftInheritanceReferences(tree.rootNode));
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, SWIFT_CALLABLE_CAPTURE_OPTIONS));
 
   return out;
 }

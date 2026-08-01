@@ -14,7 +14,13 @@ import {
   LOCAL_BACKEND_FTS_INDEXES,
 } from '../fixtures/local-backend-seed.js';
 
-vi.mock('../../src/storage/repo-manager.js', () => ({
+// Partial mock: registry access is faked, but everything else — critically
+// `loadMeta`, which the staleness check in LocalBackend.ensureInitialized
+// calls on every throttled window — stays REAL. A factory that omitted
+// loadMeta made that call site throw a TypeError that the staleness check's
+// catch silently swallowed, so the code path was never actually exercised.
+vi.mock('../../src/storage/repo-manager.js', async (importActual) => ({
+  ...(await importActual<typeof import('../../src/storage/repo-manager.js')>()),
   listRegisteredRepos: vi.fn().mockResolvedValue([]),
   cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
   findSiblingClones: vi.fn().mockResolvedValue([]),
@@ -101,6 +107,31 @@ withTestLbugDB(
         expect(depNames).toContain('login');
       });
 
+      it.each(['name', 'symbol'] as const)(
+        'impact tool resolves the %s compatibility alias against a real index',
+        async (alias) => {
+          const result = await backend.callTool('impact', {
+            [alias]: 'validate',
+            direction: 'upstream',
+          });
+          expect(result).not.toHaveProperty('error');
+          expect(result.target?.name).toBe('validate');
+          const directDeps = result.byDepth[1] || result.byDepth['1'] || [];
+          expect(directDeps.map((d: any) => d.name)).toContain('login');
+        },
+      );
+
+      it('context tool resolves the file compatibility alias against a real index', async () => {
+        const result = await backend.callTool('context', {
+          name: 'authenticate',
+          file: 'src/base.ts',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('found');
+        expect(result.symbol?.name).toBe('authenticate');
+        expect(result.symbol?.filePath).toBe('src/base.ts');
+      });
+
       it('query tool returns results for keyword search', async () => {
         const result = await backend.callTool('query', { query: 'login' });
         expect(result).not.toHaveProperty('error');
@@ -116,6 +147,98 @@ withTestLbugDB(
         // At least one of the search phases must have fired for any
         // non-error response — bm25 and/or vector always runs.
         expect(result.timing.bm25 ?? result.timing.vector).toBeGreaterThanOrEqual(0);
+
+        // Success path (FTS present + Process/Community tables exist): no degraded
+        // signal. Guards R6 — the response shape stays byte-identical when nothing
+        // fails (the `warning`/`partial` fields appear only on degradation).
+        expect(result).not.toHaveProperty('warning');
+        expect(result).not.toHaveProperty('partial');
+      });
+
+      // #2175: end-to-end proof that the renamed parameters work against a real
+      // index (Claude Code drops a tool arg named exactly "query").
+      it('query tool returns results via the new search_query param (#2175)', async () => {
+        const result = await backend.callTool('query', { search_query: 'login' });
+        expect(result).not.toHaveProperty('error');
+        expect(result).toHaveProperty('processes');
+        expect(result.processes.map((p: any) => p.id)).toContain('proc:login-flow');
+        expect(result.process_symbols.map((s: any) => s.id)).toContain('func:login');
+      });
+
+      it('cypher tool executes via the new statement param (#2175)', async () => {
+        const result = await backend.callTool('cypher', {
+          statement: 'MATCH (n:Function) RETURN n.name AS name ORDER BY n.name',
+        });
+        expect(result).toHaveProperty('markdown');
+        expect(result).toHaveProperty('row_count');
+        expect(result.row_count).toBeGreaterThanOrEqual(3);
+        expect(result.markdown).toContain('login');
+      });
+
+      // PR #222 port: the query tool batches per-symbol process/cohesion/content
+      // lookups (N+1 → 2-3 `WHERE n.id IN $nodeIds` queries). These assertions
+      // guard the batch-adaptation hazards that a naive cherry-pick would break:
+      // (1) each symbol keeps ITS OWN community (the per-node first-row pick that
+      //     replaced the per-symbol `LIMIT 1`), and (2) content maps to the right
+      //     node — both depend on the +1 positional-index shift after prepending
+      //     `n.id AS nodeId`. func:login is MEMBER_OF comm:auth ("Authentication");
+      //     func:validate has no community, so it must NOT inherit login's.
+      it('query batches per-symbol enrichment without cross-assigning community/content', async () => {
+        const findSym = (res: any, id: string) =>
+          (res.process_symbols ?? []).find((s: any) => s.id === id) ??
+          (res.definitions ?? []).find((s: any) => s.id === id);
+
+        const loginRes = await backend.callTool('query', {
+          query: 'login',
+          include_content: true,
+        });
+        expect(loginRes).not.toHaveProperty('error');
+        const login = findSym(loginRes, 'func:login');
+        expect(login).toBeDefined();
+        // Community correctly associated to its own node (not dropped, not leaked).
+        expect(login.module).toBe('Authentication');
+        // Content correctly mapped to its own node (positional [1] after nodeId).
+        expect(login.content).toBe('function login() {}');
+
+        const validateRes = await backend.callTool('query', {
+          query: 'validate',
+          include_content: true,
+        });
+        expect(validateRes).not.toHaveProperty('error');
+        const validate = findSym(validateRes, 'func:validate');
+        expect(validate).toBeDefined();
+        // validate has no MEMBER_OF edge — a flat batched `LIMIT 1` would have
+        // leaked some other node's community onto it. It must have none.
+        expect(validate.module).toBeUndefined();
+        expect(validate.content).toBe('function validate() {}');
+      });
+
+      // PR #222 port: a symbol in MULTIPLE processes is what fully exercises the
+      // +1 positional shift in the batched STEP_IN_PROCESS aggregation — with a
+      // single process row, `row.pid ?? row[1]` succeeds whether the shift is
+      // right or wrong. func:validate is a step in BOTH proc:login-flow (step 2)
+      // and proc:beta-flow (step 3), so both rows for the one node must be parsed
+      // (pid=row[1], step=row[6]); an off-by-one would drop a process or mis-pair
+      // pid↔step. Also pins process ranking (totalScore via the regroup-by-nodeId).
+      it('query batches a multi-process symbol and ranks processes (positional shift across rows)', async () => {
+        const res = await backend.callTool('query', { query: 'validate' });
+        expect(res).not.toHaveProperty('error');
+        const processIds = (res.processes ?? []).map((p: any) => p.id);
+        // Both of validate's processes must appear — both STEP_IN_PROCESS rows
+        // were parsed and grouped by the correct pid (row[1]).
+        expect(processIds).toContain('proc:login-flow');
+        expect(processIds).toContain('proc:beta-flow');
+
+        // process_symbols dedups by id, so validate appears once carrying the
+        // pid+step of its top-ranked process — they must come from the SAME
+        // shifted row: login-flow⇒step 2, beta-flow⇒step 3.
+        const v = (res.process_symbols ?? []).find((s: any) => s.id === 'func:validate');
+        expect(v).toBeDefined();
+        expect(v.step_index).toBe(v.process_id === 'proc:beta-flow' ? 3 : 2);
+
+        // Ranking: 'login' surfaces proc:login-flow as the top process.
+        const loginRes = await backend.callTool('query', { query: 'login' });
+        expect((loginRes.processes ?? [])[0]?.id).toBe('proc:login-flow');
       });
 
       it('tool_map returns per-tool flows without cross-attributing same-file tools', async () => {

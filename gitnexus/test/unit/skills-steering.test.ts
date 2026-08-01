@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { STANDARD_SKILL_CATALOG } from '../../src/cli/standard-skills.js';
 
 // Steering policy (#1939, #1945): the committed skill files route gitnexus
 // commands through the project-local runner `gitnexus analyze` drops next to the
@@ -21,6 +22,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..'); // -> monorepo root
 
 function collectSkillFiles(): string[] {
   const files: string[] = [];
+  const projectSkillsRoot = path.join(REPO_ROOT, '.claude', 'skills');
 
   // Bundled ship source: flat *.md files installSkills() copies to new users.
   const bundled = path.join(GITNEXUS_ROOT, 'skills');
@@ -32,13 +34,17 @@ function collectSkillFiles(): string[] {
 
   // Per-skill <name>/SKILL.md copies across the other distribution locations.
   const skillRoots = [
-    path.join(REPO_ROOT, '.claude', 'skills', 'gitnexus'),
+    projectSkillsRoot,
+    path.join(projectSkillsRoot, 'gitnexus'),
     path.join(REPO_ROOT, 'gitnexus-claude-plugin', 'skills'),
     path.join(REPO_ROOT, 'gitnexus-cursor-integration', 'skills'),
   ];
   for (const root of skillRoots) {
     if (!existsSync(root)) continue;
     for (const dir of readdirSync(root)) {
+      if (root === projectSkillsRoot && !dir.startsWith('gitnexus-')) {
+        continue;
+      }
       const skillMd = path.join(root, dir, 'SKILL.md');
       if (existsSync(skillMd)) files.push(skillMd);
     }
@@ -54,14 +60,36 @@ function cliSkillFiles(files: string[]): string[] {
   );
 }
 
+function standardSkillTargets(skill: (typeof STANDARD_SKILL_CATALOG)[number]): string[] {
+  const targets: string[] = [];
+  if (skill.distributions.project) {
+    targets.push(path.join('.claude', 'skills', skill.name, 'SKILL.md'));
+  }
+  if (skill.distributions.npm) {
+    targets.push(path.join('gitnexus', 'skills', `${skill.name}.md`));
+  }
+  if (skill.distributions.claudePlugin) {
+    targets.push(path.join('gitnexus-claude-plugin', 'skills', skill.name, 'SKILL.md'));
+  }
+  if (skill.distributions.cursor) {
+    targets.push(path.join('gitnexus-cursor-integration', 'skills', skill.name, 'SKILL.md'));
+  }
+  return targets;
+}
+
 describe('skill-file steering (#1939, #1945)', () => {
   const files = collectSkillFiles();
 
-  it('collects skill files from all four committed locations (guard is not vacuous)', () => {
+  it('collects skill files from all committed locations (guard is not vacuous)', () => {
     const rels = files.map((f) => path.relative(REPO_ROOT, f));
     expect(rels.some((r) => r.startsWith(`gitnexus${path.sep}skills${path.sep}`))).toBe(true);
     expect(
-      rels.some((r) => r.startsWith(path.join('.claude', 'skills', 'gitnexus') + path.sep)),
+      rels.some((r) => r.startsWith(path.join('.claude', 'skills', 'gitnexus-cli') + path.sep)),
+    ).toBe(true);
+    expect(
+      rels.some((r) =>
+        r.startsWith(path.join('.claude', 'skills', 'gitnexus', 'gitnexus-pdg-query') + path.sep),
+      ),
     ).toBe(true);
     expect(
       rels.some((r) => r.startsWith(path.join('gitnexus-claude-plugin', 'skills') + path.sep)),
@@ -69,6 +97,39 @@ describe('skill-file steering (#1939, #1945)', () => {
     expect(
       rels.some((r) => r.startsWith(path.join('gitnexus-cursor-integration', 'skills') + path.sep)),
     ).toBe(true);
+  });
+
+  it('scans the complete standard-skill distribution without nested duplicates', () => {
+    const rels = files.map((f) => path.relative(REPO_ROOT, f));
+    const relSet = new Set(rels);
+    const discoveredStandardNames = rels
+      .filter((rel) => path.dirname(rel) === path.join('gitnexus', 'skills') && rel.endsWith('.md'))
+      .map((rel) => path.basename(rel, '.md'))
+      .filter(
+        (name) =>
+          relSet.has(path.join('.claude', 'skills', name, 'SKILL.md')) &&
+          relSet.has(path.join('gitnexus-claude-plugin', 'skills', name, 'SKILL.md')),
+      )
+      .sort();
+    expect(STANDARD_SKILL_CATALOG.map((skill) => skill.name).sort()).toEqual(
+      discoveredStandardNames,
+    );
+
+    const discoveredCursorNames = discoveredStandardNames.filter((name) =>
+      relSet.has(path.join('gitnexus-cursor-integration', 'skills', name, 'SKILL.md')),
+    );
+    expect(
+      STANDARD_SKILL_CATALOG.filter((skill) => skill.distributions.cursor)
+        .map((skill) => skill.name)
+        .sort(),
+    ).toEqual(discoveredCursorNames);
+
+    for (const skill of STANDARD_SKILL_CATALOG) {
+      for (const target of standardSkillTargets(skill)) expect(rels).toContain(target);
+      expect(rels).not.toContain(
+        path.join('.claude', 'skills', 'gitnexus', skill.name, 'SKILL.md'),
+      );
+    }
   });
 
   it('routes EVERY cli skill subcommand through the project-local runner (#1945)', () => {

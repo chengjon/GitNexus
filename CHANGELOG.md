@@ -24,7 +24,6 @@ All notable changes to GitNexus will be documented in this file.
 
 - `analyze` now rebuilds missing Ladybug graph stores instead of trusting stale metadata left behind by older Kuzu-era indexes.
 - Direct CLI `detect-changes` now accepts `--cwd` and `--worktree` hints so staged verification can target the agent's active linked worktree instead of the MCP server's process cwd.
-
 ## [1.5.3] - 2026-04-01
 
 ### Added

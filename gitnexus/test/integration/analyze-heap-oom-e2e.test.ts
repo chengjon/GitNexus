@@ -18,6 +18,9 @@ const runAnalyzeWithForcedOom = (cwd: string, gitnexusHome: string) =>
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // This suite EXERCISES the heap respawn; the suite-wide
+      // GITNEXUS_MEMORY=off opt-out (vitest.config.ts) must not apply here.
+      GITNEXUS_MEMORY: '1',
       GITNEXUS_HOME: gitnexusHome,
       NODE_OPTIONS: '',
       GITNEXUS_TEST_RESPAWN_HEAP_MB: '32',
@@ -59,12 +62,12 @@ describe('analyze OOM guidance (real child-process OOM)', () => {
 
       expect(result.status).not.toBeNull();
       expect(result.status).not.toBe(0);
-      expect(combinedOutput).toContain('Analysis likely ran out of memory.');
+      expect(combinedOutput).toContain('Analysis likely ran out of memory (heap cap auto-sized to');
       expect(combinedOutput).toContain(
-        'NODE_OPTIONS="--max-old-space-size=24576" gitnexus analyze [your-args]',
+        'NODE_OPTIONS="--max-old-space-size=<MB>" gitnexus analyze [your-args]',
       );
       expect(combinedOutput).toContain(
-        '(Windows: set NODE_OPTIONS=--max-old-space-size=24576 && gitnexus analyze [your-args])',
+        '(Windows: set NODE_OPTIONS=--max-old-space-size=<MB> && gitnexus analyze [your-args])',
       );
     } finally {
       fs.rmSync(oomTestRepoParent, { recursive: true, force: true });

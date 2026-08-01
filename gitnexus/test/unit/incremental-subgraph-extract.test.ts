@@ -17,6 +17,10 @@ import {
   extractChangedSubgraph,
   computeEffectiveWriteSet,
 } from '../../src/core/incremental/subgraph-extract.js';
+import {
+  SPRING_AUTO_CONFIGURATION_SYNTHETIC_DESCRIPTION,
+  SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX,
+} from '../../src/core/ingestion/frameworks/spring/auto-configuration.js';
 
 const makeFileNode = (id: string, filePath: string, label = 'Function'): GraphNode =>
   ({
@@ -37,12 +41,14 @@ const makeRel = (
   sourceId: string,
   targetId: string,
   type = 'CALLS',
+  reason = 'test',
 ): GraphRelationship =>
   ({
     id,
     sourceId,
     targetId,
     type,
+    reason,
     properties: {},
   }) as unknown as GraphRelationship;
 
@@ -68,6 +74,25 @@ describe('extractChangedSubgraph', () => {
     expect(sub.nodes.map((n) => n.id).sort()).toEqual(['comm-1', 'proc-1']);
   });
 
+  it('always includes Spring auto-configuration synthetic Class nodes', () => {
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: `${SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX}com.example.ExternalAutoConfiguration`,
+      label: 'Class',
+      properties: {
+        name: 'ExternalAutoConfiguration',
+        filePath: '/repo/META-INF/spring.factories',
+        description: SPRING_AUTO_CONFIGURATION_SYNTHETIC_DESCRIPTION,
+      },
+    });
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
+    expect(sub.nodes.map((node) => node.id)).toEqual([
+      `${SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX}com.example.ExternalAutoConfiguration`,
+    ]);
+  });
+
   it('includes a relationship when at least one endpoint is writable', () => {
     const g = createKnowledgeGraph();
     g.addNode(makeFileNode('a:fn', '/repo/a.ts'));
@@ -91,6 +116,76 @@ describe('extractChangedSubgraph', () => {
     const sub = extractChangedSubgraph(g, new Set(['/repo/c.ts']));
 
     expect(sub.nodes).toEqual([]);
+    expect(sub.relationships).toEqual([]);
+  });
+
+  it('always includes TAINT_PATH edges even between two unchanged files (#2084 M4 U6)', () => {
+    // A cross-function TAINT_PATH whose endpoints (a.ts, c.ts) are both
+    // unchanged, but an intermediate function on the changed b.ts invalidated
+    // the flow. Endpoint-writability alone would skip it (stale finding);
+    // TAINT_PATH is graph-wide so it is always re-extracted (the orchestrator
+    // delete-alls the old rows first). A plain CALLS edge between the same
+    // unchanged files stays excluded — only TAINT_PATH gets this treatment.
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:handle', '/repo/a.ts'));
+    g.addNode(makeFileNode('c:sink', '/repo/c.ts'));
+    g.addRelationship(makeRel('tp1', 'a:handle', 'c:sink', 'TAINT_PATH'));
+    g.addRelationship(makeRel('call1', 'a:handle', 'c:sink', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/b.ts']));
+
+    expect(sub.relationships.map((r) => r.id)).toEqual(['tp1']);
+  });
+
+  it('always includes INJECTS edges even between two unchanged files (#2200)', () => {
+    // A DI consumer→implementer INJECTS edge whose endpoints (consumer.java,
+    // impl.java) are both unchanged, but the interface (or a sibling
+    // implementer) on the changed third.java altered the fan-out.
+    // Endpoint-writability alone would strand the stale edge; INJECTS is
+    // graph-wide so it is always re-extracted (the orchestrator
+    // unconditionally delete-alls the old rows first). A plain CALLS edge
+    // between the same unchanged files stays excluded.
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('consumer:Class', '/repo/consumer.java'));
+    g.addNode(makeFileNode('impl:Class', '/repo/impl.java'));
+    g.addRelationship(makeRel('inj1', 'consumer:Class', 'impl:Class', 'INJECTS'));
+    g.addRelationship(makeRel('call1', 'consumer:Class', 'impl:Class', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/third.java']));
+
+    expect(sub.relationships.map((r) => r.id)).toEqual(['inj1']);
+  });
+
+  it('always includes Spring DECLARES edges between unchanged metadata and classes (#2415)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('metadata:File', '/repo/META-INF/spring.factories', 'File'));
+    g.addNode(makeFileNode('config:Class', '/repo/AutoConfig.java', 'Class'));
+    g.addRelationship(
+      makeRel(
+        'declares1',
+        'metadata:File',
+        'config:Class',
+        'DECLARES',
+        'spring-auto-configuration-factory',
+      ),
+    );
+    g.addRelationship(makeRel('call1', 'metadata:File', 'config:Class', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
+    expect(sub.relationships.map((relationship) => relationship.id)).toEqual(['declares1']);
+  });
+
+  it('does not make another metadata system graph-wide just because it uses DECLARES', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('metadata:File', '/repo/META-INF/example.metadata', 'File'));
+    g.addNode(makeFileNode('target:Class', '/repo/Target.java', 'Class'));
+    g.addRelationship(
+      makeRel('declares1', 'metadata:File', 'target:Class', 'DECLARES', 'example-discovery'),
+    );
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
     expect(sub.relationships).toEqual([]);
   });
 });

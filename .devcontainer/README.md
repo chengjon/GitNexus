@@ -10,6 +10,8 @@ A cross-platform Dev Container that pre-installs Claude Code, OpenAI Codex CLI, 
 >
 > The trade-off of the copy model: host and container config **diverge after first create.** A skill or plugin you add on the host later won't appear in the container until you wipe the config volume and rebuild (see [§ Rebuild / reset](#rebuild--reset)). Edits you make inside the container persist across rebuilds but never reach the host.
 
+**Contents:** [Quick start](#quick-start) · [Windows 11 setup](#windows-11-setup) · [macOS](#macos) · [Linux](#linux) · [How CLI state flows from your host](#how-cli-state-flows-from-your-host) · [Session resume](#session-resume-across-container-recreation) · [Trust boundary](#trust-boundary-concretely) · [First-time CLI authentication](#first-time-cli-authentication) · [API key auth](#alternative-api-key-authentication-ci--headless) · [Port forwarding](#port-forwarding) · [Known gotchas](#known-gotchas) · [Rebuild / reset](#rebuild--reset) · [Bumping CLI versions](#bumping-cli-versions) · [What's not included (yet)](#whats-not-included-yet) · [Troubleshooting](#troubleshooting)
+
 ## Quick start
 
 1. Install [Docker Desktop](https://docs.docker.com/desktop/) (Windows/macOS) or Docker Engine (Linux).
@@ -310,8 +312,8 @@ VS Code's Ports panel shows forwarded ports once their listener starts.
 
 - **LadybugDB integration tests may fail in containers** (file-locking, `AGENTS.md` § Testing). Default to `npm run test:unit` inside the container; run integration tests on the host. Tracking issue: documented as a known limitation.
 - **Single-writer LadybugDB constraint** (`GUARDRAILS.md` § LadybugDB lock). Don't run `gitnexus analyze` on the host and inside the container against the same `.gitnexus/` directory simultaneously — the second writer will get `database busy`.
-- **Native grammar builds add ~30s to first install.** Tree-sitter Dart/Proto/Swift grammars build during `gitnexus`'s `postinstall`. To skip them (loses parsing for those three languages), set `GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1` in your shell or add it to `remoteEnv` and rebuild.
-- **`tree-sitter-kotlin` warnings on install** are expected (per `AGENTS.md`). Ignore them.
+- **Native grammar builds add ~30s to first install.** Tree-sitter Dart/Proto/Swift/Kotlin are all vendored uniformly: `node-gyp-build` picks a committed GitNexus-built prebuilt `.node` at install time (no compile), and only falls back to compiling from the vendored source during `postinstall` if no prebuild matches the host (then a toolchain is needed). Set `GITNEXUS_SKIP_OPTIONAL_GRAMMARS=1` (in your shell or `remoteEnv`, then rebuild) to skip all four; each loses parsing for the affected language(s), and the install still succeeds.
+- **`tree-sitter-kotlin`/`tree-sitter-swift` warnings on install** only appear when no prebuild matches the platform-arch (per `AGENTS.md`); they are non-fatal — parsing for that language is simply unavailable.
 - **`.mcp.json` works inside the container**: `npx -y gitnexus@latest mcp` resolves cleanly because npm registry is reachable and the workspace bind mount exposes the same `.mcp.json` the host sees.
 - **Husky pre-commit fires inside the container** without extra setup. The root `npm install` (run automatically in `postCreateCommand`) installs the hook via `package.json` `prepare`.
 

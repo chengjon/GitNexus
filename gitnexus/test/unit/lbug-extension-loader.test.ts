@@ -61,7 +61,9 @@ describe('ExtensionManager — install policies', () => {
       true,
     );
 
-    expect(installExtension).toHaveBeenCalledWith('fts', 1234);
+    // The LOAD failure reason is threaded to the installer so it can pick
+    // INSTALL vs FORCE INSTALL from the error class (#2374, PR #2375).
+    expect(installExtension).toHaveBeenCalledWith('fts', 1234, 'Extension "fts" not found');
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([
       'LOAD EXTENSION fts',
       'LOAD EXTENSION fts',
@@ -79,7 +81,7 @@ describe('ExtensionManager — install policies', () => {
 
     expect(installExtension).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('continuing without FTS features'));
-    expect(manager.getCapabilities()).toEqual([
+    expect(manager.getCapabilities()).toMatchObject([
       { name: 'fts', loaded: false, reason: expect.stringContaining('load-only') },
     ]);
   });
@@ -132,6 +134,68 @@ describe('ExtensionManager — install policies', () => {
   });
 });
 
+describe('ExtensionManager — reason strings carry the real LOAD error (#2374)', () => {
+  it('load-only failure reason includes the underlying LadybugDB error, collapsed to one line', async () => {
+    const warn = vi.fn();
+    const manager = new ExtensionManager({ policy: 'load-only', warn });
+    const query = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'IO exception: Failed to load library: /x/libfts.lbug_extension.\ninvalid ELF header',
+        ),
+      );
+
+    await expect(manager.ensure(query, 'fts', 'FTS')).resolves.toBe(false);
+
+    expect(manager.getCapabilities()).toMatchObject([
+      {
+        name: 'fts',
+        loaded: false,
+        reason: expect.stringContaining(
+          'LOAD fts failed: IO exception: Failed to load library: /x/libfts.lbug_extension. invalid ELF header',
+        ),
+      },
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid ELF header'));
+  });
+
+  it('failed-install reason includes both the install message and the original LOAD error', async () => {
+    const installExtension = vi.fn().mockResolvedValue(failedInstall);
+    const manager = new ExtensionManager({ policy: 'auto', installExtension, warn: noopWarn });
+    const query = vi.fn().mockRejectedValue(new Error('Extension "fts" not found'));
+
+    await expect(manager.ensure(query, 'fts', 'FTS')).resolves.toBe(false);
+
+    expect(manager.getCapabilities()).toMatchObject([
+      {
+        name: 'fts',
+        loaded: false,
+        reason: 'install failed; LOAD fts had failed: Extension "fts" not found',
+      },
+    ]);
+  });
+
+  it('post-install LOAD failure reason includes the retry error', async () => {
+    const installExtension = vi.fn().mockResolvedValue(okInstall);
+    const manager = new ExtensionManager({ policy: 'auto', installExtension, warn: noopWarn });
+    const query = vi
+      .fn()
+      .mockRejectedValue(new Error('version mismatch: extension built for 0.17.0'));
+
+    await expect(manager.ensure(query, 'fts', 'FTS')).resolves.toBe(false);
+
+    expect(manager.getCapabilities()).toMatchObject([
+      {
+        name: 'fts',
+        loaded: false,
+        reason:
+          'LOAD fts failed after successful INSTALL: version mismatch: extension built for 0.17.0',
+      },
+    ]);
+  });
+});
+
 describe('ExtensionManager — caching', () => {
   it('caches install attempt outcome to avoid retrying within the same process', async () => {
     const installExtension = vi.fn().mockResolvedValue(timedOutInstall);
@@ -177,7 +241,7 @@ describe('ExtensionManager — observability', () => {
     await manager.ensure(okQuery, 'fts', 'FTS');
     await manager.ensure(failQuery, 'vector', 'VECTOR');
 
-    expect(manager.getCapabilities()).toEqual([
+    expect(manager.getCapabilities()).toMatchObject([
       { name: 'fts', loaded: true },
       { name: 'vector', loaded: false, reason: expect.stringContaining('load-only') },
     ]);
@@ -193,6 +257,41 @@ describe('ExtensionManager — observability', () => {
     await manager.ensure(query, 'fts', 'FTS');
 
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // initLbug's writable FTS pre-load is a speculative probe — on a cold
+  // machine it misses, then analyze Phase 3 installs and every FTS index builds.
+  // The probe must not report a degradation that the same run repairs.
+  it('stays silent on a quiet probe that a later install-capable call repairs', async () => {
+    const installExtension = vi.fn().mockResolvedValue(okInstall);
+    const warn = vi.fn();
+    const manager = new ExtensionManager({ installExtension, warn });
+    const query = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Extension "fts" not found'))
+      .mockRejectedValueOnce(new Error('Extension "fts" not found'))
+      .mockResolvedValueOnce({});
+
+    await expect(
+      manager.ensure(query, 'fts', 'FTS', { policy: 'load-only', quiet: true }),
+    ).resolves.toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+
+    await expect(manager.ensure(query, 'fts', 'FTS', { policy: 'auto' })).resolves.toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    expect(manager.getCapabilities()).toEqual([{ name: 'fts', loaded: true }]);
+  });
+
+  it('still warns on a genuine load-only miss that follows a quiet probe of the same reason', async () => {
+    const warn = vi.fn();
+    const manager = new ExtensionManager({ policy: 'load-only', warn });
+    const query = vi.fn().mockRejectedValue(new Error('Extension "fts" not found'));
+
+    await manager.ensure(query, 'fts', 'FTS', { quiet: true });
+    await manager.ensure(query, 'fts', 'FTS');
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('continuing without FTS features'));
   });
 });
 

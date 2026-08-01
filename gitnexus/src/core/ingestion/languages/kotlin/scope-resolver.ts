@@ -14,7 +14,16 @@ import {
   type KotlinResolveContext,
 } from './index.js';
 import { clearCompanionScopes } from './companion-scopes.js';
+import {
+  applyKotlinCaptureSideChannel,
+  clearKotlinClassAnnotationFacts,
+} from './capture-side-channel.js';
 import { isKotlinStaticOnly } from './owners.js';
+import { populateKotlinPackageSiblings } from './package-siblings.js';
+import { attachKotlinSpringBeanCandidateMetadata } from './spring-bean-metadata.js';
+import { clearKotlinPackageFacts } from './package-facts.js';
+import { attachKotlinSpringDiMetadata } from './spring-di.js';
+import { attachKotlinSpringConditionalMetadata } from './spring-conditionals.js';
 
 /**
  * Kotlin scope resolver for RFC #909 Ring 3.
@@ -67,6 +76,8 @@ export const kotlinScopeResolver: ScopeResolver = {
     // `undefined` because Kotlin has no external resolution config
     // to load.
     clearCompanionScopes();
+    clearKotlinClassAnnotationFacts();
+    clearKotlinPackageFacts();
     return undefined;
   },
 
@@ -84,6 +95,23 @@ export const kotlinScopeResolver: ScopeResolver = {
 
   buildMro: (graph, parsedFiles, nodeLookup) => buildKotlinMro(graph, parsedFiles, nodeLookup),
 
+  // Worker-boundary restore (see `ScopeResolver.applyCaptureSideChannel`).
+  // `emitKotlinScopeCaptures` records per-file companion-object scope ids
+  // (`markCompanionScope` → `companionScopesByFile`) as a SIDE EFFECT — that
+  // state is NOT serialized onto the returned ParsedFile's scopes/defs. On the
+  // worker path those marks are populated in the worker process and lost across
+  // the MessageChannel / disk store; the main thread reuses the serialized
+  // ParsedFile and skips `extractParsedFile`, so `isKotlinStaticOnly` and
+  // `populateCompanionMembersOnEnclosingClass` (owners.ts) would see an empty
+  // map and companion/static dispatch would emit zero CALLS edges. The worker
+  // stashed a plain-data snapshot on `parsed.captureSideChannel` via
+  // `kotlinProvider.collectCaptureSideChannel`; this restores it into the
+  // module map WITHOUT any tree-sitter re-parse (the #1983 fix). The
+  // freshly-extracted leg never calls this — its marks were just populated in
+  // this process. Runs BEFORE `populateOwners` so the restored companion map is
+  // visible to it.
+  applyCaptureSideChannel: applyKotlinCaptureSideChannel,
+
   populateOwners: (parsed: ParsedFile) => populateKotlinOwners(parsed),
 
   isSuperReceiver: (text) => text.trim() === 'super',
@@ -94,6 +122,14 @@ export const kotlinScopeResolver: ScopeResolver = {
   propagatesReturnTypesAcrossImports: true,
   collapseMemberCallsByCallerTarget: false,
   hoistTypeBindingsToModule: true,
+  freeCallsRequireInstanceOwnership: true,
+  postExtractSourceTextPolicy: 'uncached-files',
+  populateNamespaceSiblings: populateKotlinPackageSiblings,
+  emitPostResolutionEdges: (graph, parsedFiles, nodeLookup, indexes) => {
+    attachKotlinSpringBeanCandidateMetadata(graph, parsedFiles, nodeLookup, indexes);
+    attachKotlinSpringConditionalMetadata(graph, parsedFiles, nodeLookup, indexes);
+    attachKotlinSpringDiMetadata(graph, parsedFiles, nodeLookup, indexes);
+  },
 };
 
 /**

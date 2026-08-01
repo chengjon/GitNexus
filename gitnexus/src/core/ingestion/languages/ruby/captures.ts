@@ -14,6 +14,8 @@ import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
 import { splitQualifiedName } from '../../utils/qualified-name.js';
 import { encodeMarker } from '../../utils/heritage-marker.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
 
 const FUNCTION_NODE_TYPES = ['method', 'singleton_method'] as const;
 const HERITAGE_CALL_NAMES: ReadonlySet<string> = new Set(['include', 'extend', 'prepend']);
@@ -22,6 +24,46 @@ const ATTR_CALL_NAMES: ReadonlySet<string> = new Set([
   'attr_reader',
   'attr_writer',
 ]);
+
+const RUBY_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set(['method', 'singleton_method', 'lambda']),
+  callNodeTypes: new Set(['call']),
+  parameterListNodeTypes: new Set(['method_parameters', 'argument_list']),
+  parameterNodeTypes: new Set([
+    'identifier',
+    'optional_parameter',
+    'splat_parameter',
+    'hash_splat_parameter',
+    'block_parameter',
+  ]),
+  bindingNodeTypes: new Set(['assignment']),
+  assignmentNodeTypes: new Set(['assignment', 'operator_assignment']),
+  identifierNodeTypes: new Set([
+    'identifier',
+    'constant',
+    'instance_variable',
+    'class_variable',
+    'global_variable',
+  ]),
+  functionScopedValueBindings: true,
+  callableProtocolMethods: new Set(['call']),
+  // A bare receiver-less identifier in value position is a method CALL in
+  // Ruby (`action = process` stores process's RETURN value) — only explicit
+  // reference forms (method(:x), &:x, lambda/proc) reference the callable.
+  bareNamesAreCalls: true,
+  extractCallableReference: (node: SyntaxNode) => {
+    if (node.type !== 'call') return undefined;
+    const method = node.childForFieldName('method');
+    if (method?.text !== 'method' && method?.text !== 'public_method') return undefined;
+    const args = node.childForFieldName('arguments');
+    const symbol = args?.namedChildren.find(
+      (child): child is SyntaxNode => child !== null && child.type === 'simple_symbol',
+    );
+    if (symbol === undefined) return undefined;
+    const name = symbol.text.replace(/^:/, '');
+    return name.length === 0 ? undefined : { name, anchor: symbol };
+  },
+} as const;
 
 /**
  * Build the full `.`-joined qualified owner name for a heritage/attr call by
@@ -106,6 +148,12 @@ export function emitRubyScopeCaptures(
           continue;
         }
       }
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       continue;
     }
@@ -118,6 +166,12 @@ export function emitRubyScopeCaptures(
         const receiver = synthesizeRubyReceiverBinding(fnNode, enclosingNode);
         if (receiver !== null) out.push(receiver);
       }
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       continue;
     }
@@ -163,6 +217,12 @@ export function emitRubyScopeCaptures(
           );
         }
       }
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       continue;
     }
@@ -263,6 +323,12 @@ export function emitRubyScopeCaptures(
       }
     }
 
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
     out.push(grouped);
   }
 
@@ -477,6 +543,7 @@ export function emitRubyScopeCaptures(
   // flow through `emitHeritageEdges` (the `__heritage__:` import path above),
   // an independent lane that stays intact when the legacy heritage leg is gated off.
   out.push(...synthesizeRubySuperclassReferences(tree.rootNode));
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, RUBY_CALLABLE_CAPTURE_OPTIONS));
 
   return out;
 }

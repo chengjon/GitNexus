@@ -6,10 +6,6 @@ import { glob } from 'glob';
 import { createIgnoreFilter } from '../../config/ignore-service.js';
 
 import { logger } from '../logger.js';
-export interface FileEntry {
-  path: string;
-  content: string;
-}
 
 /** Lightweight entry — path + size from stat, no content in memory */
 export interface ScannedFile {
@@ -87,6 +83,11 @@ export const walkRepositoryPaths = async (
     }
   }
 
+  // Filesystem/glob traversal order is not stable across filesystems or repeated
+  // scans. Canonicalize once at the scan boundary so every downstream phase sees
+  // the same repository order.
+  entries.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+
   if (skippedLarge > 0) {
     const isDefault = maxFileSizeBytes === DEFAULT_MAX_FILE_SIZE_BYTES;
     const isOverrideUnset = !process.env.GITNEXUS_MAX_FILE_SIZE;
@@ -152,22 +153,4 @@ export const readFileContents = async (
   }
 
   return contents;
-};
-
-/**
- * Legacy API — scans and reads everything into memory.
- * Used by sequential fallback path only.
- */
-export const walkRepository = async (
-  repoPath: string,
-  onProgress?: (current: number, total: number, filePath: string) => void,
-): Promise<FileEntry[]> => {
-  const scanned = await walkRepositoryPaths(repoPath, onProgress);
-  const contents = await readFileContents(
-    repoPath,
-    scanned.map((f) => f.path),
-  );
-  return scanned
-    .filter((f) => contents.has(f.path))
-    .map((f) => ({ path: f.path, content: contents.get(f.path)! }));
 };

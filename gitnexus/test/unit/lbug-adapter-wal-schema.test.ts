@@ -30,6 +30,13 @@ const SCHEMA_MOCK = {
   SCHEMA_QUERIES: ['CREATE NODE TABLE IF NOT EXISTS File (id STRING, PRIMARY KEY(id))'],
 };
 
+const schemaMockFactory = async () => ({
+  ...(await vi.importActual<typeof import('../../src/core/lbug/schema.js')>(
+    '../../src/core/lbug/schema.js',
+  )),
+  ...SCHEMA_MOCK,
+});
+
 function makeFsMock(dbPath: string) {
   const ENOENT = Object.assign(new Error(`ENOENT: ${dbPath}`), { code: 'ENOENT' });
   return {
@@ -44,6 +51,7 @@ function makeFsMock(dbPath: string) {
       rename: vi.fn(async () => {}),
       mkdir: vi.fn(async () => {}),
       open: makeOpenMock(),
+      readdir: vi.fn(async () => []),
     },
   };
 }
@@ -126,7 +134,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const db = { close: vi.fn(async () => {}) };
 
     vi.doMock('fs/promises', () => makeFsMock(dbPath));
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: vi.fn(async () => ({ db, conn })),
       closeLbugConnection: vi.fn(async () => {}),
@@ -181,7 +189,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const warnMock = vi.fn();
 
     vi.doMock('fs/promises', () => makeFsMock(dbPath));
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: vi.fn(async () => ({ db, conn })),
       closeLbugConnection: vi.fn(async () => {}),
@@ -239,7 +247,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const warnMock = vi.fn();
 
     vi.doMock('fs/promises', () => fsMock);
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: openLbugConnectionMock,
       closeLbugConnection: async (handle: { conn: typeof firstConn; db: typeof firstDb }) => {
@@ -294,7 +302,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const warnMock = vi.fn();
 
     vi.doMock('fs/promises', () => makeFsMock(dbPath));
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: openLbugConnectionMock,
       closeLbugConnection: vi.fn(async () => {}),
@@ -365,7 +373,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const ensureMock = vi.fn(async () => false);
 
     vi.doMock('fs/promises', () => makeFsMock(dbPath));
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: openLbugConnectionMock,
       closeLbugConnection: async (handle: {
@@ -449,7 +457,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const fsMock = makeFsMock(dbPath);
 
     vi.doMock('fs/promises', () => fsMock);
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: openLbugConnectionMock,
       closeLbugConnection: async (handle: { conn: typeof readOnlyConn; db: typeof readOnlyDb }) => {
@@ -503,7 +511,7 @@ describe('doInitLbug WAL corruption guard — behavioural', () => {
     const db = { close: vi.fn(async () => {}) };
 
     vi.doMock('fs/promises', () => makeFsMock(dbPath));
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: vi.fn(async () => ({ db, conn })),
       closeLbugConnection: vi.fn(async () => {}),
@@ -553,7 +561,11 @@ const TINY_ORPHAN_WAL_BYTES_TEST = 4 * 1024;
  * `orphan-wal` vs `tiny-orphan-wal` branches of refuseLargeWalQuarantine
  * without spinning up real files.
  */
-function makeFsMockWithWalSize(dbPath: string, walBytes: number | 'missing') {
+function makeFsMockWithWalSize(
+  dbPath: string,
+  walBytes: number | 'missing',
+  shadowBytes: number | 'missing' = 'missing',
+) {
   const ENOENT = Object.assign(new Error(`ENOENT: ${dbPath}`), { code: 'ENOENT' });
   const isWal = (p: string): boolean => p === `${dbPath}.wal`;
   const isShadow = (p: string): boolean => p === `${dbPath}.shadow`;
@@ -564,6 +576,7 @@ function makeFsMockWithWalSize(dbPath: string, walBytes: number | 'missing') {
       }),
       access: vi.fn(async (p: string) => {
         if (isWal(p) && walBytes !== 'missing') return;
+        if (isShadow(p) && shadowBytes !== 'missing') return;
         throw ENOENT;
       }),
       stat: vi.fn(async (p: string) => {
@@ -571,13 +584,17 @@ function makeFsMockWithWalSize(dbPath: string, walBytes: number | 'missing') {
           if (walBytes === 'missing') throw ENOENT;
           return { size: walBytes };
         }
-        if (isShadow(p)) throw ENOENT;
+        if (isShadow(p)) {
+          if (shadowBytes === 'missing') throw ENOENT;
+          return { size: shadowBytes };
+        }
         return { size: 0 };
       }),
       unlink: vi.fn(async () => {}),
       rename: vi.fn(async () => {}),
       mkdir: vi.fn(async () => {}),
       open: makeOpenMock(),
+      readdir: vi.fn(async () => []),
     },
   };
 }
@@ -588,9 +605,14 @@ describe('Symmetric WAL-size gate during missing-shadow recovery (PR #1747 D2)',
     vi.unstubAllEnvs();
   });
 
-  const setupShadowMissingRecovery = (dbPath: string, walBytes: number | 'missing') => {
+  const setupShadowMissingRecovery = (
+    dbPath: string,
+    walBytes: number | 'missing',
+    opts: { errorMessage?: string; shadowBytes?: number | 'missing' } = {},
+  ) => {
     const missingShadowError = new Error(
-      `IO exception: Cannot open file ${dbPath}.shadow: No such file or directory`,
+      opts.errorMessage ??
+        `IO exception: Cannot open file ${dbPath}.shadow: No such file or directory`,
     );
     const queryResult = { getAll: vi.fn(async () => []), close: vi.fn() };
     const firstConn = {
@@ -607,11 +629,11 @@ describe('Symmetric WAL-size gate during missing-shadow recovery (PR #1747 D2)',
       .fn()
       .mockResolvedValueOnce({ db: firstDb, conn: firstConn })
       .mockResolvedValueOnce({ db: recoveredDb, conn: recoveredConn });
-    const fsMock = makeFsMockWithWalSize(dbPath, walBytes);
+    const fsMock = makeFsMockWithWalSize(dbPath, walBytes, opts.shadowBytes ?? 'missing');
     const warnMock = vi.fn();
 
     vi.doMock('fs/promises', () => fsMock);
-    vi.doMock('../../src/core/lbug/schema.js', () => SCHEMA_MOCK);
+    vi.doMock('../../src/core/lbug/schema.js', schemaMockFactory);
     vi.doMock('../../src/core/lbug/lbug-config.js', () => ({
       openLbugConnection: openLbugConnectionMock,
       closeLbugConnection: async (handle: { conn: typeof firstConn; db: typeof firstDb }) => {
@@ -712,5 +734,90 @@ describe('Symmetric WAL-size gate during missing-shadow recovery (PR #1747 D2)',
       expect.stringContaining(`${dbPath}.wal.missing-shadow.`),
     );
     await adapter.closeLbug();
+  });
+
+  // ─── Windows-format missing-shadow recovery (issue #2382) ─────────────────
+  //
+  // On Windows the native engine reports a missing shadow as
+  // `Cannot open file. path: <p>.shadow - Error 2: <localized text>`, not the
+  // POSIX `: No such file or directory`. Before the fix isMissingShadowSidecarError
+  // missed that form, so the read-only open on serve repo-switch rethrew the raw
+  // error as an HTTP 500 and never quarantined the orphan WAL — the repo stayed
+  // broken. These drive the SAME recovery path with the Windows string through
+  // both consumers (read-only + writable) and pin the present-shadow guard (KTD7).
+
+  const windowsError2 = (dbPath: string) =>
+    `IO exception: Cannot open file. path: ${dbPath}.shadow - Error 2: The system cannot find the file specified.`;
+
+  it('read-only: recognizes the Windows Error 2 form and self-heals a tiny orphan WAL', async () => {
+    vi.resetModules();
+    const dbPath = '/tmp/gitnexus-lbug-win-selfheal/lbug';
+    const { fsMock } = setupShadowMissingRecovery(dbPath, 1024, {
+      errorMessage: windowsError2(dbPath),
+    });
+
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+
+    await expect(adapter.withLbugDb(dbPath, async () => 'ok', { readOnly: true })).resolves.toBe(
+      'ok',
+    );
+    expect(fsMock.default.rename).toHaveBeenCalledWith(
+      `${dbPath}.wal`,
+      expect.stringContaining(`${dbPath}.wal.missing-shadow.`),
+    );
+    await adapter.closeLbug();
+  });
+
+  it('read-only: Windows Error 2 with a large WAL yields the actionable message (not the raw 500)', async () => {
+    vi.resetModules();
+    const dbPath = '/tmp/gitnexus-lbug-win-largewal/lbug';
+    const { fsMock } = setupShadowMissingRecovery(dbPath, TINY_ORPHAN_WAL_BYTES_TEST + 1, {
+      errorMessage: windowsError2(dbPath),
+    });
+
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+
+    await expect(
+      adapter.withLbugDb(dbPath, async () => 'unreached', { readOnly: true }),
+    ).rejects.toThrow(/LadybugDB checkpoint sidecar is missing/);
+    expect(fsMock.default.rename).not.toHaveBeenCalled();
+  });
+
+  it('writable: Windows Error 2 flows through the same guarded recovery (blast-radius R4)', async () => {
+    vi.resetModules();
+    const dbPath = '/tmp/gitnexus-lbug-win-writable/lbug';
+    const { fsMock } = setupShadowMissingRecovery(dbPath, 1024, {
+      errorMessage: windowsError2(dbPath),
+    });
+
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+
+    await expect(adapter.initLbug(dbPath)).resolves.toBeDefined();
+    expect(fsMock.default.rename).toHaveBeenCalledWith(
+      `${dbPath}.wal`,
+      expect.stringContaining(`${dbPath}.wal.missing-shadow.`),
+    );
+    await adapter.closeLbug();
+  });
+
+  it('KTD7 guard: refuses to quarantine when the shadow is present on disk (data-loss guard)', async () => {
+    vi.resetModules();
+    const dbPath = '/tmp/gitnexus-lbug-win-shadow-present/lbug';
+    const { fsMock, warnMock } = setupShadowMissingRecovery(dbPath, 1024, {
+      errorMessage: windowsError2(dbPath),
+      shadowBytes: 64,
+    });
+
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+
+    await expect(
+      adapter.withLbugDb(dbPath, async () => 'unreached', { readOnly: true }),
+      // Present-shadow refusal throws the present-but-unreachable message (S2),
+      // NOT the "sidecar is missing / rebuild" message — the shadow is present.
+    ).rejects.toThrow(/LadybugDB checkpoint sidecar is present but unreachable/);
+    expect(fsMock.default.rename).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('the .shadow sidecar is present on disk'),
+    );
   });
 });

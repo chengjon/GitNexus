@@ -44,11 +44,109 @@ import type { ParseWorkerResult } from '../core/ingestion/workers/parse-worker.j
  * On version mismatch, `loadParseCache` returns an empty cache and the
  * next save overwrites the on-disk file with the new version baked in.
  */
-// Bumped to 3 in RING4-1 (#942): ParseWorkerResult lost its `heritage` field
-// when the legacy heritage path was deleted. Invalidating stale on-disk caches
-// prevents cross-version replay (e.g. a rollback reading a heritage-less cache
-// into legacy code that expects `result.heritage`).
-const SCHEMA_BUMP = 3;
+// Bumped to 4 in #1983: on-disk parse-cache shards omit legacy DAG fields
+// (`calls`, `assignments`, `constructorBindings`) unused after RING4-1 (#942)
+// and the worker `parsedFiles` (the worker writes those to the disk ParsedFile
+// store instead). #2038 added a DURABLE, content-addressed ParsedFile store
+// (`parsedfile-cache/`, see parsedfile-store.ts) keyed by chunk hash that
+// mirrors THIS cache's lifecycle — version-gated by PARSE_CACHE_VERSION, pruned
+// in lockstep to the surviving keys. On a warm parse-cache hit the chunk's
+// ParsedFiles are restored from it, so scope-resolution does NOT re-extract on
+// the main thread (the #1983 OOM). Because the two stores share this version,
+// any future change to the `ParsedFile` serialization shape MUST bump
+// SCHEMA_BUMP so both invalidate in lockstep.
+// v35: Java/Kotlin Spring @Bean factory and @Resource side-channel facts
+// (#2413). ParsedFile results are content-addressed and replayed verbatim, so
+// the feature/schema inventory alone cannot invalidate pre-#2413 captures.
+// (Cut as v32 on this branch; `main` took 32 for #2742 and 33/34 for #2747
+// first, so this series is renumbered at merge time — see the v21 note.)
+// v34: the receiver-chain capture is emitted by ALL 14 language emitters, not
+// just TypeScript. v33 landed with the TypeScript-only emission; the rollout to
+// the other 13 languages changed the capture set AGAIN, so a cache stamped 33 by
+// an intermediate build of that series is not equivalent to one stamped at this
+// commit — it would be treated as current while every non-TypeScript file
+// replayed pre-rollout captures, leaving the feature silently inert for 13 of 14
+// languages. Bumped there so the version tracks the FINAL capture set rather
+// than the first divergence.
+// v33: TypeScript call matches carry `@reference.receiver-chain`, a compact
+// encoding of a receiver that is itself an expression.
+// v32: Rust items are qualified by their enclosing `mod` chain (#2742). The
+// qualified name is computed in the parse worker, so a warm cache replays the
+// old unqualified ids verbatim and the collapse persists.
+// v31: Rust `mod_item` gained `@declaration.namespace` and scoped call sites
+// gained `@reference.qualified-name` (#2730). Both are PARSE-TIME captures, so a
+// warm cache replays the old capture set verbatim: `rawQualifiedName` comes back
+// undefined and no Namespace def exists to hang a module prefix on, which turns
+// the whole module-qualified resolution tier into a no-op on unchanged files.
+// Re-checked against origin/main at commit time per the v29 note below.
+// v29: closure-binding declaration rules for PHP/Rust/Kotlin/Ruby/Dart, a Rust
+// graph node for `let f = || …`, a Dart closure scope, and function-local VALUES
+// (Variable/Const/Property/Static) qualified by their enclosing callable plus
+// position (#2699 parts A1 + B). All parse-time, so a warm cache would replay
+// the old captures and the pre-qualification ids verbatim.
+//
+// This is 29 and not 28 because of the exact collision the v21 note below warns
+// about: this branch cut at 27 and bumped to 28, while #2415 bumped 27 -> 28 and
+// merged FIRST. Re-checking against origin/main at merge time — not at branch
+// time — is what caught it; leaving it at 28 would have shipped this change with
+// NO parse-cache invalidation, so every warm cache keeps serving the pre-fix
+// captures and ids.
+// v28: Java/Kotlin capture side-channels persist Spring condition facts and
+// annotation-source line numbers (#2415).
+// v26: the enclosing-callable walk stops at class bodies and anonymous-class
+// construction sites (#2699 follow-up); a v25 cache replays worker results carrying the
+// wrong Java anonymous-class ids. Cached results are replayed verbatim — including
+// across `--force` — so without this bump a warm cache keeps serving them.
+// v25: function-local callables are qualified by their enclosing-callable chain
+// plus their own position, and JS/TS gain block scopes (#2699). Both the node
+// ids AND the scope tree in a cached worker result are therefore stale. Cached
+// results are replayed verbatim — including across `--force` — so without this
+// bump a warm cache keeps serving the colliding ids and the block-less scopes.
+// v24: function scopes carry `Scope.ownsReceivers`, marking the JS/TS forms
+// that bind their own `this` (#2701). The flag lives on the cached `Scope`, so
+// without this bump a warm cache replays scopes that lack it and every `this`
+// inside an ordinary `function` keeps resolving to the enclosing class —
+// verified by probe: `--force` alone does NOT re-derive it.
+// v23: closure bindings emit callable nodes in Dart, Ruby, Java, C# and PHP
+// (plus JS/TS `var`), and Dart/PHP gain the scope declarations and flow
+// captures their forms were missing (#2693). Cached worker results are replayed
+// verbatim, so without this bump a warm cache keeps serving the old labels.
+// v22: `const X = <arrow | function-expression>` emits one `Function` node
+// instead of a `Function` plus an edgeless `Const` twin (#2687). Cached worker
+// results are replayed verbatim — including across `--force` — so without this
+// bump a warm cache keeps serving the old two-node set.
+// v21: TWO changes share this number — a collision, not a typo. #2632
+// (Java/Kotlin Spring DI facts: constructor, field/property and method
+// injection sites plus bean-name and @Primary provider metadata) bumped 20 -> 21
+// and merged first; #2653 (Java local class/enum/record/interface captures using
+// javac-compatible, source-type-relative JLS 13.1 identities and
+// declaration-to-block scopes, #2562) had branched at 20, bumped to 21 as well,
+// and merged second — so it shipped with NO invalidation of its own. An index
+// already stamped 21 by the first change was treated as current by the second
+// and kept serving stale local-class identities from the warm cache. Harmless
+// now (anything below the current value is rejected), and left as-is because
+// both genuinely shipped as 21 — renumbering would misstate history. Read this
+// as the reason to re-check SCHEMA_BUMP against origin/main immediately before
+// merging, not just when the branch is cut; the same collision hit
+// INCREMENTAL_SCHEMA_VERSION in #2653/#2654.
+// v27: generator EXPRESSIONS bound to a name emit a callable definition capture,
+// and nested-callable caller attribution appends the localIdentity suffix the
+// definition phase already used. Both are parse-time, so a warm cache would
+// otherwise replay the old captures and ids verbatim.
+// v30/schema v22: CommonJS export capture emission (#2723) — new @definition/@declaration
+// captures for exports.X, aliased receivers, module-level `this`, re-export
+// forwarding and `module.exports = fn`, plus prototype/`this` Methods. A warm
+// cache would otherwise replay the pre-fix captures verbatim.
+// v20: Java/Kotlin capture side-channels persist package and class-annotation
+// facts for shared Spring Bean resolution.
+// v19: Java enum constant bodies emit E$N Class nodes; anonymous naming uses
+// JLS 13.1 immediate-host chains (#2555).
+// v18: Worker$N anonymous bodies. v17: callable-value-flow operand identity.
+// v16: direct callee identity.
+// v36: bound-callable graph `startLine` follows the initializer so multi-line
+// closure bindings join the scope channel (#2735). Warm cache would otherwise
+// keep serving wrapper-line startLines and drop the CALLS edge.
+const SCHEMA_BUMP = 36;
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from
@@ -108,6 +206,14 @@ export interface ParseCache {
    * Transient — never serialized to disk.
    */
   usedKeys: Set<string>;
+  /**
+   * When set, chunk payloads are loaded from / flushed to sharded files on
+   * demand instead of retaining every chunk in `entries` for the whole run
+   * (#1983 — Linux kernel OOM from duplicate in-memory cache + graph).
+   */
+  storagePath?: string;
+  /** Index of chunk hashes known to exist under `storagePath/parse-cache/`. */
+  onDiskKeys?: Set<string>;
 }
 
 /** SHA-256 hex of a single string or buffer. */
@@ -126,12 +232,72 @@ export const fileContentHash = (content: Buffer | string): string => sha256Hex(c
  * in the chunk. We sort by filePath before hashing so chunks composed of
  * the same files in different order produce the same key.
  */
+/** PDG/CFG cache namespace (#2081 M1) — every input that changes the
+ *  WORKER-EMITTED `cfgSideChannel` must be folded into the chunk key, and
+ *  ONLY those. The classification test for a future option: does the worker
+ *  see it (workerData) and does it change the bytes the worker writes to the
+ *  shard? `pdgMaxEdgesPerFunction` famously fails that test — it is applied
+ *  at EMIT time on the main thread (scope-resolution run.ts), the worker
+ *  never receives it, and the cached output is byte-identical across cap
+ *  values; folding it in (as a prior review round did) only forced a
+ *  spurious full re-parse on every cap change (#2099 F3). Options that
+ *  change the PERSISTED GRAPH but not the shard belong in the RepoMeta pdg
+ *  stamp (incremental-eligibility), not here. */
+export interface PdgCacheKey {
+  readonly pdg?: boolean;
+  /** Per-function source-line cap (changes WHICH functions get a CFG —
+   *  applied in the worker, so it shapes the cached shard). Callers must
+   *  pass the RESOLVED value (the production call site in parse-impl.ts
+   *  applies the worker's default before folding) so an explicit-default
+   *  run shares the default run's keys — this function folds whatever it
+   *  is given verbatim. */
+  readonly maxFunctionLines?: number;
+}
+
 export const computeChunkHash = (
   entries: Array<{ filePath: string; contentHash: string }>,
+  pdg: boolean | PdgCacheKey = false,
 ): string => {
   const sorted = [...entries].sort((a, b) => (a.filePath < b.filePath ? -1 : 1));
   const joined = sorted.map((e) => `${e.filePath}:${e.contentHash}`).join('\n');
-  return sha256Hex(joined);
+  const opts: PdgCacheKey = typeof pdg === 'boolean' ? { pdg } : pdg;
+  // pdg-off path keeps its pre-#2081 chunk-KEY format verbatim. Note this does
+  // NOT mean caches survive the M1 upgrade: SCHEMA_BUMP 4→5 changed
+  // PARSE_CACHE_VERSION, and both loadParseCache (below) and the durable
+  // parsedfile-store index hard-invalidate on it — every user pays one full
+  // cold re-parse on upgrade regardless of --pdg. Keeping the key format
+  // stable only means no SECOND invalidation class is introduced here.
+  if (!opts.pdg) return sha256Hex(joined);
+  // Fold the worker-visible --pdg configuration into the key: the boolean
+  // plus `maxFunctionLines` (decides which functions get a CFG at all, in the
+  // worker). Without it a warm chunk built under one cap is served to a run
+  // with a different cap → a stale/under-built CFG: the #2038-class
+  // option-blind-key trap. `def` marks an unset (default) value so two
+  // default-cap runs share a key. The emit-time edge cap is deliberately
+  // absent — see the PdgCacheKey doc comment.
+  //
+  // NAMESPACE VERSION (`pdg:5`): bumped when the worker-emitted
+  // `cfgSideChannel` SHAPE changes for pdg-mode runs only — pdg:1→2 in #2083
+  // M3 U1 (TsHarvester emits taint `sites` on StatementFacts); pdg:2→3 in the
+  // #2227 follow-up U1 (every C-family / TS harvester now stamps the call-site
+  // anchor `SiteRecord.at`, which the resolved-callee-id join reads); pdg:3→4 in
+  // the #2227 tri-review-2 U4 (the Rust harvester now emits a `kind:'new'` site
+  // for `struct_expression`, a new worker-output site the join consumes); pdg:4→5
+  // in the FU-C call-summary soundness fix (the TS harvester now stamps
+  // `BindingEntry.formalIndex` on param bindings so the PDG call-summary keys
+  // return-flow on the enclosing FORMAL position, not the flattened binding
+  // ordinal — a warm chunk lacking it would route the harvest to its conservative
+  // empty-summary fallback). A warm chunk built by a worker predating the relevant
+  // change carries a stale site shape, so the join skips it and
+  // `BasicBlock.calleeIds` is silently empty (or missing the struct constructor)
+  // even though `callees` is populated — exactly the #2225-class shape skew this
+  // version token exists to prevent. Invalidates pdg-mode chunks and their durable
+  // parsedfile-cache entries; flag-off chunk keys never reach this line and stay
+  // byte-identical, so non-pdg users pay nothing. Deliberately NOT a SCHEMA_BUMP —
+  // that gates the whole cache version and would force a full cold re-parse on
+  // EVERY user (the M1 bump comment above records that cost).
+  const ns = `pdg:5;maxFn=${opts.maxFunctionLines ?? 'def'}`;
+  return sha256Hex(`${ns}\n${joined}`);
 };
 
 /**
@@ -146,13 +312,13 @@ export const computeChunkHash = (
 const MAP_TAG = '__$mapEntries$__';
 const SET_TAG = '__$setValues$__';
 
-const mapReplacer = (_key: string, value: unknown): unknown => {
+export const mapReplacer = (_key: string, value: unknown): unknown => {
   if (value instanceof Map) return { [MAP_TAG]: Array.from(value.entries()) };
   if (value instanceof Set) return { [SET_TAG]: Array.from(value.values()) };
   return value;
 };
 
-const mapReviver = (_key: string, value: unknown): unknown => {
+export const mapReviver = (_key: string, value: unknown): unknown => {
   if (value && typeof value === 'object') {
     const v = value as Record<string, unknown>;
     if (Array.isArray(v[MAP_TAG])) return new Map(v[MAP_TAG] as [unknown, unknown][]);
@@ -172,6 +338,90 @@ const getCacheIndexPath = (storagePath: string): string =>
 const getCacheChunkPath = (storagePath: string, chunkHash: string): string =>
   path.join(getCacheDirPath(storagePath), `${chunkHash}.json`);
 
+/**
+ * Drop fields that are not replayed by `mergeChunkResults` / parse-impl after
+ * RING4-1 (#942). Shrinks on-disk shards and peak RSS during cold runs.
+ */
+export const slimParseWorkerResultsForCache = (
+  chunkResults: readonly ParseWorkerResult[],
+): ParseWorkerResult[] => {
+  const slim: ParseWorkerResult[] = [];
+  for (const result of chunkResults) {
+    slim.push({
+      ...result,
+      calls: [],
+      assignments: [],
+      constructorBindings: [],
+      parsedFiles: [],
+      // #2112: a clone-safety skip list is per-run telemetry, not graph data —
+      // replay ignores it. Drop it so it doesn't bloat the cached shard.
+      skippedPaths: [],
+    });
+  }
+  return slim;
+};
+
+const readParseCacheChunkFromDisk = async (
+  storagePath: string,
+  chunkHash: string,
+): Promise<ParseWorkerResult[] | undefined> => {
+  if (!isValidChunkCacheKey(chunkHash)) return undefined;
+  try {
+    const chunkRaw = await fs.readFile(getCacheChunkPath(storagePath, chunkHash), 'utf-8');
+    const chunkData = JSON.parse(chunkRaw, mapReviver) as ParseWorkerResult[];
+    return Array.isArray(chunkData) ? chunkData : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Load one chunk shard. Does not retain it in `cache.entries`. */
+export const loadParseCacheChunk = async (
+  cache: ParseCache,
+  chunkHash: string,
+): Promise<ParseWorkerResult[] | undefined> => {
+  const inMemory = cache.entries.get(chunkHash);
+  if (inMemory !== undefined) return inMemory;
+  if (cache.storagePath && cache.onDiskKeys?.has(chunkHash)) {
+    return readParseCacheChunkFromDisk(cache.storagePath, chunkHash);
+  }
+  return undefined;
+};
+
+/**
+ * Cache directories already created this process. `persistParseCacheChunk` runs
+ * once per cache-miss chunk; without this guard every miss re-issues a redundant
+ * `mkdir` syscall (hundreds on a large cold repo) (#1983). Storage paths are
+ * process-scoped, so the Set stays bounded.
+ */
+const createdCacheDirs = new Set<string>();
+
+/**
+ * Persist one chunk shard and avoid retaining it in RAM for the rest of the
+ * run. Falls back to `cache.entries` when `storagePath` is unset (unit tests).
+ */
+export const persistParseCacheChunk = async (
+  cache: ParseCache,
+  chunkHash: string,
+  chunkResults: readonly ParseWorkerResult[],
+): Promise<void> => {
+  const slim = slimParseWorkerResultsForCache(chunkResults);
+  if (cache.storagePath) {
+    const cacheDir = getCacheDirPath(cache.storagePath);
+    if (!createdCacheDirs.has(cacheDir)) {
+      await fs.mkdir(cacheDir, { recursive: true });
+      createdCacheDirs.add(cacheDir);
+    }
+    const payload = JSON.stringify(slim, mapReplacer);
+    await fs.writeFile(getCacheChunkPath(cache.storagePath, chunkHash), payload, 'utf-8');
+    cache.onDiskKeys ??= new Set<string>();
+    cache.onDiskKeys.add(chunkHash);
+    cache.entries.delete(chunkHash);
+    return;
+  }
+  cache.entries.set(chunkHash, slim);
+};
+
 const loadLegacyParseCache = async (storagePath: string): Promise<ParseCache> => {
   const cachePath = getLegacyCachePath(storagePath);
   try {
@@ -184,15 +434,15 @@ const loadLegacyParseCache = async (storagePath: string): Promise<ParseCache> =>
       typeof data.entries !== 'object' ||
       data.entries === null
     ) {
-      return emptyCache();
+      return emptyCache(storagePath);
     }
     const entries = new Map<string, ParseWorkerResult[]>();
     for (const [k, v] of Object.entries(data.entries)) {
       if (Array.isArray(v)) entries.set(k, v as ParseWorkerResult[]);
     }
-    return { version: PARSE_CACHE_VERSION, entries, usedKeys: new Set<string>() };
+    return { version: PARSE_CACHE_VERSION, entries, usedKeys: new Set<string>(), storagePath };
   } catch {
-    return emptyCache();
+    return emptyCache(storagePath);
   }
 };
 
@@ -207,22 +457,24 @@ const loadShardedParseCache = async (storagePath: string): Promise<ParseCache | 
       data.version !== PARSE_CACHE_VERSION ||
       !Array.isArray(data.keys)
     ) {
-      return emptyCache();
+      return emptyCache(storagePath);
     }
 
-    const entries = new Map<string, ParseWorkerResult[]>();
+    const onDiskKeys = new Set<string>();
     for (const chunkHash of data.keys) {
-      if (typeof chunkHash !== 'string' || !isValidChunkCacheKey(chunkHash)) continue;
-      try {
-        const chunkRaw = await fs.readFile(getCacheChunkPath(storagePath, chunkHash), 'utf-8');
-        const chunkData = JSON.parse(chunkRaw, mapReviver) as ParseWorkerResult[];
-        if (Array.isArray(chunkData)) entries.set(chunkHash, chunkData);
-      } catch {
-        /* skip corrupt or missing shard */
+      if (typeof chunkHash === 'string' && isValidChunkCacheKey(chunkHash)) {
+        onDiskKeys.add(chunkHash);
       }
     }
 
-    return { version: PARSE_CACHE_VERSION, entries, usedKeys: new Set<string>() };
+    // Lazy: index only — load individual shards on cache hit (#1983).
+    return {
+      version: PARSE_CACHE_VERSION,
+      entries: new Map<string, ParseWorkerResult[]>(),
+      usedKeys: new Set<string>(),
+      storagePath,
+      onDiskKeys,
+    };
   } catch {
     return null;
   }
@@ -248,38 +500,57 @@ export const loadParseCache = async (storagePath: string): Promise<ParseCache> =
  * reparses. This is not a single atomic swap of the whole tree, but avoids
  * leaving a half-written shard set visible to readers.
  */
-export const saveParseCache = async (storagePath: string, cache: ParseCache): Promise<void> => {
+export const saveParseCache = async (storagePath: string, cache: ParseCache): Promise<string[]> => {
   await fs.mkdir(storagePath, { recursive: true });
   const cacheDir = getCacheDirPath(storagePath);
   const tmpDir = `${cacheDir}.tmp`;
   await fs.rm(tmpDir, { recursive: true, force: true });
   await fs.mkdir(tmpDir, { recursive: true });
 
-  const keys: string[] = [];
-  for (const [chunkHash, chunkResults] of cache.entries) {
-    if (!isValidChunkCacheKey(chunkHash)) continue;
-    let payload: string;
-    try {
-      payload = JSON.stringify(chunkResults, mapReplacer);
-    } catch {
-      // Extremely dense chunks could theoretically exceed string limits; skip
-      // rather than failing the entire save (orchestrator catches save errors).
+  const keys = [...cache.usedKeys].filter(isValidChunkCacheKey).sort();
+  // Track hashes whose shard was actually written/copied this save. A hash can
+  // be in `usedKeys` without a backing shard — its in-memory serialize threw, or
+  // its on-disk copy failed/was-absent (e.g. a worker-quarantined chunk added to
+  // usedKeys but never persisted). Writing such a hash into `index.keys` would
+  // make the next load reference a shard that doesn't exist (#1983). Build the
+  // index from what we persisted, not from the raw usedKeys snapshot.
+  const writtenKeys: string[] = [];
+  for (const chunkHash of keys) {
+    const chunkPath = path.join(tmpDir, `${chunkHash}.json`);
+    const inMemory = cache.entries.get(chunkHash);
+    if (inMemory !== undefined) {
+      let payload: string;
+      try {
+        payload = JSON.stringify(inMemory, mapReplacer);
+      } catch {
+        continue;
+      }
+      await fs.writeFile(chunkPath, payload, 'utf-8');
+      writtenKeys.push(chunkHash);
       continue;
     }
-    keys.push(chunkHash);
-    const chunkPath = path.join(tmpDir, `${chunkHash}.json`);
-    await fs.writeFile(chunkPath, payload, 'utf-8');
+    const existingPath = getCacheChunkPath(storagePath, chunkHash);
+    try {
+      await fs.copyFile(existingPath, chunkPath);
+      writtenKeys.push(chunkHash);
+    } catch {
+      /* shard missing — skip; next run treats as cache miss */
+    }
   }
 
   const index: ShardedParseCacheIndex = {
     version: cache.version,
-    keys,
+    keys: writtenKeys,
   };
   await fs.writeFile(path.join(tmpDir, CACHE_INDEX_FILENAME), JSON.stringify(index), 'utf-8');
 
   await fs.rm(cacheDir, { recursive: true, force: true });
   await fs.rename(tmpDir, cacheDir);
   await fs.rm(getLegacyCachePath(storagePath), { force: true });
+  // The authoritative final key set actually backed by a shard on disk.
+  // Callers (the durable ParsedFile store) prune to exactly these so the two
+  // content-addressed stores stay coherent — a chunk is cached iff BOTH have it.
+  return writtenKeys;
 };
 
 /**
@@ -295,11 +566,21 @@ export const pruneCache = (cache: ParseCache, usedHashes: ReadonlySet<string>): 
       removed++;
     }
   }
+  if (cache.onDiskKeys) {
+    for (const k of cache.onDiskKeys) {
+      if (!usedHashes.has(k)) {
+        cache.onDiskKeys.delete(k);
+        removed++;
+      }
+    }
+  }
   return removed;
 };
 
-const emptyCache = (): ParseCache => ({
+const emptyCache = (storagePath?: string): ParseCache => ({
   version: PARSE_CACHE_VERSION,
   entries: new Map<string, ParseWorkerResult[]>(),
   usedKeys: new Set<string>(),
+  storagePath,
+  onDiskKeys: storagePath ? new Set<string>() : undefined,
 });

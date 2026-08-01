@@ -9,27 +9,25 @@
  *
  *   - `processRoutesFromExtracted` — CALLS edges from framework routes
  *     (e.g. Laravel) to their controller methods.
- *   - `processNextjsFetchRoutes` / `extractFetchCallsFromFiles` /
- *     `extractConsumerAccessedKeys` — FETCHES edges from `fetch()` calls to
- *     Next.js Route nodes.
+ *   - `processNextjsFetchRoutes` / `extractConsumerAccessedKeys` — FETCHES edges
+ *     from `fetch()` calls to Next.js Route nodes.
  *   - `buildExportedTypeMapFromGraph` — exported symbol → return/declared type
  *     map, consumed by the cross-file enrichment pass.
  */
 
-import Parser from 'tree-sitter';
 import { KnowledgeGraph } from '../graph/types.js';
-import { ASTCache } from './ast-cache.js';
 import type { SemanticModel, SymbolTableReader } from './model/index.js';
-import { isLanguageAvailable, loadParser, loadLanguage } from '../tree-sitter/parser-loader.js';
-import { getProvider } from './languages/index.js';
 import { generateId } from '../../lib/utils.js';
-import { getLanguageFromFilename } from 'gitnexus-shared';
 import type { SymbolDefinition } from 'gitnexus-shared';
 import { yieldToEventLoop } from './utils/event-loop.js';
-import { parseSourceSafe } from '../tree-sitter/safe-parse.js';
-import { getTreeSitterBufferSize } from './constants.js';
 import type { ExtractedRoute, ExtractedFetchCall } from './workers/parse-worker.js';
+import type { ExtractedDecoratorRoute } from './workers/parse-worker.js';
 import { normalizeFetchURL, routeMatches } from './route-extractors/nextjs.js';
+import {
+  normalizeExtractedRoutePath,
+  normalizeRouteMethod,
+  routeNodeKey,
+} from './route-extractors/route-path.js';
 import { extractReturnTypeName } from './type-extractors/shared.js';
 
 const MAX_EXPORTS_PER_FILE = 500;
@@ -38,6 +36,34 @@ const MAX_TYPE_NAME_LENGTH = 256;
 /** Per-file resolved type bindings for exported symbols.
  *  Consumed by the cross-file re-resolution / enrichment pass. */
 export type ExportedTypeMap = Map<string, Map<string, string>>;
+
+/** Record one exported graph node into the incremental ExportedTypeMap. */
+export const accumulateExportedTypesFromParsedNode = (
+  result: ExportedTypeMap,
+  node: { id: string; properties?: Record<string, unknown> },
+  symbolTable: SymbolTableReader,
+): void => {
+  if (!node.properties?.isExported) return;
+  if (!node.properties?.filePath || !node.properties?.name) return;
+  const filePath = node.properties.filePath as string;
+  const name = node.properties.name as string;
+  if (!name || name.length > MAX_TYPE_NAME_LENGTH) return;
+  const defs = symbolTable.lookupExactAll(filePath, name);
+  const def = defs.find((d) => d.nodeId === node.id) ?? defs[0];
+  if (!def) return;
+  const typeName = def.returnType ?? def.declaredType;
+  if (!typeName || typeName.length > MAX_TYPE_NAME_LENGTH) return;
+  const simpleType = extractReturnTypeName(typeName) ?? typeName;
+  if (!simpleType) return;
+  let fileExports = result.get(filePath);
+  if (!fileExports) {
+    fileExports = new Map();
+    result.set(filePath, fileExports);
+  }
+  if (fileExports.size < MAX_EXPORTS_PER_FILE) {
+    fileExports.set(name, simpleType);
+  }
+};
 
 /** Build ExportedTypeMap from graph nodes — used for the worker path where the
  *  sequential TypeEnv is not available in the main thread. Collects
@@ -48,29 +74,7 @@ export function buildExportedTypeMapFromGraph(
 ): ExportedTypeMap {
   const result: ExportedTypeMap = new Map();
   graph.forEachNode((node) => {
-    if (!node.properties?.isExported) return;
-    if (!node.properties?.filePath || !node.properties?.name) return;
-    const filePath = node.properties.filePath as string;
-    const name = node.properties.name as string;
-    if (!name || name.length > MAX_TYPE_NAME_LENGTH) return;
-    // For callable symbols, use returnType; for properties/variables, use declaredType.
-    // Use lookupExactAll + nodeId match to handle same-name methods in different classes.
-    const defs = symbolTable.lookupExactAll(filePath, name);
-    const def = defs.find((d) => d.nodeId === node.id) ?? defs[0];
-    if (!def) return;
-    const typeName = def.returnType ?? def.declaredType;
-    if (!typeName || typeName.length > MAX_TYPE_NAME_LENGTH) return;
-    // Extract simple type name (strip Promise<>, etc.) — reuse shared utility
-    const simpleType = extractReturnTypeName(typeName) ?? typeName;
-    if (!simpleType) return;
-    let fileExports = result.get(filePath);
-    if (!fileExports) {
-      fileExports = new Map();
-      result.set(filePath, fileExports);
-    }
-    if (fileExports.size < MAX_EXPORTS_PER_FILE) {
-      fileExports.set(name, simpleType);
-    }
+    accumulateExportedTypesFromParsedNode(result, node, symbolTable);
   });
   return result;
 }
@@ -245,6 +249,93 @@ export const processRoutesFromExtracted = async (
   onProgress?.(extractedRoutes.length, extractedRoutes.length);
 };
 
+/**
+ * Resolve each route's handler to a real symbol UID, keyed by the route's
+ * `(method, url)` identity (`routeNodeKey` — the same key the routes phase uses
+ * for the `Route` node). This is the Part 2 (#2138) groundwork that lets
+ * `HttpRouteExtractor.extractProvidersGraph` read the handler symbol from the
+ * graph instead of re-parsing source via `getDetections()`.
+ *
+ * Two route shapes, one resolution target — `(filePath, name) → nodeId`:
+ *   - Laravel framework routes (`ExtractedRoute`) carry `controllerName` +
+ *     `methodName`; resolve the controller (qualified-first) then the method in
+ *     the controller's own file (mirrors `processRoutesFromExtracted`).
+ *   - Decorator routes (`ExtractedDecoratorRoute`, e.g. Spring/FastAPI) carry
+ *     `handlerName` (the decorated method, captured at extraction); resolve it
+ *     directly in the route's own file.
+ *
+ * First-writer-wins per route identity, matching the routes phase's dedup (it
+ * keeps the first route registered for a `(method, url)` key and counts the rest
+ * as duplicates). The first route to claim a key reserves it **even when its
+ * handler is unresolvable**, so a later same-key route can never stamp its
+ * handler onto the first route's Route node (the routes phase made that first
+ * route the node-winner). Keying is `routeNodeKey(method, url)` (#2289): a
+ * same-URL multi-verb pair (`GET /x` + `POST /x`) resolves two handlers, one per
+ * node; method-less / wildcard routes key by URL alone, byte-identical to the
+ * pre-#2289 behavior. Routes whose handler cannot be *uniquely* resolved (no
+ * name, zero matches, or an ambiguous same-name match) carry no
+ * `handlerSymbolId`; the extractor then falls back to source scan for that route
+ * (fail-open, no regression, never a wrong handler).
+ */
+export function resolveRouteHandlerSymbols(
+  model: SemanticModel,
+  extractedRoutes: readonly ExtractedRoute[],
+  decoratorRoutes: readonly ExtractedDecoratorRoute[],
+): Map<string, string> {
+  const out = new Map<string, string>();
+  // Route identities already claimed by an earlier route (resolved or not).
+  // Mirrors the routes phase `addRoute` first-writer-wins so the handler we
+  // stamp always belongs to the route that actually won the Route node.
+  const claimed = new Set<string>();
+
+  // Resolve a single same-file symbol by name, refusing to guess on ambiguity:
+  // exactly one match → its nodeId; zero or many → undefined (fail-open).
+  const uniqueSymbolId = (filePath: string, name: string): string | undefined => {
+    const defs = model.symbols.lookupExactAll(filePath, name);
+    return defs.length === 1 ? defs[0]?.nodeId : undefined;
+  };
+
+  const claim = (
+    routePath: string | null,
+    prefix: string | null,
+    httpMethod: string | null | undefined,
+    symbolId: string | undefined,
+  ) => {
+    if (!routePath) return;
+    const url = normalizeExtractedRoutePath(routePath, prefix);
+    const key = routeNodeKey(normalizeRouteMethod(httpMethod), url);
+    if (claimed.has(key)) return; // first-writer-wins: later same-key routes can't override
+    claimed.add(key);
+    if (symbolId) out.set(key, symbolId);
+  };
+
+  // Laravel framework routes — controller class + method name.
+  for (const route of extractedRoutes) {
+    let methodId: string | undefined;
+    if (route.controllerName && route.methodName) {
+      let controllerDef: SymbolDefinition | undefined;
+      if (route.controllerQualifiedName) {
+        controllerDef = resolveControllerByQualifiedName(model, route.controllerQualifiedName);
+      }
+      if (!controllerDef) {
+        const controllerDefs = model.types.lookupClassByName(route.controllerName);
+        if (controllerDefs.length === 1) controllerDef = controllerDefs[0];
+      }
+      if (controllerDef) methodId = uniqueSymbolId(controllerDef.filePath, route.methodName);
+    }
+    claim(route.routePath, route.prefix ?? null, route.httpMethod, methodId);
+  }
+
+  // Decorator routes (Spring / FastAPI / generic) — the decorated handler in
+  // the route's own file.
+  for (const dr of decoratorRoutes) {
+    const handlerId = dr.handlerName ? uniqueSymbolId(dr.filePath, dr.handlerName) : undefined;
+    claim(dr.routePath, dr.prefix ?? null, dr.httpMethod, handlerId);
+  }
+
+  return out;
+}
+
 /** Common method names on response/data objects that are NOT property accesses */
 // Properties/methods to ignore when extracting consumer accessed keys from `data.X` patterns.
 // Avoids false positives from Fetch API, Array, Object, Promise, and DOM access on variables
@@ -388,19 +479,29 @@ export const extractConsumerAccessedKeys = (content: string): string[] => {
  * Create FETCHES edges from extracted fetch() calls to matching Route nodes.
  * When consumerContents is provided, extracts property access patterns from
  * consumer files and encodes them in the edge reason field.
+ *
+ * Matching stays URL-only (#2289): a verb-less consumer (a `fetch()` call has
+ * no statically-known HTTP method) matches a route by URL and connects to
+ * **every** Route node sharing that URL — i.e. both the `GET /x` and `POST /x`
+ * nodes when a URL carries multiple verbs. `routeUrlToKeys` therefore maps each
+ * route URL to the list of `routeNodeKey` identities at that URL; a single-verb
+ * (or method-less) URL has a one-element list, keeping edges byte-identical to
+ * the pre-#2289 behavior.
  */
 export const processNextjsFetchRoutes = (
   graph: KnowledgeGraph,
   fetchCalls: ExtractedFetchCall[],
-  routeRegistry: Map<string, string>, // routeURL → handlerFilePath
+  routeUrlToKeys: Map<string, string[]>, // routeURL → route node keys at that URL
   consumerContents?: Map<string, string>, // filePath → file content
 ) => {
-  // Pre-count how many routes each consumer file matches (for confidence attribution)
+  // Pre-count how many route URLs each consumer file matches (for confidence
+  // attribution). Counts once per call that matches any URL — independent of how
+  // many verbs share that URL — so the multi-fetch heuristic is unchanged.
   const routeCountByFile = new Map<string, number>();
   for (const call of fetchCalls) {
     const normalized = normalizeFetchURL(call.fetchURL);
     if (!normalized) continue;
-    for (const [routeURL] of routeRegistry) {
+    for (const routeURL of routeUrlToKeys.keys()) {
       if (routeMatches(normalized, routeURL)) {
         routeCountByFile.set(call.filePath, (routeCountByFile.get(call.filePath) ?? 0) + 1);
         break;
@@ -412,10 +513,9 @@ export const processNextjsFetchRoutes = (
     const normalized = normalizeFetchURL(call.fetchURL);
     if (!normalized) continue;
 
-    for (const [routeURL] of routeRegistry) {
+    for (const [routeURL, routeKeys] of routeUrlToKeys) {
       if (routeMatches(normalized, routeURL)) {
         const sourceId = generateId('File', call.filePath);
-        const routeNodeId = generateId('Route', routeURL);
 
         // Extract consumer accessed keys if file content is available
         let reason = 'fetch-url-match';
@@ -435,92 +535,20 @@ export const processNextjsFetchRoutes = (
           reason = `${reason}|fetches:${fetchCount}`;
         }
 
-        graph.addRelationship({
-          id: generateId('FETCHES', `${sourceId}->${routeNodeId}`),
-          sourceId,
-          targetId: routeNodeId,
-          type: 'FETCHES',
-          confidence: 0.9,
-          reason,
-        });
+        // Connect to every Route node at this URL (one per verb).
+        for (const routeKey of routeKeys) {
+          const routeNodeId = generateId('Route', routeKey);
+          graph.addRelationship({
+            id: generateId('FETCHES', `${sourceId}->${routeNodeId}`),
+            sourceId,
+            targetId: routeNodeId,
+            type: 'FETCHES',
+            confidence: 0.9,
+            reason,
+          });
+        }
         break;
       }
     }
   }
-};
-
-/**
- * Extract fetch() calls from source files (sequential path).
- * Workers handle this via tree-sitter captures in parse-worker; this function
- * provides the same extraction for the sequential fallback path.
- */
-export const extractFetchCallsFromFiles = async (
-  files: { path: string; content: string }[],
-  astCache: ASTCache,
-): Promise<ExtractedFetchCall[]> => {
-  const parser = await loadParser();
-  const result: ExtractedFetchCall[] = [];
-
-  for (const file of files) {
-    const language = getLanguageFromFilename(file.path);
-    if (!language) continue;
-    if (!isLanguageAvailable(language)) continue;
-
-    const provider = getProvider(language);
-    const queryStr = provider.treeSitterQueries;
-    if (!queryStr) continue;
-
-    await loadLanguage(language, file.path);
-
-    let tree = astCache.get(file.path);
-    if (!tree) {
-      const parseContent = provider.preprocessSource?.(file.content, file.path) ?? file.content;
-      try {
-        tree = parseSourceSafe(parser, parseContent, undefined, {
-          bufferSize: getTreeSitterBufferSize(parseContent),
-        });
-      } catch {
-        continue;
-      }
-      astCache.set(file.path, tree);
-    }
-
-    let matches;
-    try {
-      const lang = parser.getLanguage();
-      const query = new Parser.Query(lang, queryStr);
-      matches = query.matches(tree.rootNode);
-    } catch {
-      continue;
-    }
-
-    for (const match of matches) {
-      const captureMap: Record<string, any> = {};
-      match.captures.forEach((c) => (captureMap[c.name] = c.node));
-
-      if (captureMap['route.fetch']) {
-        const urlNode = captureMap['route.url'] ?? captureMap['route.template_url'];
-        if (urlNode) {
-          result.push({
-            filePath: file.path,
-            fetchURL: urlNode.text,
-            lineNumber: captureMap['route.fetch'].startPosition.row,
-          });
-        }
-      } else if (captureMap['http_client'] && captureMap['http_client.url']) {
-        const method = captureMap['http_client.method']?.text;
-        const url = captureMap['http_client.url'].text;
-        const HTTP_CLIENT_ONLY = new Set(['head', 'options', 'request', 'ajax']);
-        if (method && HTTP_CLIENT_ONLY.has(method) && url.startsWith('/')) {
-          result.push({
-            filePath: file.path,
-            fetchURL: url,
-            lineNumber: captureMap['http_client'].startPosition.row,
-          });
-        }
-      }
-    }
-  }
-
-  return result;
 };

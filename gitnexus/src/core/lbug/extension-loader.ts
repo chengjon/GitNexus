@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { LBUG_MAX_DB_SIZE } from './lbug-config.js';
+import { diagnoseExtensionLoad, type ExtensionLoadDiagnosis } from './extension-load-error.js';
 import { logger } from '../logger.js';
 
 const DEFAULT_EXTENSION_INSTALL_TIMEOUT_MS = 15_000;
@@ -30,18 +31,40 @@ export interface ExtensionCapability {
   loaded: boolean;
   /** Human-readable reason when `loaded` is false. */
   reason?: string;
+  /**
+   * Classified diagnosis of `reason`, computed ONCE at mark-unavailable time so
+   * per-request surfaces (ftsDegradedWarning on /api/search + MCP query) read the
+   * cached remedy instead of re-inspecting the extension file on every call (#2383 F3).
+   */
+  diagnosis?: ExtensionLoadDiagnosis;
 }
 
 /** Per-call overrides applied on top of `ExtensionManager` defaults. */
 export interface ExtensionEnsureOptions {
   policy?: ExtensionInstallPolicy;
   installTimeoutMs?: number;
+  /**
+   * Speculative probe: log an unavailable outcome at debug level instead of
+   * warn, and do not consume the once-per-(extension, reason) warn budget.
+   *
+   * Set only by callers that do NOT own the extension's lifecycle and know a
+   * later owner will retry with an install-capable policy — currently the
+   * writable `initLbug` pre-load, whose miss on a cold cache is expected and
+   * is fixed moments later by analyze Phase 3. Never set it on a path where
+   * the failure is the final answer (serve/MCP read paths), or a real
+   * degradation goes unreported.
+   */
+  quiet?: boolean;
 }
 
 export interface ExtensionManagerOptions {
   policy?: ExtensionInstallPolicy;
   installTimeoutMs?: number;
-  installExtension?: (extensionName: string, timeoutMs: number) => Promise<ExtensionInstallResult>;
+  installExtension?: (
+    extensionName: string,
+    timeoutMs: number,
+    loadError?: string,
+  ) => Promise<ExtensionInstallResult>;
   warn?: (message: string) => void;
 }
 
@@ -49,6 +72,9 @@ const alreadyAvailable = (message: string): boolean =>
   message.includes('already loaded') ||
   message.includes('already installed') ||
   message.includes('already exists');
+
+/** LadybugDB errors are multi-line; collapse for single-line warn/reason strings. */
+const oneLine = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const resolvePolicyFromEnv = (): ExtensionInstallPolicy => {
   const raw = process.env.GITNEXUS_LBUG_EXTENSION_INSTALL;
@@ -103,6 +129,7 @@ export const getExtensionInstallChildProcessArgs = (
 export const installDuckDbExtensionOutOfProcess = async (
   extensionName: string,
   timeoutMs: number = getExtensionInstallTimeoutMs(),
+  loadError?: string,
 ): Promise<ExtensionInstallResult> => {
   if (!EXTENSION_NAME_PATTERN.test(extensionName)) {
     throw new Error(`Invalid DuckDB extension name: ${extensionName}`);
@@ -113,6 +140,9 @@ export const installDuckDbExtensionOutOfProcess = async (
       env: {
         ...process.env,
         GITNEXUS_LBUG_EXTENSION_NAME: extensionName,
+        // The child picks INSTALL vs FORCE INSTALL from this LOAD error so it
+        // only re-downloads when the on-disk extension file is actually broken.
+        ...(loadError ? { GITNEXUS_LBUG_EXTENSION_LOAD_ERROR: loadError } : {}),
       },
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
@@ -132,7 +162,7 @@ export const installDuckDbExtensionOutOfProcess = async (
       resolve({
         success: false,
         timedOut: true,
-        message: `INSTALL ${extensionName} timed out after ${timeoutMs}ms`,
+        message: `extension install for ${extensionName} timed out after ${timeoutMs}ms`,
       });
     }, timeoutMs);
 
@@ -152,8 +182,8 @@ export const installDuckDbExtensionOutOfProcess = async (
         timedOut: false,
         message:
           code === 0
-            ? `INSTALL ${extensionName} completed`
-            : `INSTALL ${extensionName} failed with ${signal ?? `exit code ${code}`}${stderr ? `: ${stderr.trim()}` : ''}`,
+            ? `extension install for ${extensionName} completed`
+            : `extension install for ${extensionName} failed with ${signal ?? `exit code ${code}`}${stderr ? `: ${stderr.trim()}` : ''}`,
       });
     });
   });
@@ -212,50 +242,84 @@ export class ExtensionManager {
     const timeoutMs =
       opts.installTimeoutMs ?? this.options.installTimeoutMs ?? getExtensionInstallTimeoutMs();
     const warn = this.options.warn ?? ((msg: string) => logger.warn(msg));
+    const quiet = opts.quiet === true;
 
     if (policy === 'never') {
-      this.markUnavailable(name, label, 'extension install policy is "never"', warn);
+      this.markUnavailable(name, label, 'extension install policy is "never"', warn, quiet);
       return false;
     }
 
-    if (await this.tryLoad(query, name)) {
+    const loadError = await this.tryLoad(query, name);
+    if (loadError === null) {
       this.markLoaded(name);
       return true;
     }
 
     if (policy === 'load-only') {
-      this.markUnavailable(name, label, 'load-only policy: extension not pre-installed', warn);
+      this.markUnavailable(
+        name,
+        label,
+        `load-only policy (no install attempted); LOAD ${name} failed: ${loadError}`,
+        warn,
+        quiet,
+      );
       return false;
     }
 
     let install = this.installAttempted.get(name);
     if (!install) {
       const installFn = this.options.installExtension ?? installDuckDbExtensionOutOfProcess;
-      install = await installFn(name, timeoutMs);
+      // Hand the child the LOAD error so it re-downloads (FORCE) only when the
+      // present extension file is provably broken, not on every LOAD failure.
+      install = await installFn(name, timeoutMs, loadError);
       this.installAttempted.set(name, install);
     }
 
     if (!install.success) {
-      this.markUnavailable(name, label, install.message, warn);
+      this.markUnavailable(
+        name,
+        label,
+        `${install.message}; LOAD ${name} had failed: ${loadError}`,
+        warn,
+        quiet,
+      );
       return false;
     }
 
-    if (await this.tryLoad(query, name)) {
+    const retryError = await this.tryLoad(query, name);
+    if (retryError === null) {
       this.markLoaded(name);
       return true;
     }
 
-    this.markUnavailable(name, label, `LOAD ${name} failed after successful INSTALL`, warn);
+    this.markUnavailable(
+      name,
+      label,
+      `LOAD ${name} failed after successful INSTALL: ${retryError}`,
+      warn,
+      quiet,
+    );
     return false;
   }
 
-  private async tryLoad(query: (sql: string) => Promise<unknown>, name: string): Promise<boolean> {
+  /**
+   * Attempt `LOAD EXTENSION <name>`; returns `null` on success and the
+   * collapsed error message on failure. The message is the load-side ground
+   * truth — LadybugDB distinguishes a missing extension file from a present
+   * but unloadable one (wrong platform, truncated download, version mismatch),
+   * and discarding it left users staring at "not pre-installed" when the file
+   * existed all along (#2374).
+   */
+  private async tryLoad(
+    query: (sql: string) => Promise<unknown>,
+    name: string,
+  ): Promise<string | null> {
     try {
       await query(`LOAD EXTENSION ${name}`);
-      return true;
+      return null;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return alreadyAvailable(msg);
+      return alreadyAvailable(msg) ? null : oneLine(msg);
     }
   }
 
@@ -268,14 +332,27 @@ export class ExtensionManager {
     label: string,
     reason: string,
     warn: (message: string) => void,
+    quiet = false,
   ): void {
-    this.capabilities.set(name, { name, loaded: false, reason });
+    // Classify once here (the single load-failure sink, run per Database not per
+    // request) so the hot per-request warning path does no file I/O (#2383 F3).
+    this.capabilities.set(name, {
+      name,
+      loaded: false,
+      reason,
+      diagnosis: diagnoseExtensionLoad(reason, label),
+    });
+    const message = `GitNexus: ${label} extension unavailable; continuing without ${label} features. ${reason}`;
+    // A quiet probe must not register the dedup key: the owning caller may hit
+    // the identical reason later, and that one is the real degradation report.
+    if (quiet) {
+      logger.debug(message);
+      return;
+    }
     const key = `${name}:${reason}`;
     if (this.warnedKeys.has(key)) return;
     this.warnedKeys.add(key);
-    warn(
-      `GitNexus: ${label} extension unavailable; continuing without ${label} features. ${reason}`,
-    );
+    warn(message);
   }
 }
 

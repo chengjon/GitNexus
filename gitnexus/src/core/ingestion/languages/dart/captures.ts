@@ -44,6 +44,9 @@ import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
 import { encodeMarker } from '../../utils/heritage-marker.js';
 import { DART_BUILT_INS } from './built-ins.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { preprocessDartExtensionTypes } from './extension-type-preprocess.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
 
 const FUNCTION_DECL_TAGS = [
   '@declaration.function',
@@ -51,18 +54,73 @@ const FUNCTION_DECL_TAGS = [
   '@declaration.constructor',
 ] as const;
 
+const DART_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set(['function_signature', 'function_expression']),
+  callNodeTypes: new Set(['selector']),
+  parameterListNodeTypes: new Set(['formal_parameter_list', 'arguments']),
+  parameterNodeTypes: new Set(['formal_parameter']),
+  // `initialized_identifier` covers TOP-LEVEL `var` bindings and the second and
+  // later declarators of a multi-name local; `static_final_declaration` covers
+  // top-level `final`/`const`, which parse into a different list node entirely.
+  // Dart wraps only the FIRST local declarator in `initialized_variable_
+  // definition`, so without the other two a top-level `var f = (x) => x;`, a
+  // `final f = …`, and the `g` of `var f = …, g = …;` all emitted no flow
+  // captures at all and never resolved (#2693).
+  bindingNodeTypes: new Set([
+    'initialized_variable_definition',
+    'initialized_identifier',
+    'static_final_declaration',
+  ]),
+  assignmentNodeTypes: new Set(['assignment_expression']),
+  identifierNodeTypes: new Set(['identifier', 'type_identifier']),
+  // `initialized_identifier` and `static_final_declaration` are FIELDLESS, so
+  // the shared field-based fallback (`left`/`name`/`value`/…) decomposes
+  // nothing and those bindings produced no flow facts at all — the same shape
+  // as Kotlin's fieldless `assignment` node. Positional: first named child is
+  // the bound name, last is the initializer.
+  // `initialized_variable_definition` carries real `name:` / `value:` fields,
+  // so it is left to the shared path by returning undefined.
+  extractAssignment: (node: SyntaxNode) => {
+    if (node.type !== 'initialized_identifier' && node.type !== 'static_final_declaration') {
+      return undefined;
+    }
+    const named = node.namedChildren.filter((child): child is SyntaxNode => child !== null);
+    if (named.length < 2) return undefined;
+    return { destination: named[0]!, source: named[named.length - 1]! };
+  },
+  lexicalFunctionOwner: (node: SyntaxNode) => dartLexicalFunctionOwner(node),
+  isCallNode: (node: SyntaxNode) => node.namedChild(0)?.type === 'argument_part',
+  extractCallCallee: (node: SyntaxNode) => dartCallableCallee(node) ?? undefined,
+  callSiteNode: (node: SyntaxNode) => dartCallableCallee(node) ?? undefined,
+  callableProtocolMethods: new Set(['call']),
+} as const;
+
+function dartLexicalFunctionOwner(input: SyntaxNode): SyntaxNode | undefined {
+  let node: SyntaxNode | null = input;
+  while (node !== null) {
+    if (node.type === 'function_signature' || node.type === 'function_expression') return node;
+    if (node.type === 'function_body') {
+      const signature = node.previousNamedSibling;
+      if (signature?.type === 'function_signature') return signature;
+    }
+    node = node.parent;
+  }
+  return undefined;
+}
+
 export function emitDartScopeCaptures(
   sourceText: string,
   _filePath: string,
   cachedTree?: unknown,
 ): readonly CaptureMatch[] {
+  const parseText = preprocessDartExtensionTypes(sourceText);
   let tree: Parser.Tree;
   if (cachedTree !== undefined && cachedTree !== null) {
     tree = cachedTree as Parser.Tree;
     recordCacheHit();
   } else {
-    tree = parseSourceSafe(getDartParser(), sourceText, undefined, {
-      bufferSize: getTreeSitterBufferSize(sourceText),
+    tree = parseSourceSafe(getDartParser(), parseText, undefined, {
+      bufferSize: getTreeSitterBufferSize(parseText),
     });
     recordCacheMiss();
   }
@@ -98,6 +156,12 @@ export function emitDartScopeCaptures(
       const bodyNode = findFunctionBody(declNode);
 
       attachArityMetadata(grouped, declNode);
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
 
       if (bodyNode !== null) {
@@ -124,6 +188,12 @@ export function emitDartScopeCaptures(
           fieldType,
         );
       }
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       if (fieldType !== null) {
         out.push({
@@ -135,6 +205,12 @@ export function emitDartScopeCaptures(
       continue;
     }
 
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
     out.push(grouped);
   }
 
@@ -157,9 +233,24 @@ export function emitDartScopeCaptures(
       emitHeritage(node, out);
       return;
     }
+    if (node.type === 'extension_declaration') {
+      emitExtensionImplementsHeritage(node, out);
+      return;
+    }
   });
 
+  out.push(...synthesizeCallableFlowCaptures(root, DART_CALLABLE_CAPTURE_OPTIONS));
+
   return out;
+}
+
+function dartCallableCallee(selector: SyntaxNode): SyntaxNode | null {
+  if (selector.namedChild(0)?.type !== 'argument_part') return null;
+  const previous = selector.previousNamedSibling;
+  if (previous?.type === 'identifier') return previous;
+  if (previous?.type !== 'selector') return null;
+  const inner = previous.namedChild(0);
+  return inner !== null && ASSIGNABLE_SELECTORS.has(inner.type) ? selectorName(inner) : null;
 }
 
 // ─── Function scope synthesis ───────────────────────────────────────────────
@@ -177,6 +268,15 @@ export function emitDartScopeCaptures(
  * nodes are unaffected.
  */
 function findFunctionBody(declNode: SyntaxNode): SyntaxNode | null {
+  // A closure literal carries its body as a CHILD (function_expression_body),
+  // unlike a Dart declaration whose body is the next named SIBLING. Without
+  // this branch the caller synthesizes no @scope.function for a closure at all,
+  // so a closure binding has no scope to own its callable def and can never be
+  // a call SOURCE (#2699 S4 — this is why Dart alone showed zero child scopes).
+  if (declNode.type === 'function_expression') {
+    const body = declNode.namedChildren.find((c) => c.type === 'function_expression_body');
+    return body ?? null;
+  }
   const node =
     declNode.parent !== null && declNode.parent.type === 'method_signature'
       ? declNode.parent
@@ -480,6 +580,50 @@ function emitHeritage(classNode: SyntaxNode, out: CaptureMatch[]): void {
   if (interfaces !== null) {
     emitHeritageMarkers(interfaces, 'implements', className, out);
   }
+}
+
+function emitExtensionImplementsHeritage(extensionNode: SyntaxNode, out: CaptureMatch[]): void {
+  const nameNode = extensionNode.childForFieldName('name');
+  if (nameNode === null) return;
+
+  const bodyStart = extensionNode.text.indexOf('{');
+  const header = bodyStart === -1 ? extensionNode.text : extensionNode.text.slice(0, bodyStart);
+  const implementsIndex = header.indexOf('implements');
+  if (implementsIndex === -1) return;
+
+  const className = nameNode.text;
+  const interfaces = header.slice(implementsIndex + 'implements'.length);
+  for (const rawInterface of splitTopLevelCommaList(interfaces)) {
+    const target = /^[ \t]*([A-Za-z_$][A-Za-z0-9_$]*)/.exec(rawInterface)?.[1];
+    if (target === undefined) continue;
+    const payload = encodeMarker('heritage', ['implements', target, className]);
+    out.push({ '@import.heritage': syntheticCapture('@import.heritage', nameNode, payload) });
+  }
+}
+
+function splitTopLevelCommaList(text: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let angleDepth = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '<') {
+      angleDepth++;
+      continue;
+    }
+    if (ch === '>' && angleDepth > 0) {
+      angleDepth--;
+      continue;
+    }
+    if (ch === ',' && angleDepth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+
+  parts.push(text.slice(start));
+  return parts;
 }
 
 function emitHeritageMarkers(

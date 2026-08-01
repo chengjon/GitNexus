@@ -30,6 +30,8 @@ import { getCsharpParser, getCsharpScopeQuery } from './query.js';
 import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
 
 /** Declaration anchors that carry function-like arity metadata. */
 const FUNCTION_DECL_TAGS = [
@@ -47,6 +49,28 @@ const FUNCTION_NODE_TYPES = [
   'conversion_operator_declaration',
   'local_function_statement',
 ] as const;
+
+const CSHARP_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set([
+    ...FUNCTION_NODE_TYPES,
+    'lambda_expression',
+    'anonymous_method_expression',
+  ]),
+  callNodeTypes: new Set(['invocation_expression']),
+  parameterListNodeTypes: new Set(['parameter_list', 'argument_list']),
+  parameterNodeTypes: new Set(['parameter']),
+  bindingNodeTypes: new Set(['variable_declarator']),
+  assignmentNodeTypes: new Set(['assignment_expression']),
+  identifierNodeTypes: new Set(['identifier', 'generic_name']),
+  callableProtocolMethods: new Set(['Invoke']),
+  extractAssignment: (node: SyntaxNode) => {
+    if (node.type !== 'variable_declarator') return undefined;
+    const destination = node.childForFieldName('name');
+    const source = node.lastNamedChild;
+    if (destination === null || source === null || source.id === destination.id) return undefined;
+    return { destination, source };
+  },
+} as const;
 
 const BUILTIN_TYPE_NAMES = new Set([
   'bool',
@@ -86,10 +110,11 @@ export function emitCsharpScopeCaptures(
   _filePath: string,
   cachedTree?: unknown,
 ): readonly CaptureMatch[] {
-  // Skip the parse when the caller (parse phase's scopeTreeCache)
-  // already produced a Tree for this source. Cache miss = re-parse,
-  // same as before. The cachedTree parameter is typed as `unknown` at
-  // the LanguageProvider contract layer; cast here at the use site.
+  // Reuse a pre-parsed Tree when the caller passes one via `cachedTree`; a
+  // miss re-parses. (The cache is currently always empty — its only producer,
+  // the sequential parser, was removed — so this re-parses in practice.) The
+  // cachedTree parameter is typed `unknown` at the LanguageProvider contract
+  // layer; cast here at the use site.
   let tree = cachedTree as ReturnType<ReturnType<typeof getCsharpParser>['parse']> | undefined;
   if (tree === undefined) {
     tree = parseSourceSafe(getCsharpParser(), sourceText, undefined, {
@@ -135,6 +160,12 @@ export function emitCsharpScopeCaptures(
       }
       // Defensive fallback: emit the raw match so the extractor at
       // least sees an anchor, even without markers.
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       continue;
     }
@@ -153,6 +184,12 @@ export function emitCsharpScopeCaptures(
     // the AST in code. Mirrors Python's `self`/`cls` synthesis on
     // `@scope.function` matches.
     if (grouped['@scope.function'] !== undefined) {
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
       out.push(grouped);
       const fnNode = nodeIfType(nodeMap['@scope.function'], ...FUNCTION_NODE_TYPES);
       if (fnNode !== null) {
@@ -191,6 +228,33 @@ export function emitCsharpScopeCaptures(
             '@declaration.parameter-types',
             fnNode,
             JSON.stringify(arity.parameterTypes),
+          );
+        }
+      }
+    }
+
+    // Qualified constructor calls — `new Ns.Foo()`, `new A.B.Foo()`,
+    // `new Ns.Box<int>()` — bind only `@reference.call.constructor.qualified`
+    // with NO `@reference.name`, so the central extractor falls back to the
+    // whole-expression anchor and the reference name becomes the raw
+    // `new Ns.Foo()` text (never resolves). Derive the bare simple-name tail via
+    // the same `terminalTypeNameNode` helper the inheritance synth uses — it
+    // handles qualified_name, a generic tail (`Ns.Box<int>` → `Box`), and
+    // alias_qualified_name (`global::Ns.Foo`). Mirrors Java F35 (#1928).
+    if (
+      grouped['@reference.call.constructor.qualified'] !== undefined &&
+      grouped['@reference.name'] === undefined
+    ) {
+      const qNode = nodeMap['@reference.call.constructor.qualified'];
+      const nameNode = qNode === undefined ? null : terminalTypeNameNode(qNode);
+      if (nameNode !== null) {
+        grouped['@reference.name'] = nodeToCapture('@reference.name', nameNode);
+        const qText = qNode.text.trim();
+        if (qText.length > 0 && qText !== nameNode.text) {
+          grouped['@reference.qualified-name'] = syntheticCapture(
+            '@reference.qualified-name',
+            qNode,
+            qText,
           );
         }
       }
@@ -236,6 +300,12 @@ export function emitCsharpScopeCaptures(
       }
     }
 
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
     out.push(grouped);
 
     // Synthesize primary-constructor declarations on class/record
@@ -263,8 +333,98 @@ export function emitCsharpScopeCaptures(
 
   out.push(...synthesizeGenericTypeArgumentReferences(tree.rootNode));
   out.push(...synthesizeCsharpInheritanceReferences(tree.rootNode));
+  out.push(...synthesizeCsharpConstructorInitializerReferences(tree.rootNode));
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, CSHARP_CALLABLE_CAPTURE_OPTIONS));
 
   return out;
+}
+
+/**
+ * Synthesize `@reference.call.constructor` captures for C# constructor
+ * initializers — `: base(...)` and `: this(...)` (F38 analog of Java #1928).
+ * tree-sitter-c-sharp models these as `constructor_initializer` nodes the scope
+ * query never matched, so the chained-constructor CALLS edges (derived ctor →
+ * base ctor; ctor → sibling overload) were silently dropped.
+ *
+ * The initializer carries no constructor name (the `base`/`this` child is a bare
+ * keyword token), so the target is resolved structurally:
+ *   - `this(...)` → the enclosing type's own simple name.
+ *   - `base(...)` → the enclosing class/record's base type, reduced to its bare
+ *     simple name via `terminalTypeNameNode`. C# requires the base class first in
+ *     a mixed list (`class C : Base, IFoo`); interface-only lists (`class C : IFoo`)
+ *     imply implicit `System.Object` — no `@reference` is emitted when the first
+ *     non-builtin base would be an interface-only target (resolution also drops
+ *     Interface-typed constructor targets in `free-call-fallback`).
+ * Arity is attached for overload disambiguation, mirroring `new X(...)`.
+ */
+function synthesizeCsharpConstructorInitializerReferences(root: SyntaxNode): CaptureMatch[] {
+  const out: CaptureMatch[] = [];
+  walkNamedTree(root, (node) => {
+    if (node.type !== 'constructor_initializer') return;
+
+    let kind: 'base' | 'this' | null = null;
+    for (let i = 0; i < node.childCount; i++) {
+      const t = node.child(i)?.type;
+      if (t === 'base' || t === 'this') {
+        kind = t;
+        break;
+      }
+    }
+    if (kind === null) return;
+
+    const enclosingType = findEnclosingTypeDeclaration(node);
+    if (enclosingType === null) return;
+
+    let targetNameNode: SyntaxNode | null = null;
+    if (kind === 'this') {
+      targetNameNode = enclosingType.childForFieldName('name');
+    } else {
+      const baseList = findNamedChild(enclosingType, 'base_list');
+      if (baseList === null) return;
+      // Prefer the first non-builtin entry (idiomatically the base class). When
+      // the list is interface-only (`class C : IFoo`), do not synthesize a
+      // `base(...)` ref — valid C# chains to implicit Object, not IFoo (#2046).
+      let sawNonBuiltin = false;
+      for (const base of baseList.namedChildren) {
+        if (base === null) continue;
+        const n = terminalTypeNameNode(base);
+        if (n === null || BUILTIN_TYPE_NAMES.has(n.text)) continue;
+        sawNonBuiltin = true;
+        targetNameNode = n;
+        break;
+      }
+      if (!sawNonBuiltin) return;
+    }
+    if (targetNameNode === null) return;
+
+    const argList = findNamedChild(node, 'argument_list');
+    const arity =
+      argList === null
+        ? 0
+        : argList.namedChildren.filter((c) => c !== null && c.type === 'argument').length;
+
+    out.push({
+      '@reference.call.constructor': nodeToCapture('@reference.call.constructor', node),
+      '@reference.name': nodeToCapture('@reference.name', targetNameNode),
+      '@reference.arity': syntheticCapture('@reference.arity', node, String(arity)),
+    });
+  });
+  return out;
+}
+
+function findEnclosingTypeDeclaration(node: SyntaxNode): SyntaxNode | null {
+  let cur: SyntaxNode | null = node.parent;
+  while (cur !== null) {
+    if (
+      cur.type === 'class_declaration' ||
+      cur.type === 'struct_declaration' ||
+      cur.type === 'record_declaration'
+    ) {
+      return cur;
+    }
+    cur = cur.parent;
+  }
+  return null;
 }
 
 /**

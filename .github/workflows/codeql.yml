@@ -42,13 +42,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Don't leave GITHUB_TOKEN in .git/config for downstream steps to read.
           persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
@@ -65,10 +65,14 @@ jobs:
               - 'gitnexus/src/core/parsing/**/parser.js'
               # Test fixtures are intentionally synthetic inputs (broken/unused
               # code, malformed samples) used to exercise the analyzer. CodeQL
-              # findings here are noise, not real bugs.
+              # findings here are noise, not real bugs. The second glob also
+              # covers fixtures nested deeper in the test tree, e.g.
+              # test/integration/cfg/fixtures/ (the CFG/PDG hazard inputs that
+              # deliberately contain use-before-init / unused-variable shapes).
               - '**/test/fixtures/**'
+              - '**/test/**/fixtures/**'
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           category: '/language:${{ matrix.language }}'

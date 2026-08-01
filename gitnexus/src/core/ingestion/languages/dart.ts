@@ -9,9 +9,12 @@
  *     The hook resolves the enclosing function by inspecting the previous sibling.
  */
 
-import type { SyntaxNode } from '../utils/ast-helpers.js';
+import {
+  createLeadingDocDescriptionExtractor,
+  FUNCTION_NODE_TYPES,
+  type SyntaxNode,
+} from '../utils/ast-helpers.js';
 import type { NodeLabel } from 'gitnexus-shared';
-import { FUNCTION_NODE_TYPES } from '../utils/ast-helpers.js';
 import { SupportedLanguages } from 'gitnexus-shared';
 import { createClassExtractor } from '../class-extractors/generic.js';
 import { dartClassConfig } from '../class-extractors/configs/dart.js';
@@ -22,6 +25,7 @@ import { dartExportChecker } from '../export-detection.js';
 import { createImportResolver } from '../import-resolvers/resolver-factory.js';
 import { dartImportConfig } from '../import-resolvers/configs/dart.js';
 import { DART_QUERIES } from '../tree-sitter-queries.js';
+import { createDartCfgVisitor } from '../cfg/visitors/dart.js';
 import { createFieldExtractor } from '../field-extractors/generic.js';
 import { dartConfig as dartFieldConfig } from '../field-extractors/configs/dart.js';
 import { createMethodExtractor } from '../method-extractors/generic.js';
@@ -41,6 +45,7 @@ import {
   dartArityCompatibility,
 } from './dart/index.js';
 import { DART_BUILT_INS } from './dart/built-ins.js';
+import { preprocessDartExtensionTypes } from './dart/extension-type-preprocess.js';
 
 /**
  * Resolve the enclosing function from a `function_body` node by looking at its
@@ -115,6 +120,7 @@ export const dartProvider = defineLanguage({
     },
   ] satisfies AstFrameworkPatternConfig[],
   treeSitterQueries: DART_QUERIES,
+  preprocessSource: preprocessDartExtensionTypes,
   typeConfig: dartConfig,
   exportChecker: dartExportChecker,
   importResolver: createImportResolver(dartImportConfig),
@@ -123,6 +129,8 @@ export const dartProvider = defineLanguage({
   methodExtractor: createMethodExtractor(dartMethodConfig),
   variableExtractor: createVariableExtractor(dartVariableConfig),
   classExtractor: createClassExtractor(dartClassConfig),
+  // ── Dartdoc (`///`) → description (issue #2270) ──
+  descriptionExtractor: createLeadingDocDescriptionExtractor(),
   enclosingFunctionFinder: dartEnclosingFunctionFinder,
   builtInNames: DART_BUILT_INS,
 
@@ -131,6 +139,7 @@ export const dartProvider = defineLanguage({
   // emit-side `ScopeResolver` lives in `dart/scope-resolver.ts`; the same
   // function references flow through both interfaces.
   emitScopeCaptures: emitDartScopeCaptures,
+  cfgVisitor: createDartCfgVisitor(),
   interpretImport: interpretDartImport,
   interpretTypeBinding: interpretDartTypeBinding,
   bindingScopeFor: dartBindingScopeFor,

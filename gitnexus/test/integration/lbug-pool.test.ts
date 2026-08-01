@@ -94,6 +94,86 @@ withTestLbugDB(
       });
     });
 
+    // ─── closeLbug rejects pending waiters (#2068 follow-up) ─────────────
+    //
+    // Before the fix, closeOne() never rejected queued waiters: a caller
+    // waiting for a free connection when the pool was closed (e.g. a staleness
+    // reinit under concurrent query load) hung for WAITER_TIMEOUT_MS (15s) and
+    // then surfaced a misleading "pool exhausted" error. Now they reject
+    // immediately with an actionable "pool closed" message. The pool caps at
+    // MAX_CONNS_PER_REPO (8); firing a synchronous burst larger than that queues
+    // the surplus as waiters, and closing synchronously (before any query
+    // settles) must reject every queued waiter at once. The default 5s test
+    // timeout also guards promptness — a regression would block ~15s and time
+    // out rather than reject.
+    describe('closeLbug waiter handling (#2068)', () => {
+      it('rejects queued waiters promptly with a pool-closed error on close', async () => {
+        await initLbug('test-repo', handle.dbPath);
+
+        // Fire a burst larger than the 8-connection cap WITHOUT awaiting: the
+        // first 8 check out connections synchronously, the surplus queue as
+        // waiters — all before the synchronous closeLbug below runs.
+        const BURST = 24;
+        const MAX_CONNS = 8;
+        const inflight = Array.from({ length: BURST }, () =>
+          executeQuery('test-repo', 'MATCH (n:Function) RETURN n.name AS name'),
+        );
+        // Close in the same synchronous tick — no microtask has served a waiter.
+        const closing = closeLbug('test-repo');
+
+        const settled = await Promise.allSettled(inflight);
+        await closing;
+
+        const reasons = settled
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map((r) => String(r.reason?.message ?? r.reason));
+
+        // The surplus (BURST - MAX_CONNS) waiters must reject with "pool closed".
+        const poolClosed = reasons.filter((m) => /pool closed/i.test(m));
+        expect(poolClosed.length).toBeGreaterThanOrEqual(BURST - MAX_CONNS);
+        // And none should have hit the 15s "exhausted" waiter-timeout path.
+        expect(reasons.some((m) => /waiting for a free connection/i.test(m))).toBe(false);
+
+        expect(isLbugReady('test-repo')).toBe(false);
+      });
+
+      it('settles in-flight queries and fully tears down when closed mid-flight', async () => {
+        // closeOne-vs-checkin interleave (F4b): with 8 connections in-flight and
+        // surplus callers queued, a synchronous close must (a) let every promise
+        // settle — no hang — and (b) fully delete the pool entry so checked-in
+        // connections are closed as orphans rather than handed to a rejected
+        // waiter. We assert the observable contract; the "orphan not handed to a
+        // rejected waiter" invariant is single-threaded-by-construction (closeOne
+        // drains waiters with no await before any checkin can run).
+        await initLbug('test-repo', handle.dbPath);
+
+        const inflight = Array.from({ length: 16 }, () =>
+          executeQuery('test-repo', 'MATCH (n:Function) RETURN n.name AS name'),
+        );
+        const closing = closeLbug('test-repo');
+
+        // allSettled only resolves once EVERY query settled — proving none hangs
+        // (a 15s waiter-timeout regression would blow the default test timeout).
+        const settled = await Promise.allSettled(inflight);
+        await closing;
+        expect(settled).toHaveLength(16);
+        expect(
+          settled.some(
+            (r) =>
+              r.status === 'rejected' &&
+              /waiting for a free connection/i.test(String(r.reason?.message ?? r.reason)),
+          ),
+        ).toBe(false);
+
+        // Pool entry fully gone — a subsequent query fails fast with the
+        // not-initialized error, not a hang or a stale connection.
+        expect(isLbugReady('test-repo')).toBe(false);
+        await expect(executeQuery('test-repo', 'MATCH (n) RETURN n LIMIT 1')).rejects.toThrow(
+          /not initialized/i,
+        );
+      });
+    });
+
     // ─── Parameterized queries ───────────────────────────────────────────
 
     describe('executeParameterized', () => {
@@ -233,5 +313,93 @@ withTestLbugDB(
   {
     seed: POOL_SEED_DATA,
     poolAdapter: true,
+  },
+);
+
+/**
+ * Pool vector lane (#2623 follow-up).
+ *
+ * Extension load scope is per-Database, and the pool pre-warm historically
+ * loaded only FTS — so `CALL QUERY_VECTOR_INDEX` through the pool ALWAYS
+ * raised `Catalog exception: function QUERY_VECTOR_INDEX is not defined` and
+ * LocalBackend's semantic lane silently exact-scanned. This block pins that
+ * the pool's shared Database really can serve the vector lane: rows and the
+ * HNSW index are built through the core adapter first (the state `analyze
+ * --embeddings` leaves behind), then the pool opens and must answer a vector
+ * query. Own withTestLbugDB block: the vector index would leak into the
+ * sibling suites' shared fixture expectations.
+ */
+withTestLbugDB(
+  'lbug-pool-vector-lane',
+  (handle) => {
+    describe('pool vector lane (#2623 follow-up)', () => {
+      afterEach(async () => {
+        try {
+          await closeLbug('vec-repo');
+        } catch {
+          /* best-effort */
+        }
+      });
+
+      it('QUERY_VECTOR_INDEX works through the pool once the pre-warm loads VECTOR', async (ctx) => {
+        const core = await import('../../src/core/lbug/lbug-adapter.js');
+        const { batchInsertEmbeddings } =
+          await import('../../src/core/embeddings/embedding-pipeline.js');
+        const { EMBEDDING_TABLE_NAME, EMBEDDING_INDEX_NAME, EMBEDDING_DIMS } =
+          await import('../../src/core/lbug/schema.js');
+
+        // Seed one embedding row for the fixture Function through the CORE
+        // adapter (writable), then build the HNSW index — skip visibly when
+        // VECTOR is unavailable in this environment, matching the
+        // lbug-vector-extension suite convention.
+        const embedding = new Array(EMBEDDING_DIMS).fill(0);
+        embedding[0] = 1;
+        await batchInsertEmbeddings(core.executeWithReusedStatement, [
+          {
+            nodeId: 'func:vec',
+            chunkIndex: 0,
+            startLine: 1,
+            endLine: 3,
+            embedding,
+            contentHash: 'vec-hash',
+          },
+        ]);
+        const indexBuilt = await core.createVectorIndex();
+        if (!indexBuilt) {
+          console.warn('[lbug-pool-vector-lane] Skipping — VECTOR unavailable.');
+          ctx.skip();
+          return;
+        }
+
+        // Close the writable core adapter so the pool opens its OWN read-only
+        // Database. This is what makes the case discriminating: extension
+        // loads are per-Database, so a shared/injected Database would inherit
+        // the VECTOR load from createVectorIndex above and pass even without
+        // the pre-warm fix. A fresh Database has nothing loaded — only the
+        // pool's own pre-warm can make the vector lane legal.
+        await core.closeLbug();
+
+        // The regression: through the POOL, the vector lane must work without
+        // any caller loading the extension. Pre-fix this rejects with
+        // "Catalog exception: function QUERY_VECTOR_INDEX is not defined".
+        await initLbug('vec-repo', handle.dbPath);
+        const vec = `CAST([${embedding.join(',')}] AS FLOAT[${EMBEDDING_DIMS}])`;
+        const rows = (await executeQuery(
+          'vec-repo',
+          `CALL QUERY_VECTOR_INDEX('${EMBEDDING_TABLE_NAME}', '${EMBEDDING_INDEX_NAME}', ${vec}, 1)
+           YIELD node AS emb, distance
+           RETURN emb.nodeId AS nodeId, distance`,
+        )) as Array<{ nodeId: string; distance: number }>;
+
+        expect(rows.length).toBe(1);
+        expect(String(rows[0].nodeId)).toBe('func:vec');
+        expect(Number(rows[0].distance)).toBeLessThan(1e-6);
+      }, 120_000);
+    });
+  },
+  {
+    seed: [
+      `CREATE (fn:Function {id: 'func:vec', name: 'vec', filePath: 'src/vec.ts', startLine: 1, endLine: 3, isExported: true, content: '', description: ''})`,
+    ],
   },
 );

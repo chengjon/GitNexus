@@ -46,15 +46,21 @@ import { t, type CliMessageKey, type CliMessageVars } from './i18n/index.js';
 export type RecoveryHint =
   | 'wal-corruption'
   | 'wal-checkpoint-threshold'
+  | 'lbug-wipe-failed'
+  | 'lbug-page-size'
   | 'heap-oom-respawn'
   | 'native-worker-abort'
   | 'hf-endpoint-unreachable'
+  | 'http-embedding-endpoint-error'
+  | 'embedding-dims-invalid'
   | 'local-embedding-unsupported'
+  | 'local-embedding-stack-missing'
   | 'large-repo'
   | 'npm-resolution'
   | 'module-not-found'
   | 'gitnexusrc-invalid'
-  | 'default-branch-invalid';
+  | 'default-branch-invalid'
+  | 'index-lock-timeout';
 
 /**
  * Common shape for the optional structured-field bag passed to

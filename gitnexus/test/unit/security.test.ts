@@ -16,34 +16,78 @@ import {
 // ─── Relation type allowlist ──────────────────────────────────────────
 
 describe('VALID_RELATION_TYPES', () => {
+  // The expected types are declared once here; the size assertion derives from
+  // the array length so adding a new type only requires appending to this list.
+  const EXPECTED_RELATION_TYPES = [
+    'CALLS',
+    'IMPORTS',
+    'EXTENDS',
+    'IMPLEMENTS',
+    'HAS_METHOD',
+    'HAS_PROPERTY',
+    'METHOD_OVERRIDES',
+    'OVERRIDES',
+    'METHOD_IMPLEMENTS',
+    'ACCESSES',
+    // USES is an emitted edge type (emit-references.ts) used in the default
+    // impact relTypes + context queries; added to the allowlist in F5.
+    'USES',
+    'HANDLES_ROUTE',
+    'FETCHES',
+    'HANDLES_TOOL',
+    'ENTRY_POINT_OF',
+    'WRAPS',
+    // Spring DI @Autowired collection injection (#2200)
+    'INJECTS',
+    // Conditional activation and metadata declaration/discovery (#2415)
+    'CONDITIONAL_ON',
+    'DECLARES',
+  ] as const;
+
   it('contains all expected relation types', () => {
-    expect(VALID_RELATION_TYPES.size).toBe(15);
-    for (const t of [
-      'CALLS',
-      'IMPORTS',
-      'EXTENDS',
-      'IMPLEMENTS',
-      'HAS_METHOD',
-      'HAS_PROPERTY',
-      'METHOD_OVERRIDES',
-      'OVERRIDES',
-      'METHOD_IMPLEMENTS',
-      'ACCESSES',
-      'HANDLES_ROUTE',
-      'FETCHES',
-      'HANDLES_TOOL',
-      'ENTRY_POINT_OF',
-      'WRAPS',
-    ]) {
+    expect(VALID_RELATION_TYPES.size).toBe(EXPECTED_RELATION_TYPES.length);
+    for (const t of EXPECTED_RELATION_TYPES) {
       expect(VALID_RELATION_TYPES.has(t)).toBe(true);
     }
   });
 
   it('rejects invalid relation types', () => {
     expect(VALID_RELATION_TYPES.has('CONTAINS')).toBe(false);
-    expect(VALID_RELATION_TYPES.has('USES')).toBe(false);
     expect(VALID_RELATION_TYPES.has('calls')).toBe(false); // case-sensitive
     expect(VALID_RELATION_TYPES.has('DROP_TABLE')).toBe(false);
+  });
+
+  it('taint edge types stay OUT of the impact allow-list (#2083 M3 KTD9a)', () => {
+    // impact's BFS traverses symbol space; TAINTED/SANITIZES live in
+    // block-space (BasicBlock→BasicBlock) and would be unreachable noise
+    // there. The `explain` tool is the dedicated taint consumer. Pinned
+    // explicitly so a future "add all emitted types" sweep can't drag them in.
+    expect(VALID_RELATION_TYPES.has('TAINTED')).toBe(false);
+    expect(VALID_RELATION_TYPES.has('SANITIZES')).toBe(false);
+  });
+
+  it('TAINT_PATH stays OUT of the impact allow-list (#2084 M4 KTD9a)', () => {
+    // Cross-function TAINT_PATH (Function→Function) is the interprocedural
+    // analogue of TAINTED — surfaced ONLY via `explain` (its interprocedural
+    // findings), never impact()'s BFS. Pinned so a future allow-all sweep
+    // can't drag it in — the size assertion tracks EXPECTED_RELATION_TYPES.
+    expect(VALID_RELATION_TYPES.has('TAINT_PATH')).toBe(false);
+    // Size should match the expected types list — not a hardcoded number.
+    expect(VALID_RELATION_TYPES.size).toBe(EXPECTED_RELATION_TYPES.length);
+  });
+
+  it('CDG control-dependence edge types stay OUT of the impact allow-list (#2085 M5)', () => {
+    // CDG and POST_DOMINATE are BasicBlock→BasicBlock (block space), like the
+    // taint substrate — they must not enter impact()'s symbol-space BFS. Pinned
+    // explicitly (not just via the EXPECTED_RELATION_TYPES-derived size guard)
+    // so a future "add all emitted types" sweep can't drag them in, mirroring
+    // the TAINTED/TAINT_PATH pins.
+    expect(VALID_RELATION_TYPES.has('CDG')).toBe(false);
+    expect(VALID_RELATION_TYPES.has('POST_DOMINATE')).toBe(false);
+    // REACHING_DEF is the other BasicBlock→BasicBlock PDG edge (#2086 impact
+    // PDG mode traverses it directly, never through impact's symbol-space BFS).
+    // Pinned alongside CDG/POST_DOMINATE so an allow-all sweep can't drag it in.
+    expect(VALID_RELATION_TYPES.has('REACHING_DEF')).toBe(false);
   });
 });
 
@@ -120,5 +164,13 @@ describe('path traversal (isTestFilePath as proxy for path handling)', () => {
   it('isTestFilePath returns false for non-test files', () => {
     expect(isTestFilePath('src/main.ts')).toBe(false);
     expect(isTestFilePath('src/utils/helper.ts')).toBe(false);
+  });
+
+  it('isTestFilePath returns false for nodes without a filePath', () => {
+    // trace BFS visits Community/Process nodes whose rows carry no filePath;
+    // the guard must return false instead of throwing on undefined/null.
+    expect(isTestFilePath(undefined)).toBe(false);
+    expect(isTestFilePath(null)).toBe(false);
+    expect(isTestFilePath('')).toBe(false);
   });
 });

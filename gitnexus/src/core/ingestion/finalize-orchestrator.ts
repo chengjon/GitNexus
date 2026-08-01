@@ -51,6 +51,8 @@ import {
   finalize,
 } from 'gitnexus-shared';
 import type { ScopeResolutionIndexes } from './model/scope-resolution-indexes.js';
+import { parseTruthyEnv } from './utils/env.js';
+import { TransitionalScopeTree } from '../../storage/scope-index-store.js';
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 
@@ -114,7 +116,13 @@ export function finalizeScopeModel(
     moduleEntries.push({ filePath: file.filePath, moduleScopeId: file.moduleScope });
   }
 
-  const scopeTree = buildScopeTree(allScopes);
+  // Out-of-core scope index: when enabled, build a TransitionalScopeTree
+  // (validated + fully resident now; sealed to disk by run.ts just before emit so
+  // the heavy Scope.bindings payload is reclaimed). Default off → the in-heap
+  // buildScopeTree result exactly, byte-identical.
+  const scopeTree = parseTruthyEnv(process.env.GITNEXUS_DISK_SCOPE_INDEX)
+    ? new TransitionalScopeTree(allScopes)
+    : buildScopeTree(allScopes);
   const defs = buildDefIndex(allDefs);
   const qualifiedNames = buildQualifiedNameIndex(allDefs);
   const moduleScopes = buildModuleScopeIndex(moduleEntries);
@@ -193,6 +201,7 @@ function collectReferenceSites(parsedFiles: readonly ParsedFile[]) {
 function withDefaultHooks(partial: Partial<FinalizeHooks>): FinalizeHooks {
   return {
     resolveImportTarget: partial.resolveImportTarget ?? (() => null),
+    isNamespaceImport: partial.isNamespaceImport,
     expandsWildcardTo: partial.expandsWildcardTo ?? (() => []),
     mergeBindings:
       partial.mergeBindings ??

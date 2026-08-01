@@ -16,10 +16,9 @@
  */
 
 import fs from 'fs/promises';
-import os from 'os';
-import path from 'path';
 import lbug from '@ladybugdb/core';
-import { isReadOnlyDbError, loadFTSExtension } from './lbug-adapter.js';
+import { isReadOnlyDbError, loadFTSExtension, loadVectorExtension } from './lbug-adapter.js';
+import { closeQueryResults } from './query-result-utils.js';
 import {
   createLbugDatabase,
   isWalCorruptionError,
@@ -27,6 +26,7 @@ import {
   WAL_RECOVERY_SUGGESTION,
 } from './lbug-config.js';
 import {
+  guardWalQuarantine,
   isMissingFsError,
   isMissingShadowSidecarError,
   isReadOnlyShadowReplayError,
@@ -36,42 +36,6 @@ import {
   statIfExists,
 } from './sidecar-recovery.js';
 
-/**
- * Probe whether a Windows FTS extension binary is locally installed under
- * ~/.lbdb/extension/<any-version>/win_amd64/fts/. Returns true on the first
- * version dir whose libfts.lbug_extension exists on disk; false if the
- * extension root is missing or contains no FTS binary.
- *
- * Gates the Windows skip-FTS-load guard below so we only skip the load
- * when no extension binary is present. When at least one binary exists,
- * loadFTSExtension is called with policy: 'load-only' — LadybugDB resolves
- * LOAD EXTENSION fts to its version-specific path internally, and the
- * ExtensionManager's tryLoad try/catch handles version-mismatch errors
- * cleanly without ever attempting dlopen of a stale binary. The install
- * path that the #1199/#1217 SIGSEGV documented is never exercised at
- * query time.
- *
- * Exported so unit tests can exercise the probe directly against a
- * temp-dir plus spied `os.homedir()` — see lbug-pool-win-fts-probe.test.ts.
- */
-export async function hasLocalWinFtsExtension(): Promise<boolean> {
-  try {
-    const extRoot = path.join(os.homedir(), '.lbdb', 'extension');
-    const versions = await fs.readdir(extRoot);
-    for (const v of versions) {
-      try {
-        await fs.stat(path.join(extRoot, v, 'win_amd64', 'fts', 'libfts.lbug_extension'));
-        return true;
-      } catch {
-        /* missing for this version, keep looking */
-      }
-    }
-  } catch {
-    /* no .lbdb/extension dir */
-  }
-  return false;
-}
-
 /** Per-repo pool: one Database, many Connections */
 interface PoolEntry {
   db: lbug.Database;
@@ -79,12 +43,52 @@ interface PoolEntry {
   available: lbug.Connection[];
   /** Number of connections currently checked out */
   checkedOut: number;
-  /** Queued waiters for when all connections are busy */
-  waiters: Array<(conn: lbug.Connection) => void>;
+  /** Queued waiters for when all connections are busy. Each carries `resolve`
+   *  (hand off a freed connection) and `reject` (fail fast when the pool is
+   *  closed before a connection frees, instead of hanging until the waiter
+   *  timeout — #2068 follow-up). */
+  waiters: Array<{
+    resolve: (conn: lbug.Connection) => void;
+    reject: (err: Error) => void;
+  }>;
   lastUsed: number;
   dbPath: string;
+  /** Filesystem identity of the on-disk DB at open time. When `analyze`
+   *  rebuilds or mutates the index, this diverges from the current file and
+   *  initLbug re-opens the pool onto the new file instead of serving the
+   *  stale open inode. Null for injected/external databases (initLbugWithDb),
+   *  which are never invalidated this way. */
+  dbIdentity: DbIdentity | null;
   /** Set to true when the pool entry is closed — checkin will close orphaned connections */
   closed: boolean;
+}
+
+/** Filesystem identity used to detect an index rebuilt/mutated under a live
+ *  read pool. `ino` catches a full-rebuild unlink+recreate or an atomic-rename
+ *  swap; `mtimeMs`+`size` catch an in-place incremental writeback. */
+interface DbIdentity {
+  ino: number;
+  mtimeMs: number;
+  size: number;
+}
+
+export async function statDbIdentity(dbPath: string): Promise<DbIdentity | null> {
+  try {
+    const s = await fs.stat(dbPath);
+    return { ino: s.ino, mtimeMs: s.mtimeMs, size: s.size };
+  } catch {
+    return null;
+  }
+}
+
+/** True only when both identities are known AND differ. A stat failure
+ *  (ENOENT during the brief unlink window of a full rebuild) yields false, so
+ *  the reader keeps serving its still-valid open inode until the NEW file
+ *  appears with a different identity — avoiding a churn into a failed reopen
+ *  mid-rebuild. */
+export function dbIdentityChanged(prev: DbIdentity | null, next: DbIdentity | null): boolean {
+  if (!prev || !next) return false;
+  return prev.ino !== next.ino || prev.mtimeMs !== next.mtimeMs || prev.size !== next.size;
 }
 
 const pool = new Map<string, PoolEntry>();
@@ -122,6 +126,18 @@ interface SharedDB {
   db: lbug.Database;
   refCount: number;
   ftsLoaded: boolean;
+  /** VECTOR loaded on this Database. Extension load scope is per-Database
+   *  (probe-verified on @ladybugdb/core 0.18.x): loading on any one
+   *  connection enables QUERY_VECTOR_INDEX on every connection of the same
+   *  Database. Without this load the pool's vector lane raised a Catalog
+   *  exception on every semantic query and silently fell back to the exact
+   *  scan (#2623 follow-up). Optional with `?? false` semantics so the
+   *  construction sites stay minimal. */
+  vectorLoaded?: boolean;
+  /** File identity at open — used to detect reuse of a shared read-only handle
+   *  whose on-disk index was rebuilt/swapped since it opened (only reachable
+   *  when a second pool consumer shares this dbPath; #2614 F2). */
+  dbIdentity?: DbIdentity | null;
   /** When true, closeOne skips db.close() — the Database is owned externally. */
   external?: boolean;
 }
@@ -133,6 +149,44 @@ const MAX_POOL_SIZE = 5;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Max connections per repo (caps concurrent queries per repo) */
 const MAX_CONNS_PER_REPO = 8;
+
+/**
+ * Repos exempt from AUTOMATIC eviction (LRU + idle timeout) until explicitly
+ * unpinned. Used by bounded multi-repo operations like `group sync`, which
+ * initializes one pool per repo and then resolves cross-repo manifest/workspace
+ * links against ALL of those pools after the init loop. Without pinning, a
+ * group larger than MAX_POOL_SIZE would LRU-evict the earliest repos before
+ * resolution runs, leaving the deferred executor closures pointing at dead pool
+ * entries (issue #2189).
+ *
+ * Pins are REFERENCE-COUNTED: the map holds repoId → active lease count. This
+ * lets overlapping holders (two windows of one sync, or two concurrent
+ * `group sync` calls sharing a repo) coexist safely — the repo stays exempt
+ * until the LAST holder releases. A boolean Set could not represent "two
+ * holders," so the first release would wrongly clear a pin another holder still
+ * needs (PR #2191 review, Finding 1).
+ *
+ * Pins block only automatic eviction (LRU + idle). Explicit teardown
+ * (closeOne / closeLbug) always closes the entry and force-clears its count —
+ * teardown is authoritative. A present key always means count ≥ 1. While every
+ * pooled repo is pinned, evictLRU finds no eligible victim and the pool may
+ * transiently exceed MAX_POOL_SIZE — the same soft-cap behavior that already
+ * occurs when every entry is checked out.
+ */
+const pinnedRepos = new Map<string, number>();
+
+// Behavior-neutral RSS tracing for the FTS evict→reload memory repro
+// (gitnexus/scripts/bench/fts-evict-reload-rss.mjs). Two invariants keep it safe
+// in the pool init/close hot path: it writes ONLY to stderr (stdout is the MCP
+// JSON-RPC channel), and the GITNEXUS_POOL_RSS_TRACE gate makes it a no-op — one
+// env-var compare per call, nothing else — unless a harness explicitly enables it.
+function traceRss(event: 'init' | 'close', repoId: string): void {
+  if (process.env.GITNEXUS_POOL_RSS_TRACE !== '1') return;
+  const rssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+  process.stderr.write(
+    `[pool-rss] ${event} repo=${repoId} pool=${pool.size} dbCache=${dbCache.size} rssMB=${rssMb}\n`,
+  );
+}
 
 let idleTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -163,6 +217,7 @@ function ensureIdleTimer(): void {
   idleTimer = setInterval(() => {
     const now = Date.now();
     for (const [repoId, entry] of pool) {
+      if (pinnedRepos.has(repoId)) continue;
       if (now - entry.lastUsed > IDLE_TIMEOUT_MS && entry.checkedOut === 0) {
         closeOne(repoId);
       }
@@ -185,7 +240,64 @@ export const touchRepo = (repoId: string): void => {
 };
 
 /**
- * Evict the least-recently-used repo if pool is at capacity
+ * Acquire one eviction-exemption lease on a repo (LRU + idle timeout) by
+ * incrementing its reference count. The repoId must match the key passed to
+ * initLbug (e.g. group sync leases by handle.id — the same id it inits with).
+ * Leasing a repoId before it enters the pool is allowed and protects the entry
+ * once it is created, but the lease does NOT survive a teardown: closeOne
+ * force-clears the count, so a later re-init of the same repoId starts
+ * unpinned. Each pinRepo MUST be balanced by exactly one release (the repo
+ * stays exempt until the last lease is released). See the pinnedRepos docstring
+ * for the full contract.
+ *
+ * Returns a `release` disposer (mirroring addPoolCloseListener) that releases
+ * THIS lease exactly once — calling it twice is a no-op, so it can never
+ * over-decrement a sibling holder's count. Prefer the disposer
+ * (`const release = pinRepo(id); try { … } finally { release(); }`) so the
+ * pin/release pair is leak-proof; unpinRepo remains available for callers that
+ * pair explicitly.
+ */
+export const pinRepo = (repoId: string): (() => void) => {
+  pinnedRepos.set(repoId, (pinnedRepos.get(repoId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    unpinRepo(repoId);
+  };
+};
+
+/**
+ * Release one eviction-exemption lease on a repo. The repo becomes eligible for
+ * automatic eviction again only once its count reaches 0 (the key is deleted).
+ * Idempotent at the floor: releasing a repo with no active lease is a no-op (no
+ * negative counts). Does NOT close the repo's pool.
+ */
+export const unpinRepo = (repoId: string): void => {
+  const count = pinnedRepos.get(repoId);
+  if (count === undefined) return;
+  if (count <= 1) {
+    pinnedRepos.delete(repoId);
+  } else {
+    pinnedRepos.set(repoId, count - 1);
+  }
+};
+
+/**
+ * Maximum number of repos a bounded multi-repo operation (e.g. group sync's
+ * windowed manifest resolution) should hold resident at once. Equals
+ * MAX_POOL_SIZE today, but exposed under an intent-named accessor so callers
+ * size their working set against "max repos a bounded op should hold" rather
+ * than coupling to the LRU eviction-cap constant, which may be tuned
+ * independently.
+ */
+export const getMaxResidentRepos = (): number => MAX_POOL_SIZE;
+
+/**
+ * Evict the least-recently-used repo if pool is at capacity.
+ * Pinned repos are never chosen as the eviction victim — when every eligible
+ * entry is pinned, no eviction occurs and the pool transiently exceeds
+ * MAX_POOL_SIZE (see the pinnedRepos docstring).
  */
 function evictLRU(): void {
   if (pool.size < MAX_POOL_SIZE) return;
@@ -193,6 +305,7 @@ function evictLRU(): void {
   let oldestId: string | null = null;
   let oldestTime = Infinity;
   for (const [id, entry] of pool) {
+    if (pinnedRepos.has(id)) continue;
     if (entry.checkedOut === 0 && entry.lastUsed < oldestTime) {
       oldestTime = entry.lastUsed;
       oldestId = id;
@@ -213,6 +326,20 @@ function closeOne(repoId: string): void {
   if (!entry) return;
 
   entry.closed = true;
+
+  // Reject any callers still queued for a connection: the pool is going away
+  // (re-init / teardown / LRU eviction), so they must fail fast with an
+  // actionable error instead of hanging until WAITER_TIMEOUT_MS and then
+  // surfacing a misleading "pool exhausted" (#2068 follow-up). Draining the
+  // queue also guarantees checkin() below finds no waiter expecting a
+  // connection, so a connection returned after close is simply closed.
+  if (entry.waiters.length > 0) {
+    const closedErr = new Error(
+      `LadybugDB connection pool closed for repo "${repoId}" (re-init/teardown); retry the query.`,
+    );
+    for (const waiter of entry.waiters) waiter.reject(closedErr);
+    entry.waiters.length = 0;
+  }
 
   // Close available connections — fire-and-forget with .catch() to prevent
   // unhandled rejections.  Native close() returns Promise<void> but can crash
@@ -239,6 +366,7 @@ function closeOne(repoId: string): void {
         // for the same dbPath reuse it instead of hitting a file lock.
         shared.refCount = 0;
         shared.ftsLoaded = false;
+        shared.vectorLoaded = false;
       } else {
         shared.db.close().catch(() => {});
         dbCache.delete(entry.dbPath);
@@ -247,6 +375,11 @@ function closeOne(repoId: string): void {
   }
 
   pool.delete(repoId);
+
+  // Clear any eviction pin — the entry is gone, so the pin is meaningless and
+  // would otherwise leak across operations in a long-lived process. Teardown
+  // is authoritative: an explicit close always wins over a pin.
+  pinnedRepos.delete(repoId);
 
   // Notify listeners AFTER the pool entry is gone so any cache-invalidation
   // they perform is consistent with `isLbugReady(repoId) === false`.
@@ -257,6 +390,8 @@ function closeOne(repoId: string): void {
       // Isolate listener failures — teardown must complete.
     }
   }
+
+  traceRss('close', repoId);
 }
 
 /**
@@ -301,7 +436,16 @@ setInterval(() => {
 function createConnection(db: lbug.Database): lbug.Connection {
   silenceStdout();
   try {
-    return new lbug.Connection(db);
+    const conn = new lbug.Connection(db);
+    // Bound a single query at the engine level so a pathological query cannot
+    // hang a pooled connection past the JS-side Promise.race guard (which frees
+    // the waiter but not the native call). Matches QUERY_TIMEOUT_MS. Guarded so
+    // test doubles that don't model the engine method don't break connection
+    // creation.
+    if (typeof conn.setQueryTimeout === 'function') {
+      conn.setQueryTimeout(QUERY_TIMEOUT_MS);
+    }
+    return conn;
   } finally {
     restoreStdout();
   }
@@ -312,6 +456,8 @@ const QUERY_TIMEOUT_MS = 30_000;
 /** Waiter queue timeout in milliseconds */
 const WAITER_TIMEOUT_MS = 15_000;
 
+// Read-only open retry while `gitnexus analyze` writes. Catalogued as entry 4
+// of the lbug-config retry-budget registry.
 const LOCK_RETRY_ATTEMPTS = 3;
 const LOCK_RETRY_DELAY_MS = 2000;
 const SHADOW_REPLAY_PROBE_QUERY = 'MATCH (n) RETURN n LIMIT 1';
@@ -350,8 +496,14 @@ type TryQuarantineResult = { kind: 'quarantined'; path: string } | { kind: 'peer
  */
 async function tryQuarantineForMissingShadow(
   dbPath: string,
-  opts: { reason: string },
+  opts: { reason: string; err: unknown },
 ): Promise<TryQuarantineResult> {
+  // Refuse (throw) before renaming a live WAL when the shadow is present on
+  // disk or the orphan WAL is too large — parity with the serve path's
+  // refuseLargeWalQuarantine (issue #2382 review, Finding B). Kept OUTSIDE the
+  // try so the actionable recovery message propagates to the MCP caller rather
+  // than being re-wrapped as a rename failure.
+  await guardWalQuarantine(dbPath, opts.reason, opts.err, poolSidecarLogger);
   try {
     const quarantinePath = await quarantineWalForMissingShadow(dbPath, {
       logger: poolSidecarLogger,
@@ -398,6 +550,7 @@ async function replayShadowPagesWithWritableOpen(dbPath: string): Promise<void> 
     if (isMissingShadowSidecarError(err)) {
       await tryQuarantineForMissingShadow(dbPath, {
         reason: 'pool writable replay recovery',
+        err,
       });
       return;
     }
@@ -429,6 +582,7 @@ async function openReadOnlyDatabase(dbPath: string): Promise<lbug.Database> {
         db = undefined;
         await tryQuarantineForMissingShadow(dbPath, {
           reason: 'pool read-only recovery',
+          err,
         });
         await preflightLbugSidecars(dbPath, {
           mode: 'read-only',
@@ -497,18 +651,45 @@ const initPromises = new Map<string, Promise<void>>();
  * Concurrent calls for the same repoId are deduplicated — the second caller
  * awaits the first's in-progress init rather than starting a redundant one.
  */
-export const initLbug = async (repoId: string, dbPath: string): Promise<void> => {
+/**
+ * Returns `true` when this call (re)opened a fresh handle onto the current
+ * on-disk file, `false` when it reused/served the existing handle (unchanged,
+ * or changed-but-a-query-is-in-flight). Callers that gate their own freshness
+ * bookkeeping on "did the pool actually roll over" (LocalBackend) use the
+ * return value; callers that only need the pool ready can ignore it.
+ */
+export const initLbug = async (repoId: string, dbPath: string): Promise<boolean> => {
   const existing = pool.get(repoId);
   if (existing) {
     existing.lastUsed = Date.now();
-    return;
+    // Detect an index that `analyze` rebuilt or mutated under this live read
+    // pool. Without this, the pool keeps serving the old (POSIX:
+    // unlinked-but-open) inode until LRU/idle eviction — a stale-read window
+    // of up to IDLE_TIMEOUT_MS after analyze finishes.
+    const current = await statDbIdentity(dbPath);
+    if (!dbIdentityChanged(existing.dbIdentity, current)) return false; // unchanged → reuse
+    // A query is in flight on this entry; closing its connection (and the
+    // shared Database at refCount 0) mid-use is a native use-after-free. Serve
+    // the current handle for this dispatch — the next initLbug that finds the
+    // entry idle (checkedOut === 0) reopens, since the identity stays divergent
+    // until then. Under sustained overlapping queries `checkedOut` may never
+    // reach 0 and `lastUsed` keeps the idle timer from evicting, so this window
+    // is bounded by the load, not IDLE_TIMEOUT_MS — the data stays consistent
+    // (a complete older snapshot), just not the newest. Callers that route
+    // freshness THROUGH initLbug (rather than calling closeLbug directly) get
+    // this guard for free; that is why LocalBackend delegates here (#2614).
+    if (existing.checkedOut > 0) return false;
+    closeOne(repoId); // idle & changed → evict, then fall through to reopen the new file
   }
 
   // Deduplicate concurrent init calls for the same repoId —
   // prevents double-init race when multiple parallel tool calls
   // trigger initialization for the same repo simultaneously.
   const pending = initPromises.get(repoId);
-  if (pending) return pending;
+  if (pending) {
+    await pending;
+    return true;
+  }
 
   const promise = doInitLbug(repoId, dbPath);
   initPromises.set(repoId, promise);
@@ -517,6 +698,7 @@ export const initLbug = async (repoId: string, dbPath: string): Promise<void> =>
   } finally {
     initPromises.delete(repoId);
   }
+  return true;
 };
 
 /**
@@ -537,6 +719,23 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
   // Reuse an existing native Database if another repoId already opened this path.
   // This prevents buffer manager exhaustion from multiple mmap regions on the same file.
   let shared = dbCache.get(dbPath);
+  if (shared && !shared.external && shared.dbIdentity) {
+    // #2614 F2: a cached read-only Database is keyed by dbPath and shared across
+    // pool consumers. If the on-disk index was rebuilt/swapped (new inode) while
+    // ANOTHER consumer still holds this handle (refCount kept it alive), reusing
+    // it serves a superseded index. Unreachable via the MCP backend (one
+    // consumer per lbugPath ⇒ refCount hits 0 ⇒ closeOne reopens fresh); a
+    // complete fix needs per-inode handles rather than a dbPath-keyed cache.
+    // Surface it so the corner is observable instead of silently stale.
+    const current = await statDbIdentity(dbPath);
+    if (dbIdentityChanged(shared.dbIdentity, current)) {
+      realStderrWrite(
+        `GitNexus: reusing a shared read-only handle for ${dbPath} whose on-disk ` +
+          `index was rebuilt while another consumer holds it — results may be stale ` +
+          `until that consumer releases it.\n`,
+      );
+    }
+  }
   if (!shared) {
     // Open in read-only mode — MCP server never writes to the database.
     // This allows multiple MCP server instances to read concurrently, and
@@ -545,7 +744,7 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
     for (let attempt = 1; attempt <= LOCK_RETRY_ATTEMPTS; attempt++) {
       try {
         const db = await openReadOnlyDatabase(dbPath);
-        shared = { db, refCount: 0, ftsLoaded: false };
+        shared = { db, refCount: 0, ftsLoaded: false, dbIdentity: await statDbIdentity(dbPath) };
         dbCache.set(dbPath, shared);
         break;
       } catch (err: any) {
@@ -554,7 +753,12 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
         if (isWalCorruptionError(lastError)) {
           try {
             const db = await tryQuarantineAndReopen(dbPath, repoId);
-            shared = { db, refCount: 0, ftsLoaded: false };
+            shared = {
+              db,
+              refCount: 0,
+              ftsLoaded: false,
+              dbIdentity: await statDbIdentity(dbPath),
+            };
             dbCache.set(dbPath, shared);
             break;
           } catch (retryErr) {
@@ -567,6 +771,7 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
 
         if (
           lastError.message.startsWith('LadybugDB checkpoint sidecar is missing') ||
+          lastError.message.startsWith('LadybugDB checkpoint sidecar is present but unreachable') ||
           lastError.message.startsWith('GitNexus could not move the LadybugDB WAL sidecar') ||
           isMissingShadowSidecarError(lastError)
         ) {
@@ -612,32 +817,22 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
   // install; analyze owns extension installation. If LOAD fails, search
   // features degrade gracefully and the user-facing query path proceeds.
   if (!shared.ftsLoaded) {
-    // Windows guard: LOAD EXTENSION fts crashes with SIGSEGV on Windows during
-    // *install* — the @ladybugdb/core out-of-process installer hits an unhandled
-    // error path that signals SIGSEGV instead of throwing (see #1199, #1217).
-    // The previous unconditional skip was over-broad: it also disabled FTS on
-    // hosts where the binary was already on disk and only needed LOAD, leaving
-    // BM25 silently degraded with no error path (see #1690).
-    //
-    // Probe ~/.lbdb/extension/*/win_amd64/fts/ first. If any binary is on disk
-    // we run loadFTSExtension(..., 'load-only'); the install path is never
-    // exercised, and LadybugDB's version-specific resolution + ExtensionManager
-    // try/catch handle stale/zero-byte siblings cleanly (verified empirically
-    // on Win10 + Node 22.19 + gitnexus 1.6.5 + @ladybugdb/core 0.16.1). With
-    // no binary at all, we fall back to the upstream skip so install-time
-    // SIGSEGV continues to be avoided.
-    if (process.platform === 'win32') {
-      shared.ftsLoaded = (await hasLocalWinFtsExtension())
-        ? await loadFTSExtension(available[0], { policy: 'load-only' })
-        : true;
-    } else {
-      shared.ftsLoaded = await loadFTSExtension(available[0], { policy: 'load-only' });
-    }
+    shared.ftsLoaded = await loadFTSExtension(available[0], { policy: 'load-only' });
+  }
+  // VECTOR too — extension load scope is per-Database, so this one load
+  // makes QUERY_VECTOR_INDEX legal on every pooled connection. Same
+  // load-only contract as FTS above; on failure the semantic-query lane
+  // falls back to the exact scan with its own diagnostic (#2623 follow-up).
+  if (!shared.vectorLoaded) {
+    shared.vectorLoaded = await loadVectorExtension(available[0], { policy: 'load-only' });
   }
 
   // Register pool entry only after all connections are pre-warmed and FTS is
   // loaded.  Concurrent executeQuery calls see either "not initialized"
   // (and throw cleanly) or a fully ready pool — never a half-built one.
+  // Record the on-disk identity so a later initLbug can detect an analyze
+  // rebuild/mutation and re-open onto the new file (pool staleness invalidation).
+  const dbIdentity = await statDbIdentity(dbPath);
   pool.set(repoId, {
     db,
     available,
@@ -645,9 +840,11 @@ async function doInitLbug(repoId: string, dbPath: string): Promise<void> {
     waiters: [],
     lastUsed: Date.now(),
     dbPath,
+    dbIdentity,
     closed: false,
   });
   ensureIdleTimer();
+  traceRss('init', repoId);
 }
 
 /**
@@ -696,15 +893,13 @@ export async function initLbugWithDb(
   // Load FTS extension if not already loaded on this Database.
   // policy: 'load-only' — same contract as initLbug above; the read pool
   // must not block on a network install during query execution.
-  // Windows guard: same probe-then-load policy as doInitLbug above.
   if (!shared.ftsLoaded) {
-    if (process.platform === 'win32') {
-      shared.ftsLoaded = (await hasLocalWinFtsExtension())
-        ? await loadFTSExtension(available[0], { policy: 'load-only' })
-        : true;
-    } else {
-      shared.ftsLoaded = await loadFTSExtension(available[0], { policy: 'load-only' });
-    }
+    shared.ftsLoaded = await loadFTSExtension(available[0], { policy: 'load-only' });
+  }
+  // VECTOR too — same per-Database scope and load-only contract as the
+  // doInitLbug site above (#2623 follow-up).
+  if (!shared.vectorLoaded) {
+    shared.vectorLoaded = await loadVectorExtension(available[0], { policy: 'load-only' });
   }
 
   pool.set(repoId, {
@@ -714,9 +909,12 @@ export async function initLbugWithDb(
     waiters: [],
     lastUsed: Date.now(),
     dbPath,
+    // Injected/external DB (tests) — not tracked for rebuild invalidation.
+    dbIdentity: null,
     closed: false,
   });
   ensureIdleTimer();
+  traceRss('init', repoId);
 }
 
 /**
@@ -745,14 +943,20 @@ function checkout(entry: PoolEntry): Promise<lbug.Connection> {
 
   // At capacity — queue the caller with a timeout.
   return new Promise<lbug.Connection>((resolve, reject) => {
-    const waiter = (conn: lbug.Connection) => {
-      clearTimeout(timer);
-      resolve(conn);
+    const waiter = {
+      resolve: (conn: lbug.Connection) => {
+        clearTimeout(timer);
+        resolve(conn);
+      },
+      reject: (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      },
     };
     const timer = setTimeout(() => {
       const idx = entry.waiters.indexOf(waiter);
       if (idx !== -1) entry.waiters.splice(idx, 1);
-      reject(
+      waiter.reject(
         new Error(
           `Connection pool exhausted: timed out after ${WAITER_TIMEOUT_MS}ms waiting for a free connection`,
         ),
@@ -778,7 +982,7 @@ function checkin(entry: PoolEntry, conn: lbug.Connection): void {
   if (entry.waiters.length > 0) {
     // Hand directly to the next waiter — no intermediate available state
     const waiter = entry.waiters.shift()!;
-    waiter(conn);
+    waiter.resolve(conn);
   } else {
     entry.checkedOut--;
     entry.available.push(conn);
@@ -821,22 +1025,33 @@ export const executeParameterized = async (
   const conn = await checkout(entry);
   silenceStdout();
   activeQueryCount++;
+  let queryResult: lbug.QueryResult | lbug.QueryResult[] | undefined;
   try {
     const stmt = await withTimeout(conn.prepare(cypher), QUERY_TIMEOUT_MS, 'Prepare');
     if (!stmt.isSuccess()) {
       const errMsg = await stmt.getErrorMessage();
       throw new Error(`Prepare failed: ${errMsg}`);
     }
-    const queryResult = await withTimeout(conn.execute(stmt, params), QUERY_TIMEOUT_MS, 'Execute');
+    queryResult = await withTimeout(conn.execute(stmt, params), QUERY_TIMEOUT_MS, 'Execute');
     const result = Array.isArray(queryResult) ? queryResult[0] : queryResult;
     const rows = await result.getAll();
     return rows;
   } catch (err) {
     if (isReadOnlyDbError(err)) {
-      throw new Error('Write operations are not allowed. The pool adapter is read-only.');
+      // Preserve the native error as `cause` so the original frame/message is
+      // not lost behind the friendly read-only message (#2068 follow-up).
+      throw new Error('Write operations are not allowed. The pool adapter is read-only.', {
+        cause: err,
+      });
     }
     throw err;
   } finally {
+    // Close the native QueryResult cursor(s) before returning the connection —
+    // getAll() drains rows but does not release the native cursor, so without
+    // this the cursor leaks for the connection's lifetime (#2068 follow-up).
+    // Best-effort via the shared helper; never masks the query result or a real
+    // error.
+    if (queryResult) await closeQueryResults(queryResult);
     activeQueryCount--;
     restoreStdout();
     checkin(entry, conn);

@@ -61,6 +61,10 @@
 
 import type {
   BindingRef,
+  CallableFlowExpectedSignature,
+  CallableFlowOperand,
+  CallableFlowPassingMode,
+  CallableFlowSite,
   CaptureMatch,
   ImportEdge,
   ParameterTypeClass,
@@ -77,6 +81,7 @@ import type {
 } from 'gitnexus-shared';
 import { buildPositionIndex, buildScopeTree, canParentScope, makeScopeId } from 'gitnexus-shared';
 import type { LanguageProvider } from './language-provider.js';
+import { isValidReceiverChain } from './utils/receiver-chain-codec.js';
 import { extractTemplateArguments } from './utils/template-arguments.js';
 
 // ─── Narrow hook surface the extractor actually uses ───────────────────────
@@ -97,6 +102,7 @@ import { extractTemplateArguments } from './utils/template-arguments.js';
 export type ScopeExtractorHooks = Pick<
   LanguageProvider,
   | 'resolveScopeKind'
+  | 'scopeOwnsReceivers'
   | 'bindingScopeFor'
   | 'interpretImport'
   | 'interpretTypeBinding'
@@ -133,7 +139,19 @@ export function extract(
   for (let i = 0; i < scopeDrafts.length; i++) {
     const d = scopeDrafts[i];
     if (d.parent === null && d.kind !== 'Module') {
-      scopeDrafts[i] = makeDraft(d.id, moduleScope.id, d.kind, d.range, d.filePath);
+      // `ownsReceivers` must be carried across: it is decided from the scope's
+      // own capture in pass 1 and re-parenting does not change what the scope
+      // binds. Dropping it here would silently un-mark every function scope in
+      // a file whose root parsed as ERROR (the only way a scope is orphaned).
+      scopeDrafts[i] = makeDraft(
+        d.id,
+        moduleScope.id,
+        d.kind,
+        d.range,
+        d.filePath,
+        d.ownsReceivers,
+        d.lexicalNames,
+      );
     }
   }
   const scopes = scopeDrafts.map(draftToScope);
@@ -187,6 +205,12 @@ export function extract(
     scopeTree,
   );
 
+  // ── Pass 6: collect normalized callable-value-flow facts ───────────
+  // Kept after (and independent from) Pass 5 so existing reference-site
+  // extraction remains byte-identical.
+  const callableFlowSites: CallableFlowSite[] = [];
+  pass6CollectCallableFlows(partitioned.callableFlow, positionIndex, filePath, callableFlowSites);
+
   // Freeze Scope drafts into final shape and return.
   const frozenScopes = scopeDrafts.map(draftToScope);
   return Object.freeze({
@@ -196,6 +220,9 @@ export function extract(
     parsedImports: Object.freeze(parsedImports.slice()),
     localDefs: Object.freeze(localDefs.slice()),
     referenceSites: Object.freeze(referenceSites.slice()),
+    ...(callableFlowSites.length > 0
+      ? { callableFlowSites: Object.freeze(callableFlowSites.slice()) }
+      : {}),
   });
 }
 
@@ -207,12 +234,13 @@ interface Partitioned {
   readonly import_: readonly CaptureMatch[];
   readonly typeBinding: readonly CaptureMatch[];
   readonly reference: readonly CaptureMatch[];
+  readonly callableFlow: readonly CaptureMatch[];
 }
 
 /**
- * Bucket each match by the topic of its anchor capture. The anchor is the
- * capture whose name is prefixed with the match's topic (`@scope.*`,
- * `@declaration.*`, `@import.*`, `@type-binding.*`, `@reference.*`).
+ * Bucket each match by every topic represented by its anchor captures. An
+ * emitter may deliberately group a lexical scope and its declaration in one
+ * match so both passes observe the exact same source range.
  *
  * A match may contain additional captures (e.g., `@import.source`,
  * `@declaration.class.name`) that are used by the provider hooks to
@@ -225,49 +253,49 @@ function partitionByTopic(matches: readonly CaptureMatch[]): Partitioned {
   const import_: CaptureMatch[] = [];
   const typeBinding: CaptureMatch[] = [];
   const reference: CaptureMatch[] = [];
+  const callableFlow: CaptureMatch[] = [];
 
   for (const match of matches) {
-    const topic = topicOf(match);
-    switch (topic) {
-      case 'scope':
-        scope.push(match);
-        break;
-      case 'declaration':
-        declaration.push(match);
-        break;
-      case 'import':
-        import_.push(match);
-        break;
-      case 'type-binding':
-        typeBinding.push(match);
-        break;
-      case 'reference':
-        reference.push(match);
-        break;
-      case 'unknown':
-        // Unrecognized anchor — silently skip. Providers may emit extra
-        // captures (e.g., `@comment`) that the extractor has no topic for.
-        break;
+    for (const topic of topicsOf(match)) {
+      switch (topic) {
+        case 'scope':
+          scope.push(match);
+          break;
+        case 'declaration':
+          declaration.push(match);
+          break;
+        case 'import':
+          import_.push(match);
+          break;
+        case 'type-binding':
+          typeBinding.push(match);
+          break;
+        case 'reference':
+          reference.push(match);
+          break;
+        case 'callable-flow':
+          callableFlow.push(match);
+          break;
+      }
     }
   }
 
-  return { scope, declaration, import_, typeBinding, reference };
+  return { scope, declaration, import_, typeBinding, reference, callableFlow };
 }
 
-type Topic = 'scope' | 'declaration' | 'import' | 'type-binding' | 'reference' | 'unknown';
+type Topic = 'scope' | 'declaration' | 'import' | 'type-binding' | 'reference' | 'callable-flow';
 
-function topicOf(match: CaptureMatch): Topic {
-  // The anchor is the capture whose name uses one of the known topic
-  // prefixes. For multi-capture matches, ALL captures share the topic;
-  // we pick the first matching key for efficiency.
+function topicsOf(match: CaptureMatch): ReadonlySet<Topic> {
+  const topics = new Set<Topic>();
   for (const name of Object.keys(match)) {
-    if (name.startsWith('@scope.')) return 'scope';
-    if (name.startsWith('@declaration.')) return 'declaration';
-    if (name.startsWith('@import.')) return 'import';
-    if (name.startsWith('@type-binding.')) return 'type-binding';
-    if (name.startsWith('@reference.')) return 'reference';
+    if (name.startsWith('@scope.')) topics.add('scope');
+    else if (name.startsWith('@declaration.')) topics.add('declaration');
+    else if (name.startsWith('@import.')) topics.add('import');
+    else if (name.startsWith('@type-binding.')) topics.add('type-binding');
+    else if (name.startsWith('@reference.')) topics.add('reference');
+    else if (name.startsWith('@callable-flow.')) topics.add('callable-flow');
   }
-  return 'unknown';
+  return topics;
 }
 
 // ─── Internal: Scope draft model ───────────────────────────────────────────
@@ -287,6 +315,9 @@ interface ScopeDraft {
   readonly ownedDefs: SymbolDefinition[];
   readonly imports: ImportEdge[];
   readonly typeBindings: Map<string, TypeRef>;
+  readonly lexicalNames?: ReadonlySet<string>;
+  /** See `Scope.ownsReceivers` — set once at pass 1, never mutated. */
+  readonly ownsReceivers?: ReadonlySet<string>;
 }
 
 function ensureModuleScope(
@@ -342,6 +373,8 @@ function draftToScope(draft: ScopeDraft): Scope {
     ownedDefs: Object.freeze(draft.ownedDefs.slice()),
     imports: Object.freeze(draft.imports.slice()),
     typeBindings: new Map(draft.typeBindings),
+    lexicalNames: draft.lexicalNames,
+    ownsReceivers: draft.ownsReceivers,
   };
 }
 
@@ -410,7 +443,17 @@ function pass1BuildScopes(
     }
 
     const parent = stack.length > 0 ? stack[stack.length - 1]!.id : null;
-    drafts.push(makeDraft(cand.id, parent, cand.kind, cand.range, filePath));
+    drafts.push(
+      makeDraft(
+        cand.id,
+        parent,
+        cand.kind,
+        cand.range,
+        filePath,
+        provider.scopeOwnsReceivers?.(cand.match),
+        parseScopeLexicalNames(cand.match),
+      ),
+    );
     stack.push(cand);
   }
 
@@ -441,6 +484,8 @@ function resolveKindForScopeMatch(
       return 'Block';
     case 'expression':
       return 'Expression';
+    case 'object':
+      return 'Object';
     default:
       return null;
   }
@@ -452,6 +497,8 @@ function makeDraft(
   kind: ScopeKind,
   range: Range,
   filePath: string,
+  ownsReceivers?: ReadonlySet<string>,
+  lexicalNames?: ReadonlySet<string>,
 ): ScopeDraft {
   return {
     id,
@@ -463,7 +510,24 @@ function makeDraft(
     ownedDefs: [],
     imports: [],
     typeBindings: new Map(),
+    lexicalNames,
+    ownsReceivers,
   };
+}
+
+function parseScopeLexicalNames(match: CaptureMatch): ReadonlySet<string> | undefined {
+  const raw = match['@scope.lexical-names']?.text;
+  if (raw === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return undefined;
+    const names = parsed.filter(
+      (name): name is string => typeof name === 'string' && name.length > 0,
+    );
+    return names.length > 0 ? new Set(names) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ─── Pass 2: attach declarations + local bindings ──────────────────────────
@@ -575,6 +639,7 @@ function buildDefFromDeclarationMatch(
   const returnType = match['@declaration.return-type']?.text;
   const templateConstraints = parseJsonCapture(match['@declaration.template-constraints']);
   const isExplicit = parseBooleanCapture(match['@declaration.is-explicit']);
+  const isDeleted = parseBooleanCapture(match['@declaration.is-deleted']);
 
   return {
     nodeId: makeDefId(filePath, anchor.range, type, nameCap.text),
@@ -590,6 +655,7 @@ function buildDefFromDeclarationMatch(
     ...(templateArguments !== undefined ? { templateArguments } : {}),
     ...(templateConstraints !== undefined ? { templateConstraints } : {}),
     ...(isExplicit === true ? { isExplicit: true } : {}),
+    ...(isDeleted === true ? { isDeleted: true } : {}),
   };
 }
 
@@ -652,12 +718,19 @@ function parseJsonParameterTypeClassesCapture(
       if (typeof o.pointerDepth !== 'number' || !Number.isFinite(o.pointerDepth)) {
         return undefined;
       }
-      out.push({
+      const shape: ParameterTypeClass = {
         base: o.base,
         cv: o.cv,
         indirection: o.indirection,
         pointerDepth: o.pointerDepth,
-      });
+      };
+      if (Array.isArray(o.templateArguments)) {
+        if (!o.templateArguments.every((x): x is string => typeof x === 'string')) {
+          return undefined;
+        }
+        shape.templateArguments = [...o.templateArguments];
+      }
+      out.push(shape);
     }
     return out;
   } catch {
@@ -680,6 +753,7 @@ function parseJsonStringArrayCapture(
 
 function deriveDeclarationName(match: CaptureMatch, def: SymbolDefinition): string | undefined {
   const nameCap =
+    match['@declaration.binding-name'] ??
     match['@declaration.name'] ??
     match[
       Object.keys(match).find((k) => k.startsWith('@declaration.') && k.endsWith('.name')) ?? ''
@@ -745,6 +819,8 @@ function normalizeNodeLabel(kindStr: string): SymbolDefinition['type'] | undefin
       return 'Annotation';
     case 'namespace':
       return 'Namespace';
+    case 'program':
+      return 'Module';
     case 'macro':
       return 'Macro';
     default:
@@ -955,13 +1031,15 @@ function followChainedRef(start: TypeRef, draftById: ReadonlyMap<ScopeId, ScopeD
  * name in the same scope. Higher number wins; ties keep the later match
  * (last-write-wins preserves historical order within a tier).
  *
- * Rationale: explicit annotations always beat inferred ones because they
- * reflect user intent. `self`/`cls` are treated as strongly as annotations
- * because they are language-required receiver types.
+ * Rationale: explicit variable and field annotations always beat bindings
+ * derived from parameter annotations or inference because they reflect the
+ * most specific user intent. `self`/`cls` are treated as strongly as other
+ * declared types because they are language-required receiver types.
  */
 function typeBindingStrength(source: TypeRef['source']): number {
   switch (source) {
     case 'annotation':
+      return 3;
     case 'parameter-annotation':
     case 'return-annotation':
     case 'self':
@@ -1016,6 +1094,17 @@ function pass5CollectReferences(
       match['@reference.parameter-type-classes'],
     );
 
+    // Object-literal key for value-ref sites (`{ key: fn }` / shorthand);
+    // consumed by the property-dispatch pass (#2437).
+    const propertyKeyCap = match['@reference.property-key'];
+
+    // Compact receiver chain, when the emitter produced one. Validated HERE as
+    // well as at the store boundary: bounds applied only on load are a
+    // recurring defect in this codebase — the writer keeps minting payloads the
+    // reader keeps rejecting, which is a permanent warm-cache-miss reparse loop
+    // that logs nothing.
+    const receiverChain = extractReceiverChain(match);
+
     const site: ReferenceSite = {
       name: nameCap.text,
       atRange: anchor.range,
@@ -1024,11 +1113,15 @@ function pass5CollectReferences(
       ...(qualifiedCap?.text !== undefined && qualifiedCap.text.length > 0
         ? { rawQualifiedName: qualifiedCap.text }
         : {}),
+      ...(propertyKeyCap?.text !== undefined && propertyKeyCap.text.length > 0
+        ? { propertyKey: propertyKeyCap.text }
+        : {}),
       ...(callForm !== undefined ? { callForm } : {}),
       ...(explicitReceiver !== undefined ? { explicitReceiver } : {}),
       ...(arity !== undefined ? { arity } : {}),
       ...(argumentTypes !== undefined ? { argumentTypes } : {}),
       ...(argumentTypeClasses !== undefined ? { argumentTypeClasses } : {}),
+      ...(receiverChain !== undefined ? { receiverChain } : {}),
     };
     referenceSites.push(site);
   }
@@ -1056,6 +1149,8 @@ function referenceKindFromAnchor(name: string): ReferenceKind | undefined {
       return 'import-use';
     case 'macro':
       return 'macro';
+    case 'value-ref':
+      return 'value-ref';
     default:
       return undefined;
   }
@@ -1097,6 +1192,19 @@ function extractExplicitReceiver(match: CaptureMatch): { readonly name: string }
   return { name: cap.text };
 }
 
+/**
+ * The compact receiver chain, when the language emitter synthesized one.
+ *
+ * Returns `undefined` for anything that does not decode, so a malformed or
+ * over-bound payload degrades to the existing text cascade rather than
+ * poisoning the durable store. Never throws — this runs per reference site.
+ */
+function extractReceiverChain(match: CaptureMatch): string | undefined {
+  const cap = match['@reference.receiver-chain'];
+  if (cap === undefined) return undefined;
+  return isValidReceiverChain(cap.text) ? cap.text : undefined;
+}
+
 function extractArity(match: CaptureMatch): number | undefined {
   const cap = match['@reference.arity'];
   if (cap === undefined) return undefined;
@@ -1114,6 +1222,272 @@ function extractArgumentTypes(match: CaptureMatch): readonly string[] | undefine
     /* malformed — fall through */
   }
   return undefined;
+}
+
+// ─── Pass 6: collect callable-value-flow facts ─────────────────────────────
+
+const CALLABLE_FLOW_KINDS = [
+  'seed',
+  'copy',
+  'alias',
+  'address',
+  'store',
+  'load',
+  'formal',
+  'argument',
+  'invoke',
+] as const;
+
+type CallableFlowKind = (typeof CALLABLE_FLOW_KINDS)[number];
+
+function pass6CollectCallableFlows(
+  matches: readonly CaptureMatch[],
+  positionIndex: ReturnType<typeof buildPositionIndex>,
+  filePath: string,
+  out: CallableFlowSite[],
+): void {
+  for (const match of matches) {
+    const kind = callableFlowKind(match);
+    if (kind === undefined) continue;
+    const anchor = match[`@callable-flow.${kind}`];
+    if (anchor === undefined) continue;
+
+    switch (kind) {
+      case 'seed': {
+        const destination = callableFlowOperand(match, 'destination', positionIndex, filePath);
+        const target = match['@callable-flow.target'];
+        const targetName = match['@callable-flow.target-name']?.text ?? target?.text;
+        if (destination === undefined || target === undefined || !nonEmpty(targetName)) continue;
+        const expectedSignature = callableFlowExpectedSignature(match);
+        out.push({
+          kind,
+          destination,
+          targetName,
+          targetRange: target.range,
+          ...(nonEmpty(match['@callable-flow.target-qualified-name']?.text)
+            ? { targetQualifiedName: match['@callable-flow.target-qualified-name']!.text }
+            : {}),
+          ...(expectedSignature !== undefined ? { expectedSignature } : {}),
+        });
+        break;
+      }
+      case 'copy':
+      case 'alias': {
+        const source = callableFlowOperand(match, 'source', positionIndex, filePath);
+        const destination = callableFlowOperand(match, 'destination', positionIndex, filePath);
+        if (source === undefined || destination === undefined) continue;
+        out.push({ kind, source, destination });
+        break;
+      }
+      case 'address': {
+        const source = callableFlowOperand(match, 'source', positionIndex, filePath);
+        const destination = callableFlowOperand(match, 'destination', positionIndex, filePath);
+        if (source === undefined || destination === undefined) continue;
+        out.push({ kind, source, destination });
+        break;
+      }
+      case 'store': {
+        const source = callableFlowOperand(match, 'source', positionIndex, filePath);
+        const pointer = callableFlowOperand(match, 'pointer', positionIndex, filePath);
+        if (source === undefined || pointer === undefined) continue;
+        out.push({ kind, source, pointer });
+        break;
+      }
+      case 'load': {
+        const pointer = callableFlowOperand(match, 'pointer', positionIndex, filePath);
+        const destination = callableFlowOperand(match, 'destination', positionIndex, filePath);
+        if (pointer === undefined || destination === undefined) continue;
+        out.push({ kind, pointer, destination });
+        break;
+      }
+      case 'formal': {
+        const owner = match['@callable-flow.owner'];
+        const binding = callableFlowOperand(match, 'binding', positionIndex, filePath);
+        const parameterIndex = parseNonNegativeInt(match['@callable-flow.parameter-index']?.text);
+        const passingMode = parseCallablePassingMode(match['@callable-flow.passing-mode']?.text);
+        if (
+          owner === undefined ||
+          !nonEmpty(owner.text) ||
+          binding === undefined ||
+          parameterIndex === undefined ||
+          passingMode === undefined
+        ) {
+          continue;
+        }
+        const expectedSignature = callableFlowExpectedSignature(match);
+        out.push({
+          kind,
+          ownerName: owner.text,
+          ownerRange: owner.range,
+          parameterIndex,
+          binding,
+          passingMode,
+          ...(expectedSignature !== undefined ? { expectedSignature } : {}),
+        });
+        break;
+      }
+      case 'argument': {
+        const source = callableFlowOperand(match, 'source', positionIndex, filePath);
+        const parameterIndex = parseNonNegativeInt(match['@callable-flow.parameter-index']?.text);
+        if (source === undefined || parameterIndex === undefined) continue;
+        out.push({
+          kind,
+          callSite: anchor.range,
+          parameterIndex,
+          source,
+          ...(nonEmpty(match['@callable-flow.direct-callee-name']?.text)
+            ? { directCalleeName: match['@callable-flow.direct-callee-name']!.text }
+            : {}),
+        });
+        break;
+      }
+      case 'invoke': {
+        const callee = callableFlowOperand(match, 'callee', positionIndex, filePath);
+        const inScope = positionIndex.atPosition(
+          filePath,
+          anchor.range.startLine,
+          anchor.range.startCol,
+        );
+        const invocationKind = parseCallableInvocationKind(
+          match['@callable-flow.invocation-kind']?.text,
+        );
+        if (callee === undefined || inScope === undefined || invocationKind === undefined) continue;
+        const receiver = callableFlowOperand(match, 'receiver', positionIndex, filePath);
+        const arity = parseNonNegativeInt(match['@callable-flow.arity']?.text);
+        out.push({
+          kind,
+          callSite: anchor.range,
+          inScope,
+          callee,
+          invocationKind,
+          ...(receiver !== undefined ? { receiver } : {}),
+          ...(arity !== undefined ? { arity } : {}),
+        });
+        break;
+      }
+    }
+  }
+}
+
+function callableFlowKind(match: CaptureMatch): CallableFlowKind | undefined {
+  return CALLABLE_FLOW_KINDS.find((kind) => match[`@callable-flow.${kind}`] !== undefined);
+}
+
+function callableFlowOperand(
+  match: CaptureMatch,
+  role: 'source' | 'destination' | 'pointer' | 'binding' | 'callee' | 'receiver',
+  positionIndex: ReturnType<typeof buildPositionIndex>,
+  filePath: string,
+): CallableFlowOperand | undefined {
+  const cap = match[`@callable-flow.${role}`];
+  if (cap === undefined || !nonEmpty(cap.text)) return undefined;
+  const inScope = positionIndex.atPosition(filePath, cap.range.startLine, cap.range.startCol);
+  if (inScope === undefined) return undefined;
+  const expressionKind = parseCallableOperandKind(match[`@callable-flow.${role}-kind`]?.text);
+  const indirection = parseNonNegativeInt(match[`@callable-flow.${role}-indirection`]?.text);
+  if (indirection !== undefined && indirection > 16) return undefined;
+  return {
+    name: cap.text,
+    inScope,
+    atRange: cap.range,
+    indirection: indirection ?? 0,
+    addressOf: match[`@callable-flow.${role}-address`]?.text === 'true',
+    ...(expressionKind !== undefined ? { expressionKind } : {}),
+    ...(nonEmpty(match[`@callable-flow.${role}-qualified-name`]?.text)
+      ? { qualifiedName: match[`@callable-flow.${role}-qualified-name`]!.text }
+      : {}),
+  };
+}
+
+function callableFlowExpectedSignature(
+  match: CaptureMatch,
+): CallableFlowExpectedSignature | undefined {
+  const parameterCount = parseNonNegativeInt(match['@callable-flow.expected-arity']?.text);
+  const parameterTypes = parseJsonStringArray(match['@callable-flow.expected-types']?.text);
+  const parameterTypeClasses = parseJsonParameterTypeClassesCapture(
+    match['@callable-flow.expected-type-classes'],
+  );
+  const isConst = parseBooleanText(match['@callable-flow.expected-const']?.text);
+  if (
+    parameterCount === undefined &&
+    parameterTypes === undefined &&
+    parameterTypeClasses === undefined &&
+    isConst === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(parameterCount !== undefined ? { parameterCount } : {}),
+    ...(parameterTypes !== undefined ? { parameterTypes } : {}),
+    ...(parameterTypeClasses !== undefined ? { parameterTypeClasses } : {}),
+    ...(isConst !== undefined ? { isConst } : {}),
+  };
+}
+
+function parseCallableOperandKind(
+  text: string | undefined,
+): 'binding' | 'callable-designator' | 'bound-member' | 'anonymous-callable' | undefined {
+  switch (text) {
+    case 'binding':
+    case 'callable-designator':
+    case 'bound-member':
+    case 'anonymous-callable':
+      return text;
+    default:
+      return undefined;
+  }
+}
+
+function parseBooleanText(text: string | undefined): boolean | undefined {
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  return undefined;
+}
+
+function parseJsonStringArray(text: string | undefined): readonly string[] | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseNonNegativeInt(text: string | undefined): number | undefined {
+  if (text === undefined || !/^\d+$/.test(text)) return undefined;
+  const value = Number.parseInt(text, 10);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+function parseCallablePassingMode(text: string | undefined): CallableFlowPassingMode | undefined {
+  switch (text) {
+    case 'value':
+    case 'reference':
+    case 'pointer':
+      return text;
+    default:
+      return undefined;
+  }
+}
+
+function parseCallableInvocationKind(
+  text: string | undefined,
+): 'indirect' | 'member-pointer' | 'callable-object' | undefined {
+  switch (text) {
+    case 'indirect':
+    case 'member-pointer':
+    case 'callable-object':
+      return text;
+    default:
+      return undefined;
+  }
+}
+
+function nonEmpty(value: string | undefined): value is string {
+  return value !== undefined && value.length > 0;
 }
 
 // ─── Internal: range + capture utilities ───────────────────────────────────
@@ -1137,6 +1511,7 @@ function rangesEqual(a: Range, b: Range): boolean {
  * change.
  */
 const KNOWN_SUB_TAGS: ReadonlySet<string> = new Set<string>([
+  '@scope.lexical-names',
   '@declaration.name',
   '@declaration.qualified_name',
   '@import.name',
@@ -1146,6 +1521,7 @@ const KNOWN_SUB_TAGS: ReadonlySet<string> = new Set<string>([
   '@type-binding.type',
   '@reference.name',
   '@reference.qualified-name',
+  '@reference.property-key',
   '@reference.receiver',
   '@reference.operator',
   '@reference.arity',
@@ -1158,6 +1534,7 @@ const KNOWN_SUB_TAGS: ReadonlySet<string> = new Set<string>([
   '@declaration.return-type',
   '@declaration.template-constraints',
   '@declaration.is-explicit',
+  '@declaration.is-deleted',
 ]);
 
 /**

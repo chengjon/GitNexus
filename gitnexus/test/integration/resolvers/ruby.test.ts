@@ -1300,13 +1300,11 @@ describe('Ruby method enrichment (visibility, isStatic, parameters)', () => {
   });
 });
 
-describe('Ruby singleton_class handling via sequential path (skipWorkers)', () => {
+describe('Ruby singleton_class handling (worker path)', () => {
   let result: PipelineResult;
 
   beforeAll(async () => {
-    result = await runPipelineFromRepo(path.join(FIXTURES, 'ruby-method-enrichment'), () => {}, {
-      skipWorkers: true,
-    });
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'ruby-method-enrichment'), () => {});
   }, 60000);
 
   it('keeps Animal as the owner for class << self methods', () => {
@@ -1316,7 +1314,7 @@ describe('Ruby singleton_class handling via sequential path (skipWorkers)', () =
     ).toBeDefined();
   });
 
-  it('marks from_habitat as static in the sequential path', () => {
+  it('marks from_habitat as static', () => {
     const methods = getNodesByLabelFull(result, 'Method');
     const fromHabitat = methods.find(
       (m) => m.name === 'from_habitat' && m.properties.filePath?.includes('animal'),
@@ -1597,7 +1595,6 @@ describe('Ruby inline module-nested same-tail collision — worker path parity (
       path.join(FIXTURES, 'ruby-nested-tail-collision'),
       () => {},
       {
-        workerThresholdsForTest: { minFiles: 1, minBytes: 1 },
         workerPoolSize: 2,
       },
     );
@@ -1690,7 +1687,7 @@ describe('Ruby same-tail nested mixin-module collision — worker path parity (i
     result = await runPipelineFromRepo(
       path.join(FIXTURES, 'ruby-nested-mixin-tail-collision'),
       () => {},
-      { workerThresholdsForTest: { minFiles: 1, minBytes: 1 }, workerPoolSize: 2 },
+      { workerPoolSize: 2 },
     );
   }, 120000);
 
@@ -1779,5 +1776,86 @@ describe('Ruby qualified mixin arg — IMPLEMENTS not corrupted by :: (issue #19
     // KTD3: discriminate on the resolved node id (the pre-fix bug dropped the edge).
     expect(e!.rel.sourceId).toContain('Consumer');
     expect(e!.rel.targetId).toContain('Mixin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline constructor receiver: Service.new.do_work (#2708)
+// Ruby spells construction as a selector on the class, with or without an
+// argument list, so both `Service.new.do_work` and `Service.new(1).do_work`
+// have to type the receiver as an instance of Service.
+// ---------------------------------------------------------------------------
+
+describe('Ruby inline constructor receiver resolution', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(
+      path.join(FIXTURES, 'ruby-inline-constructor-receiver'),
+      () => {},
+    );
+  }, 60000);
+
+  it('resolves Service.new.do_work and Service.new(1).do_work to Service#do_work', () => {
+    const calls = getRelationships(result, 'CALLS');
+    for (const source of ['route_inline', 'route_inline_args']) {
+      const call = calls.find((c) => c.source === source && c.target === 'do_work');
+      expect(call, `${source} -> do_work`).toMatchObject({
+        source,
+        target: 'do_work',
+        targetFilePath: 'lib/svc.rb',
+      });
+    }
+  });
+
+  it('keeps the two-step spelling resolving to Service#do_work', () => {
+    const calls = getRelationships(result, 'CALLS');
+    const twoStep = calls.find((c) => c.source === 'route_twostep' && c.target === 'do_work');
+    expect(twoStep).toMatchObject({ target: 'do_work', targetFilePath: 'lib/svc.rb' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Construction selector vs. an ordinary member named `new` (#2708 follow-up)
+// `Factory.new` constructs, but `factory.new` calls an instance method named
+// `new`, and a class-level `new` carrying a recorded return type must keep it.
+// The selector rule is a fallback behind the return-type lookup, not a
+// short-circuit ahead of it.
+// ---------------------------------------------------------------------------
+
+describe('Ruby construction selector vs. a real `new` member', () => {
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    result = await runPipelineFromRepo(path.join(FIXTURES, 'ruby-construction-selector'), () => {});
+  }, 60000);
+
+  it('treats `Factory.new.run` as construction — Factory#run', () => {
+    const call = getRelationships(result, 'CALLS').find(
+      (c) => c.source === 'via_class_constant' && c.target === 'run',
+    );
+    expect(call).toMatchObject({ target: 'run' });
+    expect(call!.rel.targetId).toContain('Factory');
+  });
+
+  it('resolves `factory.new.run` through the instance method — Product#run', () => {
+    const call = getRelationships(result, 'CALLS').find(
+      (c) => c.source === 'via_instance' && c.target === 'run',
+    );
+    expect(call).toMatchObject({ target: 'run' });
+    expect(call!.rel.targetId).toContain('Product');
+  });
+
+  // KNOWN LIMITATION, asserted so a future change to it is deliberate: a
+  // class-level `def self.new` returning another type is still read as
+  // construction. The scope model records no staticness per member, so
+  // `def new` and `def self.new` are indistinguishable at this layer —
+  // distinguishing them needs the provider to record it first.
+  it('reads an overridden class-level `new` as construction (documented limitation)', () => {
+    const call = getRelationships(result, 'CALLS').find(
+      (c) => c.source === 'via_annotated_return' && c.target === 'run',
+    );
+    expect(call).toMatchObject({ target: 'run' });
+    expect(call!.rel.targetId).toContain('Annotated');
   });
 });

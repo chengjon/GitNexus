@@ -23,7 +23,15 @@
  */
 
 import Parser from 'tree-sitter';
-import Dart from 'tree-sitter-dart';
+import { SupportedLanguages } from 'gitnexus-shared';
+// `tree-sitter-dart` is an optional/vendored grammar that may be absent on a
+// default install. Loaded lazily + guarded via parser-loader rather than
+// statically imported: this module is pulled onto the main thread eagerly by
+// the scope-resolution registry and the language-provider index, so a top-level
+// `import Dart from 'tree-sitter-dart'` would throw ERR_MODULE_NOT_FOUND at
+// module-load and crash `analyze` even for repos with no Dart files (#2091,
+// #2093). The grammar is only ever needed inside the lazy getters below.
+import { getLanguageGrammar } from '../../../tree-sitter/parser-loader.js';
 
 const DART_SCOPE_QUERY = `
 ; ── Scopes ───────────────────────────────────────────────────────────────────
@@ -39,10 +47,87 @@ const DART_SCOPE_QUERY = `
 (extension_declaration name: (identifier) @declaration.name) @declaration.class
 (enum_declaration name: (identifier) @declaration.name) @declaration.enum
 
+; ── Declarations — type aliases (old-style + new-style function typedefs) ────
+; Both forms parse as type_alias; the name position differs, and a generic
+; <T> parameter list intervenes for the generic variants. Per #1919 review CF2,
+; a generic type_parameters node sits between the name and the next anchor, so
+; the non-generic adjacency patterns silently drop the generic forms. Four
+; standalone patterns (NOT one alternation — the tree-sitter 0.21 hazard drops
+; sibling branches) keep the name capture unambiguous and single-match per form:
+;   non-generic old-style  typedef int Cmp(int a, int b);
+;       children: return-type, NAME, formal_parameter_list
+;   generic old-style      typedef int Cmp<T>(T a, T b);          (CF2)
+;       children: return-type, NAME, type_parameters, formal_parameter_list
+;   non-generic new-style  typedef Pred = bool Function(int);
+;       children: NAME, "=", function_type
+;   generic new-style      typedef Mapper<T> = T Function(T);
+;       children: NAME, type_parameters, "=", function_type
+; The alias name is the type_identifier immediately before the param list (old)
+; or before "=" (new); for the generic forms it is the one immediately before
+; the intervening type_parameters. Mirrors Kotlin's @declaration.type_alias
+; rule; the generic scope-extractor maps "type_alias" → TypeAlias.
+(type_alias
+  (type_identifier) @declaration.name
+  .
+  (formal_parameter_list)) @declaration.type_alias
+(type_alias
+  (type_identifier) @declaration.name
+  .
+  (type_parameters)
+  .
+  (formal_parameter_list)) @declaration.type_alias
+(type_alias
+  (type_identifier) @declaration.name
+  .
+  "=") @declaration.type_alias
+(type_alias
+  (type_identifier) @declaration.name
+  .
+  (type_parameters)
+  .
+  "=") @declaration.type_alias
+
 ; ── Declarations — top-level functions (parent is program, not method) ───────
 (program
   (function_signature
     name: (identifier) @declaration.name) @declaration.function)
+
+; ── Declarations — closure bound to a local ──────────────────────────────────
+;
+; var handler = (int x) => target(x);   /   var blk = (int y) { ... };
+;
+; Anchor discipline (same contract as javascript/query.ts): @declaration.function
+; sits on the INNER function_expression, NOT on the local_variable_declaration
+; wrapper. Dart is the one language that declares NO @scope.function in this
+; file — its function scopes are SYNTHESIZED in captures.ts from
+; declNode + findFunctionBody(declNode). So this rule deliberately does not add
+; a @scope.function of its own: doing that would collide with the synthesized
+; one at identical range, and duplicate scope ids make buildScopeTree throw,
+; which drops the whole file. Instead findFunctionBody now understands a
+; closure's child function_expression_body, so the existing synthesis produces
+; exactly one scope, anchored on the same node as the declaration (#2699 S4).
+;; THREE binding shapes, not one. Dart wraps only the FIRST local declarator in
+;; initialized_variable_definition; a top-level var and every later declarator
+;; are initialized_identifier, and a top-level final/const is
+;; static_final_declaration. Matching only the first shape left idiomatic
+;; top-level closures and the g of "var f = ..., g = ..." with no declaration
+;; capture, so findFunctionBody never synthesized their scope and they could
+;; never be call SOURCES.
+;;
+;; This mirrors DART_CALLABLE_CAPTURE_OPTIONS.bindingNodeTypes in captures.ts,
+;; which already listed all three for callable-flow. The two lists must stay in
+;; step; dart-closure-binding-shapes.test.ts pins that.
+(initialized_variable_definition
+  (identifier) @declaration.name
+  (function_expression) @declaration.function)
+
+(initialized_identifier
+  (identifier) @declaration.name
+  (function_expression) @declaration.function)
+
+(static_final_declaration
+  (identifier) @declaration.name
+  (function_expression) @declaration.function)
 
 ; ── Declarations — methods (inside class/mixin/extension bodies) ─────────────
 (method_signature
@@ -78,6 +163,37 @@ const DART_SCOPE_QUERY = `
     (initialized_identifier
       . (identifier) @declaration.name))) @declaration.property
 
+; ── Declarations — closure bindings (#2693) ──────────────────────────────────
+; \`var f = (x) => x;\` binds a callable. Without a declaration the binding has
+; no SymbolDefinition, so callable-value-flow has nothing to attach its seed to
+; and \`f()\` stays unresolved even though the graph emits a Function node for it.
+;
+; Restricted to a function_expression value on purpose: declaring every Dart
+; variable would mint defs repo-wide for no resolution benefit. The top-level
+; rule is anchored under (program) — the same disambiguation the graph-node
+; query uses — so class-body fields, which reuse initialized_identifier_list
+; and are already @declaration.property, are never matched twice.
+(program
+  (initialized_identifier_list
+    (initialized_identifier
+      (identifier) @declaration.name
+      (function_expression))) @declaration.variable)
+(program
+  (static_final_declaration_list
+    (static_final_declaration
+      (identifier) @declaration.name
+      (function_expression))) @declaration.variable)
+(initialized_variable_definition
+  name: (identifier) @declaration.name
+  value: (function_expression)) @declaration.variable
+; Second and later declarators of \`var f = .., g = ..;\` are nested
+; initialized_identifier children of the same initialized_variable_definition,
+; which the field-based rule above only reaches for the first name.
+(initialized_variable_definition
+  (initialized_identifier
+    (identifier) @declaration.name
+    (function_expression)) @declaration.variable)
+
 ; ── Imports / re-exports ─────────────────────────────────────────────────────
 (import_or_export
   (library_import
@@ -94,14 +210,19 @@ let _query: Parser.Query | null = null;
 export function getDartParser(): Parser {
   if (_parser === null) {
     _parser = new Parser();
-    _parser.setLanguage(Dart as Parameters<Parser['setLanguage']>[0]);
+    _parser.setLanguage(
+      getLanguageGrammar(SupportedLanguages.Dart) as Parameters<Parser['setLanguage']>[0],
+    );
   }
   return _parser;
 }
 
 export function getDartScopeQuery(): Parser.Query {
   if (_query === null) {
-    _query = new Parser.Query(Dart as Parameters<Parser['setLanguage']>[0], DART_SCOPE_QUERY);
+    _query = new Parser.Query(
+      getLanguageGrammar(SupportedLanguages.Dart) as Parameters<Parser['setLanguage']>[0],
+      DART_SCOPE_QUERY,
+    );
   }
   return _query;
 }

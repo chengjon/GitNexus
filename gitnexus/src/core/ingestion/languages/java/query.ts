@@ -39,8 +39,23 @@ const JAVA_SCOPE_QUERY = `
 (record_declaration) @scope.class
 (annotation_type_declaration) @scope.class
 
+;; Anonymous class body: \`new Runnable() { public void run() {} }\`.
+;; Without its own scope, a method's auto-hoist (scope-extractor.ts) has
+;; nowhere to stop and leaks the name past the anonymous class into the
+;; enclosing scope -- the same failure mode fixed for TS/JS object
+;; literals (#2545).
+(object_creation_expression
+  (class_body) @scope.class)
+
+;; Enum constant body: \`enum E { A { public void hook() {} } }\` --
+;; javac's other anonymous-class shape (E$N), same scope-boundary need
+;; and same class_body anchor (#2555).
+(enum_constant
+  body: (class_body) @scope.class)
+
 (method_declaration) @scope.function
 (constructor_declaration) @scope.function
+(compact_constructor_declaration) @scope.function
 
 ;; Declarations — types
 (class_declaration
@@ -57,6 +72,15 @@ const JAVA_SCOPE_QUERY = `
 
 (annotation_type_declaration
   name: (identifier) @declaration.name) @declaration.class
+
+;; Class annotation syntax is carried to post-resolution enrichment. Keeping
+;; this in the existing scope query avoids a second AST build/traversal.
+(class_declaration
+  (modifiers
+    [
+      (marker_annotation name: (_) @class-annotation.name)
+      (annotation name: (_) @class-annotation.name)
+    ])) @class-annotation.class
 
 ;; Declarations — methods / constructors
 (method_declaration
@@ -214,8 +238,23 @@ const JAVA_SCOPE_QUERY = `
   type: (generic_type
     (type_identifier) @reference.name)) @reference.call.constructor
 
+;; References — qualified constructor calls: new pkg.Foo(), new a.b.Foo() (F35 #1928)
+;; tree-sitter-java parses \`pkg.Foo\` as a scoped_type_identifier whose final
+;; child is the simple type. Bind that tail as @reference.name (trailing \`.\`
+;; anchor = last child) so resolution targets \`Foo\`, not the raw \`pkg.Foo\` text.
+;; Mirrors the TS/JS new-expression qualified-constructor capture.
 (object_creation_expression
-  type: (scoped_type_identifier) @reference.call.constructor.qualified) @reference.call.constructor
+  type: (scoped_type_identifier
+    (type_identifier) @reference.name .) @reference.call.constructor.qualified) @reference.call.constructor
+
+;; References — qualified + generic constructor calls: new pkg.Box<T>() (F35 #1928)
+;; The base is a generic_type whose first child is a scoped_type_identifier, so
+;; neither the simple-generic nor the plain-scoped arm above matches it. Bind the
+;; scoped tail as @reference.name.
+(object_creation_expression
+  type: (generic_type
+    (scoped_type_identifier
+      (type_identifier) @reference.name .) @reference.call.constructor.qualified)) @reference.call.constructor
 
 ;; References — method references: User::getName, obj::method
 (method_reference

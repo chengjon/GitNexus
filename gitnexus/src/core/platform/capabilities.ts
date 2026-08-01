@@ -1,4 +1,6 @@
+import fs from 'fs';
 import os from 'os';
+import path from 'path';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -28,7 +30,31 @@ const packageVersion = (name: string): string | undefined => {
   try {
     return require(`${name}/package.json`).version;
   } catch {
-    return undefined;
+    // Packages whose `exports` map omits ./package.json (e.g. @ladybugdb/core)
+    // reject the direct require with ERR_PACKAGE_PATH_NOT_EXPORTED, which made
+    // doctor print "LadybugDB: unknown" on every platform (#2374). Resolve the
+    // entry point instead and walk up to the package's own package.json.
+    try {
+      let dir = path.dirname(require.resolve(name));
+      // Entry points sit at the package root or a shallow dist/ dir; a few
+      // hops always reach the package's own package.json.
+      for (let hops = 0; hops < 5; hops++) {
+        const candidate = path.join(dir, 'package.json');
+        if (fs.existsSync(candidate)) {
+          const pkg = JSON.parse(fs.readFileSync(candidate, 'utf8')) as {
+            name?: string;
+            version?: string;
+          };
+          if (pkg.name === name) return pkg.version;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 };
 
@@ -60,23 +86,24 @@ export const getRuntimeFingerprint = (): RuntimeFingerprint => ({
   onnxruntime: packageVersion('onnxruntime-node'),
 });
 
-export const isVectorExtensionSupportedByPlatform = (
-  platform: NodeJS.Platform = process.platform,
-): boolean => platform !== 'win32';
-
 export const getRuntimeCapabilities = (): RuntimeCapabilities => {
-  const vector = isVectorExtensionSupportedByPlatform() ? 'available' : 'unavailable';
   const exactScanLimit = getExactScanLimit();
+  // Static PLATFORM capability only. LadybugDB ships the VECTOR extension for
+  // every platform gitnexus supports — the extension server hosts win_amd64
+  // artifacts for every 0.18.x extension version (probed: v0.18.0 and v0.18.1
+  // both return a real 14 MB PE32+ DLL; the pinned 0.18.2 core resolves its
+  // extension directory to 0.18.1, strace-verified), so the old
+  // `platform !== 'win32'` gate was stale (#1365-era). Whether the extension
+  // actually LOADS on a given machine is a runtime question — doctor answers
+  // it with probeVectorExtensionLoad, and analyze/query degrade to exact scan
+  // when the load fails.
   return {
     graph: 'available',
     fts: 'available',
-    vector,
-    semanticMode: vector === 'available' ? 'vector-index' : 'exact-scan',
+    vector: 'available',
+    semanticMode: 'vector-index',
     exactScanLimit,
-    reason:
-      vector === 'unavailable'
-        ? 'LadybugDB VECTOR is disabled on this platform; semantic search uses exact scan when embeddings exist.'
-        : undefined,
+    reason: undefined,
   };
 };
 

@@ -1,4 +1,8 @@
-import { makeScopeId, type Capture, type CaptureMatch } from 'gitnexus-shared';
+import { makeScopeId, type Capture, type CaptureMatch, type ScopeId } from 'gitnexus-shared';
+import {
+  materializeClassAnnotationFacts,
+  recordClassAnnotationCapture,
+} from '../../frameworks/spring/bean-candidates.js';
 import {
   nodeIfType,
   nodeToCapture,
@@ -14,8 +18,62 @@ import { normalizeKotlinType } from './interpret.js';
 import { synthesizeKotlinReceiverBinding } from './receiver-binding.js';
 import { getKotlinParser, getKotlinScopeQuery } from './query.js';
 import { markCompanionScope } from './companion-scopes.js';
+import {
+  setKotlinClassAnnotationFacts,
+  setKotlinSpringConditionalFacts,
+  setKotlinSpringDiFacts,
+} from './capture-side-channel.js';
+import { captureKotlinPackageFact } from './package-facts.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { captureKotlinSpringDiClassFact, type KotlinSpringDiClassFact } from './spring-di.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
+import {
+  captureKotlinSpringConditionalFacts,
+  type KotlinSpringConditionalFact,
+} from './spring-conditionals.js';
 
 const FUNCTION_DECL_TAGS = ['@declaration.function'] as const;
+
+const KOTLIN_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set(['function_declaration', 'anonymous_function', 'lambda_literal']),
+  callNodeTypes: new Set(['call_expression']),
+  parameterListNodeTypes: new Set(['function_value_parameters', 'value_arguments']),
+  parameterNodeTypes: new Set(['parameter']),
+  bindingNodeTypes: new Set(['property_declaration']),
+  assignmentNodeTypes: new Set(['assignment']),
+  identifierNodeTypes: new Set(['simple_identifier', 'type_identifier']),
+  callableReferenceNodeTypes: new Set(['callable_reference']),
+  callableProtocolMethods: new Set(['invoke']),
+  functionName: (node: SyntaxNode) =>
+    node.namedChildren.find(
+      (child): child is SyntaxNode => child !== null && child.type === 'simple_identifier',
+    )?.text,
+  extractAssignment: (node: SyntaxNode) => {
+    // tree-sitter-kotlin's `assignment` node is FIELDLESS (positional
+    // `directly_assignable_expression` then the value), so the shared
+    // field-based fallback returned nothing and nested reassignments
+    // (`chosen = ::target` inside a block) never produced flow facts
+    // (#2522 review, shallow-coverage gap).
+    if (node.type === 'assignment') {
+      const named = node.namedChildren.filter((child): child is SyntaxNode => child !== null);
+      if (named.length < 2) return undefined;
+      return { destination: named[0]!, source: named[named.length - 1]! };
+    }
+    if (node.type !== 'property_declaration') return undefined;
+    if (!node.children.some((child) => child.text === '=')) return undefined;
+    const destination = node.namedChildren.find(
+      (child): child is SyntaxNode => child !== null && child.type === 'variable_declaration',
+    );
+    const source = [...node.namedChildren]
+      .reverse()
+      .find(
+        (child): child is SyntaxNode =>
+          child !== null && child.id !== destination?.id && child.type !== 'binding_pattern_kind',
+      );
+    return destination === undefined || source === undefined ? undefined : { destination, source };
+  },
+  normalizeQualifiedName: (raw: string) => raw.replaceAll('::', '.'),
+} as const;
 
 export function emitKotlinScopeCaptures(
   sourceText: string,
@@ -31,14 +89,20 @@ export function emitKotlinScopeCaptures(
   } else {
     recordKotlinCacheHit();
   }
+  captureKotlinPackageFact(filePath, tree.rootNode);
 
   const out: CaptureMatch[] = [];
+  const classAnnotations = new Map<ScopeId, Set<string>>();
+  const springConditionalFacts: KotlinSpringConditionalFact[] = [];
+  const springDiFacts: KotlinSpringDiClassFact[] = [];
+  const springDiClassNodeIds = new Set<number>();
   const returnTypes = collectKotlinReturnTypeTexts(tree.rootNode);
   out.push(...synthesizeKotlinLocalAssignmentBindings(tree.rootNode, returnTypes));
   out.push(...synthesizeKotlinLoopBindings(tree.rootNode, returnTypes));
   out.push(...synthesizeKotlinSmartCastBindings(tree.rootNode));
   out.push(...synthesizeKotlinLambdaBindings(tree.rootNode, returnTypes));
   out.push(...synthesizeKotlinInheritanceReferences(tree.rootNode));
+  out.push(...synthesizeKotlinSecondaryConstructorDeclarations(tree.rootNode));
 
   for (const match of getKotlinScopeQuery().matches(tree.rootNode)) {
     const grouped: Record<string, Capture> = {};
@@ -54,6 +118,31 @@ export function emitKotlinScopeCaptures(
       groupedNodes[tag] = capture.node;
     }
     if (Object.keys(grouped).length === 0) continue;
+
+    const springDiClassNode = nodeIfType(groupedNodes['@scope.class'], 'class_declaration');
+    if (springDiClassNode !== null && !springDiClassNodeIds.has(springDiClassNode.id)) {
+      springDiClassNodeIds.add(springDiClassNode.id);
+      springConditionalFacts.push(
+        ...captureKotlinSpringConditionalFacts(springDiClassNode, filePath),
+      );
+      const fact = captureKotlinSpringDiClassFact(springDiClassNode, filePath);
+      if (fact !== null) springDiFacts.push(fact);
+    }
+
+    const annotatedClass = grouped['@class-annotation.class'];
+    const annotationName = grouped['@class-annotation.name'];
+    if (annotatedClass !== undefined && annotationName !== undefined) {
+      const classNode = nodeIfType(groupedNodes['@class-annotation.class'], 'class_declaration');
+      if (classNode !== null && isKotlinBeanCandidateClass(classNode)) {
+        recordClassAnnotationCapture(
+          classAnnotations,
+          filePath,
+          annotatedClass,
+          annotationName.text,
+        );
+      }
+      continue;
+    }
 
     // Companion-object marker (#1756 / U4). The `@scope.companion`
     // capture is a side-channel marker — it shares its range with the
@@ -85,6 +174,40 @@ export function emitKotlinScopeCaptures(
           continue;
         }
       }
+    }
+
+    // Callable references (`::method`, `Type::new`, `obj::m`) — F47 (#1919).
+    // The query captures the referenced member as `@reference.name`, an
+    // optional receiver type as `@reference.receiver`, and the whole node as
+    // `@reference.callable`. Rewrite into a call reference so it participates
+    // in call-graph resolution: a bare `::member` resolves as a free call;
+    // a `Receiver::member` resolves as a member call against the receiver
+    // type. The function/constructor is referenced (not invoked), so no
+    // arity/argument metadata is attached.
+    if (grouped['@reference.callable'] !== undefined) {
+      const nameCap = grouped['@reference.name'];
+      const callableNode = groupedNodes['@reference.callable'];
+      if (nameCap !== undefined && callableNode !== undefined) {
+        const receiverCap = grouped['@reference.receiver'];
+        // The anchor Capture must carry the call-form tag as its `name` —
+        // the scope-extractor reads `Capture.name` (not the map key) to
+        // classify the reference kind, so re-wrap via nodeToCapture rather
+        // than reusing the `@reference.callable`-named Capture (whose head
+        // `callable` resolves to no ReferenceKind and silently drops it).
+        if (receiverCap !== undefined) {
+          out.push({
+            '@reference.call.member': nodeToCapture('@reference.call.member', callableNode),
+            '@reference.name': nameCap,
+            '@reference.receiver': receiverCap,
+          });
+        } else {
+          out.push({
+            '@reference.call.free': nodeToCapture('@reference.call.free', callableNode),
+            '@reference.name': nameCap,
+          });
+        }
+      }
+      continue;
     }
 
     if (
@@ -124,6 +247,12 @@ export function emitKotlinScopeCaptures(
     }
 
     if (grouped['@scope.function'] !== undefined) {
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, groupedNodes['@reference.receiver']);
       out.push(grouped);
       const fnNode = nodeIfType(groupedNodes['@scope.function'], 'function_declaration');
       if (fnNode !== null) {
@@ -181,13 +310,33 @@ export function emitKotlinScopeCaptures(
       }
     }
 
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, groupedNodes['@reference.receiver']);
     out.push(grouped);
 
     const extensionFallback = extensionFreeCallFallback(grouped, groupedNodes);
     if (extensionFallback !== null) out.push(extensionFallback);
   }
 
+  setKotlinClassAnnotationFacts(filePath, materializeClassAnnotationFacts(classAnnotations));
+  setKotlinSpringConditionalFacts(filePath, springConditionalFacts);
+  setKotlinSpringDiFacts(filePath, springDiFacts);
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, KOTLIN_CALLABLE_CAPTURE_OPTIONS));
   return out;
+}
+
+function isKotlinBeanCandidateClass(classNode: SyntaxNode): boolean {
+  if (classNode.children.some((child) => child.type === 'interface' || child.type === 'enum')) {
+    return false;
+  }
+  const modifiers = classNode.namedChildren.find((child) => child.type === 'modifiers');
+  return !modifiers?.namedChildren.some(
+    (child) => child.type === 'class_modifier' && child.text.trim() === 'annotation',
+  );
 }
 
 /**
@@ -249,6 +398,100 @@ function synthesizeKotlinInheritanceReferences(rootNode: SyntaxNode): CaptureMat
         '@reference.name': nodeToCapture('@reference.name', nameNode),
       });
     }
+  }
+  return out;
+}
+
+/**
+ * The enclosing type name for a node nested in a class/object/companion body.
+ * Walks up to the first `class_declaration` / `object_declaration` /
+ * `companion_object` ancestor and returns its `type_identifier` name node.
+ * Used to qualify a secondary-constructor declaration as `<ClassName>.constructor`.
+ */
+function kotlinEnclosingTypeNameNode(node: SyntaxNode): SyntaxNode | null {
+  for (let cur: SyntaxNode | null = node.parent; cur !== null; cur = cur.parent) {
+    if (
+      cur.type === 'class_declaration' ||
+      cur.type === 'object_declaration' ||
+      cur.type === 'companion_object'
+    ) {
+      const nameNode = cur.namedChildren.find((c) => c.type === 'type_identifier');
+      return nameNode ?? null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Synthesize a `@declaration.constructor` capture for each Kotlin
+ * `secondary_constructor` (issue #1919 review CF1). The structure phase already
+ * materializes a `Constructor` graph node (`Constructor:file:Class.constructor#<arity>`),
+ * but the registry-primary scope-resolution path had no Constructor *def* in the
+ * scope tree — so a call inside the constructor body resolved its caller anchor
+ * up to the enclosing Class def, mis-attributing the CALLS edge to the class.
+ *
+ * Paired with `(secondary_constructor) @scope.function` in query.ts: that rule
+ * makes the constructor body its own Function scope; this declaration places a
+ * Constructor def in that scope so `pickCallerCallableDef` anchors calls on the
+ * Constructor. The def is keyed to match the structure-phase node id:
+ *   - `@declaration.qualified_name` = `<ClassName>.constructor` so the bridge's
+ *     qualified key (`<q>:file::Constructor::Class.constructor`) hits the node.
+ *   - `@declaration.parameter-types` so two same-name secondary constructors are
+ *     disambiguated by the bridge's parameter-types key (`~Int,Int`), matching
+ *     the `#<arity>`-suffixed structure node for the overload with the same
+ *     parameter shape. (The zero-arg overload carries no parameter types and
+ *     resolves via the qualified/simple key to the `#0` node.)
+ *
+ * The anchor spans the whole `secondary_constructor` node — same range as the
+ * `@scope.function` it pairs with — so the def is owned by that Function scope
+ * and the constructor name auto-hoists to the enclosing class scope (exactly the
+ * binding shape a normal method declaration produces).
+ */
+function synthesizeKotlinSecondaryConstructorDeclarations(rootNode: SyntaxNode): CaptureMatch[] {
+  const out: CaptureMatch[] = [];
+  for (const ctorNode of descendantsOfType(rootNode, 'secondary_constructor')) {
+    const keyword = ctorNode.namedChildren.find((c) => c.type === 'constructor');
+    // The `constructor` keyword is an anonymous token; fall back to the node
+    // itself for the name capture position when the named-child lookup misses.
+    const nameAnchor = keyword ?? ctorNode;
+    const classNameNode = kotlinEnclosingTypeNameNode(ctorNode);
+    const qualifiedName =
+      classNameNode !== null ? `${classNameNode.text}.constructor` : 'constructor';
+
+    const match: Record<string, Capture> = {
+      '@declaration.constructor': nodeToCapture('@declaration.constructor', ctorNode),
+      '@declaration.name': syntheticCapture('@declaration.name', nameAnchor, 'constructor'),
+      '@declaration.qualified_name': syntheticCapture(
+        '@declaration.qualified_name',
+        ctorNode,
+        qualifiedName,
+      ),
+    };
+
+    const arity = computeKotlinArityMetadata(ctorNode);
+    if (arity.parameterCount !== undefined) {
+      match['@declaration.parameter-count'] = syntheticCapture(
+        '@declaration.parameter-count',
+        ctorNode,
+        String(arity.parameterCount),
+      );
+    }
+    if (arity.requiredParameterCount !== undefined) {
+      match['@declaration.required-parameter-count'] = syntheticCapture(
+        '@declaration.required-parameter-count',
+        ctorNode,
+        String(arity.requiredParameterCount),
+      );
+    }
+    if (arity.parameterTypes !== undefined) {
+      match['@declaration.parameter-types'] = syntheticCapture(
+        '@declaration.parameter-types',
+        ctorNode,
+        JSON.stringify(arity.parameterTypes),
+      );
+    }
+
+    out.push(match);
   }
   return out;
 }

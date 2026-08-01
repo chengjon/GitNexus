@@ -8,13 +8,22 @@
  * - Error handling for invalid URIs
  * - Resource handlers with mocked backend
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getResourceDefinitions,
   getResourceTemplates,
   parseResourceUri,
   readResource,
 } from '../../src/mcp/resources.js';
+import type { RepoMeta } from '../../src/storage/repo-manager.js';
+
+// Mock loadMeta so getContextResource doesn't hit the filesystem (#2438 fix).
+// Default: returns null (simulates no on-disk meta — falls back to cached handle).
+const { loadMetaMock } = vi.hoisted(() => ({ loadMetaMock: vi.fn().mockResolvedValue(null) }));
+vi.mock('../../src/storage/repo-manager.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/storage/repo-manager.js')>();
+  return { ...actual, loadMeta: loadMetaMock };
+});
 
 // ─── Minimal mock backend ──────────────────────────────────────────
 
@@ -25,6 +34,8 @@ function createMockBackend(overrides: Partial<Record<string, any>> = {}): any {
       overrides.resolvedRepo ?? {
         name: 'test-repo',
         repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
         lastCommit: 'abc1234',
       },
     ),
@@ -386,5 +397,218 @@ describe('readResource', () => {
     const result = await readResource('gitnexus://repos', backend);
     expect(result).toContain('Multiple repos indexed');
     expect(result).toContain('repo parameter');
+    // The example must use a registered tool name, not the unregistered
+    // `gitnexus_search` / `gitnexus_*` prefix (#2059).
+    // #2175: advertise the renamed param, not the legacy "query" key.
+    expect(result).toContain('query({search_query: "auth"');
+    expect(result).not.toContain('query({query:');
+    expect(result).not.toMatch(/gitnexus_/);
+  });
+});
+
+// ─── Context resource freshness (#2438) ─────────────────────────────────────
+//
+// After an out-of-process `analyze --index-only` refresh, the RepoHandle cached
+// by LocalBackend is stale (lastCommit and stats come from the registry snapshot
+// taken at init time). getContextResource must read from disk on every call so
+// the staleness banner and stats always reflect the actual on-disk state.
+
+describe('context resource freshness after out-of-process analyze (#2438)', () => {
+  beforeEach(() => {
+    loadMetaMock.mockReset();
+    loadMetaMock.mockResolvedValue(null); // default: no fresh meta
+  });
+
+  const CONTEXT = {
+    projectName: 'test-project',
+    stats: { fileCount: 100, functionCount: 500, communityCount: 3, processCount: 10 },
+  };
+
+  it('uses fresh lastCommit from disk meta for staleness check', async () => {
+    // Simulate: the cached handle has an old commit, but the on-disk meta has
+    // been updated to the current HEAD by an out-of-process analyze.
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'fresh-head-commit',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 200, nodes: 1000, processes: 20 },
+    });
+
+    const backend = createMockBackend({
+      resolvedRepo: {
+        name: 'test-project',
+        repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
+        lastCommit: 'old-stale-commit', // stale cached value
+      },
+      context: CONTEXT,
+    });
+
+    // loadMeta is called with storagePath, not lbugPath
+    await readResource('gitnexus://repo/test-project/context', backend);
+    expect(loadMetaMock).toHaveBeenCalledWith('/tmp/test-repo/.gitnexus');
+  });
+
+  it('shows fresh stats from disk meta after out-of-process analyze', async () => {
+    // Cached stats are stale (100 files, 500 symbols); disk meta has refreshed stats
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'current-head',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 250, nodes: 1500, processes: 25 },
+    });
+
+    const backend = createMockBackend({
+      context: CONTEXT, // stale: fileCount:100, functionCount:500
+    });
+
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // Fresh stats from disk override the cached context stats
+    expect(result).toContain('files: 250');
+    expect(result).toContain('symbols: 1500');
+    expect(result).toContain('processes: 25');
+    // Stale cached values should NOT appear
+    expect(result).not.toContain('files: 100');
+    expect(result).not.toContain('symbols: 500');
+  });
+
+  it('exposes the full indexed commit and typed runner receipt from fresh metadata', async () => {
+    const runnerIdentity = {
+      schemaVersion: 4 as const,
+      runtime: {
+        executablePath: '/usr/bin/node',
+        version: 'v22.0.0',
+        platform: 'linux',
+        architecture: 'x64',
+        modulesAbi: '127',
+        libc: 'glibc:2.39',
+      },
+      cliVersion: '1.6.9',
+      invokedArtifact: { path: '/opt/gitnexus/dist/cli/index.js', digest: 'sha256:entry' },
+      build: {
+        kind: 'distribution' as const,
+        rootPath: '/opt/gitnexus/dist',
+        canonicalization: 'gitnexus-analyzer-build-v2' as const,
+        digest: 'sha256:build',
+      },
+      dependencyRuntime: {
+        manifestPath: '/opt/gitnexus/package.json',
+        lockfilePath: '/opt/package-lock.json',
+        canonicalization: 'gitnexus-analyzer-dependency-runtime-v4' as const,
+        packageCount: 42,
+        artifactCount: 12,
+        digest: 'sha256:dependencies',
+      },
+    };
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: '0123456789abcdef0123456789abcdef01234567',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      runnerIdentity,
+    });
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain('index:');
+    expect(result).toContain('commit: "0123456789abcdef0123456789abcdef01234567"');
+    expect(result).toContain(`runner_identity: ${JSON.stringify(runnerIdentity)}`);
+    expect(result).toContain('runner_identity_schema_status: "current"');
+  });
+
+  it('marks an older indexed runner receipt schema as legacy', async () => {
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: '0123456789abcdef0123456789abcdef01234567',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      runnerIdentity: { schemaVersion: 1 },
+    } as unknown as RepoMeta);
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain('runner_identity_schema_status: "legacy-or-unknown"');
+  });
+
+  it('exposes the same machine-readable incomplete reasons as status', async () => {
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'current-head',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      incrementalInProgress: { startedAt: 1, toWriteCount: 2 },
+      embeddingCheckpoint: {
+        at: '2026-07-18T12:00:00.000Z',
+        nodesProcessed: 1,
+        totalNodes: 2,
+        chunksProcessed: 1,
+        model: 'fixture',
+        dimensions: 3,
+        provider: 'local',
+      },
+    });
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain(
+      'incomplete_reasons: ["incremental-in-progress","embedding-checkpoint-pending"]',
+    );
+  });
+
+  it('falls back to cached stats when loadMeta returns null', async () => {
+    // loadMeta returns null (e.g. pre-analyze state or missing gitnexus.json)
+    loadMetaMock.mockResolvedValue(null);
+
+    const backend = createMockBackend({ context: CONTEXT });
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // Must still show the cached stats (no crash, no blank output)
+    expect(result).toContain('files: 100');
+    expect(result).toContain('symbols: 500');
+    expect(result).toContain('processes: 10');
+  });
+
+  it('falls back to cached lastCommit when loadMeta throws', async () => {
+    // loadMeta throws (e.g. permissions error)
+    loadMetaMock.mockRejectedValue(new Error('EACCES: permission denied'));
+
+    const backend = createMockBackend({ context: CONTEXT });
+    // Should not throw — falls back gracefully
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    expect(result).toContain('test-project');
+    expect(result).toContain('stats:');
+  });
+
+  it('does not show staleness banner when fresh lastCommit matches HEAD', async () => {
+    // After analyze completes, lastCommit in meta equals HEAD → no stale banner.
+    // We simulate this by returning a fresh meta; checkStaleness will be called
+    // with the fresh commit but the /tmp path has no git repo so it returns safe.
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'head-after-analyze',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 200, nodes: 1000, processes: 20 },
+    });
+
+    const backend = createMockBackend({
+      resolvedRepo: {
+        name: 'test-project',
+        repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
+        lastCommit: 'old-stale-commit', // stale, would show banner if used
+      },
+      context: CONTEXT,
+    });
+
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // With a non-git path checkStaleness errors → no banner even with stale commit.
+    // What matters: the fresh commit was passed to checkStaleness, not the old one.
+    // (The staleness banner itself requires a live git repo, tested in integration.)
+    expect(result).toContain('test-project');
+    expect(result).not.toContain('error:');
   });
 });
