@@ -405,6 +405,8 @@ describe('run-analyze module', () => {
       // A plain analyze ignores the pinned sub-index and serves the flat
       // workspace slot; the same-commit clean-tree fast path restamps the
       // slot's branch label and removes the now-shadowed sub-index.
+      await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
+      await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(tmpRepo.dbPath, {}, { onProgress: () => {} });
       expect(result.alreadyUpToDate).toBe(true);
@@ -462,6 +464,8 @@ describe('run-analyze module', () => {
       // repo unregistered, so the adopt must be a full no-op on disk
       // (#2264/#1169 no-self-heal, #2364 review F2).
 
+      await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
+      await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(tmpRepo.dbPath, {}, { onProgress: () => {} });
       expect(result.alreadyUpToDate).toBe(true);
@@ -510,6 +514,8 @@ describe('run-analyze module', () => {
 
       // Detached HEAD → branchLabel is null → the restamp block must not
       // fire: the existing stamp survives, mirroring the end-of-run write.
+      await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
+      await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(tmpRepo.dbPath, {}, { onProgress: () => {} });
       expect(result.alreadyUpToDate).toBe(true);
@@ -562,6 +568,10 @@ describe('run-analyze module', () => {
         runnerIdentity,
       });
 
+      await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
+      await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
+      await fs.mkdir(path.dirname(branch.lbugPath), { recursive: true });
+      await fs.writeFile(branch.lbugPath, ''); // simulate branch-slot graph store
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(
         tmpRepo.dbPath,

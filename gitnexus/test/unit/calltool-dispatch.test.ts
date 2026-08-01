@@ -3669,8 +3669,10 @@ describe('cypher result formatting', () => {
     const result = await backend.callTool('cypher', {
       query: 'MATCH (n:Function) RETURN n.name LIMIT 0',
     });
-    expect(result).toHaveProperty('markdown');
-    expect(result.row_count).toBe(0);
+    // Upstream contract: an empty (non-tabular) result passes through as a raw
+    // array so Array.isArray consumers keep working (#2655 review F2).
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(0);
   });
 
   it('returns error object when cypher fails', async () => {

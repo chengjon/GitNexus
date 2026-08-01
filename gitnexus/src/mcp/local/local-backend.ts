@@ -2945,13 +2945,7 @@ export class LocalBackend {
       return result;
     }
 
-    if (!Array.isArray(result) || result.length === 0) {
-      return {
-        markdown: '_No results._',
-        row_count: 0,
-        hint: 'The query matched no nodes/edges. Try broadening filters or check labels with gitnexus://repo/{name}/schema.',
-      };
-    }
+    if (!Array.isArray(result) || result.length === 0) return result;
 
     const firstRow = result[0];
     if (typeof firstRow !== 'object' || firstRow === null) return result;
@@ -7393,6 +7387,7 @@ export class LocalBackend {
 
           return {
             route: r.name,
+            method: r.method,
             handler: r.filePath,
             ...(responseKeys.length > 0 ? { responseKeys } : {}),
             ...(errorKeys.length > 0 ? { errorKeys } : {}),
