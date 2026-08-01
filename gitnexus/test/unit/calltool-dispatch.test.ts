@@ -1436,7 +1436,8 @@ describe('LocalBackend.callTool', () => {
 
     await backend.callTool('detect_changes', { cwd: '/tmp/test-project', scope: 'unstaged' });
 
-    expect(resolveSpy).toHaveBeenCalledWith(undefined, { cwd: '/tmp/test-project' });
+    // resolveRepo(repoParam?, branch?, options?) — the cwd hint is the 3rd arg.
+    expect(resolveSpy).toHaveBeenCalledWith(undefined, undefined, { cwd: '/tmp/test-project' });
   });
 
   it('ignores whitespace-only cwd before dispatching local tools', async () => {
@@ -1444,7 +1445,7 @@ describe('LocalBackend.callTool', () => {
 
     await backend.callTool('detect_changes', { cwd: '   ', scope: 'unstaged' });
 
-    expect(resolveSpy).toHaveBeenCalledWith(undefined, undefined);
+    expect(resolveSpy).toHaveBeenCalledWith(undefined, undefined, undefined);
   });
 
   it('dispatches rename tool', async () => {

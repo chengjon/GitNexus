@@ -22,9 +22,17 @@ const mockVec = Array.from({ length: 384 }, (_, i) => i / 384);
 describe('HTTP embedding backend', () => {
   // Save original env state before any test mutates it
   const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  const savedHome = process.env.GITNEXUS_HOME;
   let tmpHome: string | null = null;
 
-  afterEach(() => {
+  beforeEach(async () => {
+    // Isolate from any ambient stored embeddings config (~/.gitnexus) so the
+    // "defaults to 384" assertions are deterministic in every environment.
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-http-embedder-'));
+    process.env.GITNEXUS_HOME = tmpHome;
+  });
+
+  afterEach(async () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
@@ -35,6 +43,11 @@ describe('HTTP embedding backend', () => {
       } else {
         process.env[key] = savedEnv[key];
       }
+    }
+    if (savedHome === undefined) {
+      delete process.env.GITNEXUS_HOME;
+    } else {
+      process.env.GITNEXUS_HOME = savedHome;
     }
     if (tmpHome) {
       await fs.rm(tmpHome, { recursive: true, force: true });

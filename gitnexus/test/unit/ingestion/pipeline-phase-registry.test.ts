@@ -75,6 +75,10 @@ const FULL_ORDER = [
   'orm',
   'crossFile',
   'scopeResolution',
+  // Local-fork feature retained through the upstream merge: the styleImports
+  // phase (STYLE_IMPORTS edges for Sass/CSS @use/@import/@forward) is registered
+  // in buildPhaseList right after scopeResolution, before springAutoConfiguration.
+  'styleImports',
   'springAutoConfiguration',
   'pruneLocalSymbols',
   'mro',

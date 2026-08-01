@@ -69,6 +69,7 @@ export const REL_TYPES = [
   'ENTRY_POINT_OF',
   'WRAPS',
   'QUERIES',
+  'STYLE_IMPORTS',
   'INJECTS',
   'CONDITIONAL_ON',
   'DECLARES',

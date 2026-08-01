@@ -183,7 +183,11 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo(undefined, { cwd: repoB })).resolves.toBe(handleB);
+      // resolveRepo(repoParam?, branch?, options?) since #2106 — the cwd hint
+      // is the 3rd (options) argument, the 2nd slot is the branch pin.
+      await expect(backend.resolveRepo(undefined, undefined, { cwd: repoB })).resolves.toBe(
+        handleB,
+      );
     } finally {
       rmSync(repoA, { recursive: true, force: true });
       rmSync(repoB, { recursive: true, force: true });
@@ -224,7 +228,7 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo(undefined, { cwd: plainDir })).rejects.toThrow(
+      await expect(backend.resolveRepo(undefined, undefined, { cwd: plainDir })).rejects.toThrow(
         'Multiple repositories indexed. Specify which one with the "repo" parameter.',
       );
     } finally {
@@ -246,7 +250,7 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo('alpha', { cwd: repoB })).resolves.toBe(handleA);
+      await expect(backend.resolveRepo('alpha', undefined, { cwd: repoB })).resolves.toBe(handleA);
     } finally {
       rmSync(repoA, { recursive: true, force: true });
       rmSync(repoB, { recursive: true, force: true });
@@ -264,7 +268,7 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo('shared', { cwd: repoB })).resolves.toBe(handleB);
+      await expect(backend.resolveRepo('shared', undefined, { cwd: repoB })).resolves.toBe(handleB);
     } finally {
       rmSync(repoA, { recursive: true, force: true });
       rmSync(repoB, { recursive: true, force: true });
@@ -285,7 +289,7 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo('shared', { cwd: plainDir })).rejects.toThrow(
+      await expect(backend.resolveRepo('shared', undefined, { cwd: plainDir })).rejects.toThrow(
         'Multiple registered repos match "shared"',
       );
     } finally {
@@ -314,7 +318,9 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo(undefined, { cwd: worktreeDir })).resolves.toBe(handleB);
+      await expect(backend.resolveRepo(undefined, undefined, { cwd: worktreeDir })).resolves.toBe(
+        handleB,
+      );
     } finally {
       try {
         execSync('git worktree remove -f wt-cwd', { cwd: repoB, stdio: 'ignore' });
@@ -344,7 +350,9 @@ describe('LocalBackend repo resolution — worktree paths', () => {
       backend.repos.set(handleA.id, handleA);
       backend.repos.set(handleB.id, handleB);
 
-      await expect(backend.resolveRepo('shared', { cwd: worktreeDir })).resolves.toBe(handleB);
+      await expect(backend.resolveRepo('shared', undefined, { cwd: worktreeDir })).resolves.toBe(
+        handleB,
+      );
     } finally {
       try {
         execSync('git worktree remove -f wt-shared', { cwd: repoB, stdio: 'ignore' });

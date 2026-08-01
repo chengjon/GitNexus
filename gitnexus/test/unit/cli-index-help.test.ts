@@ -254,7 +254,6 @@ describe('CLI help surface', () => {
       expect(result.status, cmd).toBe(0);
       expect(result.stdout, cmd).toContain('--branch <name>');
     }
-  })
   });
 
   it('wiki help shows provider, review, and verbose flags', () => {

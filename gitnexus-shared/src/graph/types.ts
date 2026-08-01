@@ -127,6 +127,7 @@ export type RelationshipType =
   | 'ENTRY_POINT_OF'
   | 'WRAPS'
   | 'QUERIES'
+  | 'STYLE_IMPORTS'
   /** Dependency-injection edge: a consumer class receives a likely provider
    *  through constructor, field, method, or collection injection. A
    *  per-language resolver identifies the site and provider metadata; the

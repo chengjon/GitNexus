@@ -620,14 +620,11 @@ Old content here.
   it('preserves existing skill files when gitnexus:keep is present', async () => {
     const keepDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-ai-ctx-skill-keep-'));
     const keepStorage = path.join(keepDir, '.gitnexus');
-    const skillPath = path.join(
-      keepDir,
-      '.claude',
-      'skills',
-      'gitnexus',
-      'gitnexus-cli',
-      'SKILL.md',
-    );
+    // Install skills live FLAT at .claude/skills/<name>/ since #2434; the old
+    // .claude/skills/gitnexus/<name> grouping dir is owned by the installer and
+    // actively removed (user-authored files only survive outside that path).
+    // The keep-marker contract is honored at the flat location.
+    const skillPath = path.join(keepDir, '.claude', 'skills', 'gitnexus-cli', 'SKILL.md');
     await fs.mkdir(path.dirname(skillPath), { recursive: true });
     await fs.mkdir(keepStorage, { recursive: true });
     const customSkill = `---

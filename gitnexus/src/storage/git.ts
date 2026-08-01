@@ -353,12 +353,20 @@ export const getGitRoot = (fromPath: string): string | null => {
  */
 export const getCanonicalRepoRoot = (fromPath: string): string | null => {
   try {
+    // `-C fromPath` (instead of passing the path via the execSync cwd option)
+    // keeps the CodeQL path-handling alert away (fork commit 0d142e82): the
+    // path is a plain argv element, never an option value that could be
+    // confused with a flag, and the two forms run git in the identical
+    // directory.
     const commonDir = chompGitOutput(
-      execSync('git rev-parse --path-format=absolute --git-common-dir', {
-        cwd: fromPath,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-      }),
+      execFileSync(
+        'git',
+        ['-C', fromPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+        {
+          stdio: ['ignore', 'pipe', 'ignore'],
+          windowsHide: true,
+        },
+      ),
     );
     if (!commonDir) return null;
     // Common dir is `<repo>/.git` for both the main checkout and all

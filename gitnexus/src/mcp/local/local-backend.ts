@@ -795,8 +795,19 @@ interface ApiImpactRoute {
  */
 type ApiImpactResult =
   | ApiImpactRoute
-  | { routes: ApiImpactRoute[]; total: number; index_status?: unknown; next_steps?: string[]; recovery?: { hint: string; steps: string[] } }
-  | { error: string; index_status?: unknown; next_steps?: string[]; recovery?: { hint: string; steps: string[] } };
+  | {
+      routes: ApiImpactRoute[];
+      total: number;
+      index_status?: unknown;
+      next_steps?: string[];
+      recovery?: { hint: string; steps: string[] };
+    }
+  | {
+      error: string;
+      index_status?: unknown;
+      next_steps?: string[];
+      recovery?: { hint: string; steps: string[] };
+    };
 
 /**
  * One repository entry as returned by {@link LocalBackend.listRepos} and in each
@@ -1365,7 +1376,11 @@ export class LocalBackend {
    * On a miss, re-reads the registry once in case a new repo was indexed
    * while the MCP server was running.
    */
-  async resolveRepo(repoParam?: string, branch?: string, options: RepoResolutionOptions = {}): Promise<RepoHandle> {
+  async resolveRepo(
+    repoParam?: string,
+    branch?: string,
+    options: RepoResolutionOptions = {},
+  ): Promise<RepoHandle> {
     let refreshedAfterAmbiguity = false;
     let result: RepoHandle | null;
     try {
@@ -2071,9 +2086,13 @@ export class LocalBackend {
 
     // Resolve repo from optional param (re-reads registry on miss). An optional
     // `branch` param scopes the resolved handle to that branch's index (#2106).
+    // The caller's `cwd` hint (advertised in every repo-scoped tool schema) is
+    // forwarded as the resolution options so multi-repo setups can pick the
+    // nearest handle instead of falling back to the server's process.cwd().
     const repo = await this.resolveRepo(
       p.repo as string | undefined,
       p.branch as string | undefined,
+      this.repoResolutionOptions(p),
     );
 
     switch (method) {
@@ -5340,7 +5359,8 @@ export class LocalBackend {
         direction: params.direction,
         impactedCount: 0,
         risk: 'UNKNOWN',
-        suggestion: suggestion || 'The graph query failed — try gitnexus context <symbol> as a fallback',
+        suggestion:
+          suggestion || 'The graph query failed — try gitnexus context <symbol> as a fallback',
         index_status: indexStatus,
         ...(recoverySuggestion ? { recoverySuggestion } : {}),
       };
@@ -7320,7 +7340,11 @@ export class LocalBackend {
     try {
       const routeFilter = params.route ? `AND n.name CONTAINS $route` : '';
       const queryParams = params.route ? { route: params.route } : {};
-      const allRoutes = await this.fetchRoutesWithConsumers(repo.lbugPath, routeFilter, queryParams);
+      const allRoutes = await this.fetchRoutesWithConsumers(
+        repo.lbugPath,
+        routeFilter,
+        queryParams,
+      );
 
       const results = allRoutes
         .filter(
@@ -7484,7 +7508,6 @@ export class LocalBackend {
         index_status: buildIndexStatus(repo),
       };
     }
-
   }
 
   private async apiImpact(

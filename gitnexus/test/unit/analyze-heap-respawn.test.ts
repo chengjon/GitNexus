@@ -399,7 +399,10 @@ describe('analyzeCommand heap respawn', () => {
     expect(cap.records().some((r) => r.msg.includes('Analysis aborted in a native worker'))).toBe(
       true,
     );
-    expect(cap.records().some((r) => r.msg.includes('npm install -g gitnexus@latest'))).toBe(false);
+    // Since the upstream merge the native-abort guidance lists BOTH recovery
+    // channels: the "same install channel / local source checkout" line and the
+    // npm reinstall path (rebuilds native bindings) for npm-installed users.
+    expect(cap.records().some((r) => r.msg.includes('npm install -g gitnexus@latest'))).toBe(true);
     expect(cap.records().some((r) => r.msg.includes('local source checkout'))).toBe(true);
     expect(cap.records().some((r) => r.recoveryHint === 'native-worker-abort')).toBe(true);
     expect(stderrWriteSpy).toHaveBeenCalled();

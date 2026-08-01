@@ -120,10 +120,34 @@ describe('buildEmbeddingInstallCommand', () => {
   });
 });
 
+// The embedding stack is an optionalDependency pair that npm prunes when the
+// onnxruntime-node CUDA postinstall cannot fetch its binaries (#2370), so a
+// clean checkout may legitimately have it uninstalled. Mirror the module's own
+// resolution (same anchor tree — both files live under gitnexus/) so the
+// package-source assertion below is made only when its premise holds.
+const embeddingStackInstalled = ((): boolean => {
+  try {
+    require.resolve('@huggingface/transformers');
+    require.resolve('onnxruntime-node');
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 describe('resolveEmbeddingRuntime', () => {
-  it('finds the normally-installed stack (package source wins over the prefix)', () => {
+  it('reports package source when the stack is installed, null when pruned (never a phantom prefix)', () => {
     process.env.GITNEXUS_EMBEDDING_RUNTIME_DIR = '/nonexistent/for/this/test';
-    expect(resolveEmbeddingRuntime()).toEqual({ source: 'package' });
+    const resolved = resolveEmbeddingRuntime();
+    if (embeddingStackInstalled) {
+      // Package source wins over the (nonexistent) prefix.
+      expect(resolved).toEqual({ source: 'package' });
+    } else {
+      // Optional stack pruned in this environment: with the prefix override
+      // pointing at a nonexistent dir, the honest result is null — never a
+      // fabricated 'runtime-prefix'.
+      expect(resolved).toBeNull();
+    }
   });
 });
 

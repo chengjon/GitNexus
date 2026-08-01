@@ -20,6 +20,7 @@ import {
   BASICBLOCK_SCHEMA,
   RELATION_SCHEMA,
   EMBEDDING_SCHEMA,
+  EMBEDDING_DIMS,
   CREATE_VECTOR_INDEX_QUERY,
 } from '../../src/core/lbug/schema.js';
 
@@ -245,7 +246,12 @@ describe('LadybugDB Schema', () => {
   describe('embedding schema', () => {
     it('creates CodeEmbedding table', () => {
       expect(EMBEDDING_SCHEMA).toContain(`CREATE NODE TABLE ${EMBEDDING_TABLE_NAME}`);
-      expect(EMBEDDING_SCHEMA).toContain('embedding FLOAT[384]');
+      // Dimension-parametric (local-fork feature): EMBEDDING_DIMS resolves at
+      // module load from GITNEXUS_EMBEDDING_DIMS → stored ~/.gitnexus config →
+      // 384 default, so the DDL is asserted against the resolved constant
+      // rather than a hardcoded 384.
+      expect(EMBEDDING_DIMS).toBeGreaterThan(0);
+      expect(EMBEDDING_SCHEMA).toContain('embedding FLOAT[' + EMBEDDING_DIMS + ']');
     });
 
     it('has vector index query', () => {

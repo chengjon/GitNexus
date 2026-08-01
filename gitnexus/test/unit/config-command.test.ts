@@ -7,7 +7,7 @@ import {
   embeddingsConfigSetCommand,
   embeddingsConfigShowCommand,
 } from '../../src/cli/config.js';
-import { isHttpMode } from '../../src/core/embeddings/http-client.js';
+import { getHttpDimensions } from '../../src/core/embeddings/http-client.js';
 
 const originalEnv = { ...process.env };
 
@@ -18,6 +18,13 @@ describe('config embeddings commands', () => {
   beforeEach(async () => {
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-config-cli-'));
     process.env = { ...originalEnv, HOME: tmpHome, GITNEXUS_HOME: path.join(tmpHome, '.gitnexus') };
+    // Keep the HTTP-mode probes deterministic: readConfig prefers these env
+    // vars over stored config, so an ambient value would mask what the set
+    // command actually persisted.
+    delete process.env.GITNEXUS_EMBEDDING_URL;
+    delete process.env.GITNEXUS_EMBEDDING_MODEL;
+    delete process.env.GITNEXUS_EMBEDDING_DIMS;
+    delete process.env.GITNEXUS_EMBEDDING_PROVIDER;
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
@@ -48,7 +55,13 @@ describe('config embeddings commands', () => {
         batchSize: 8,
       },
     });
-    expect(isHttpMode()).toBe(true);
+    // isHttpMode() is an env-presence probe (GITNEXUS_EMBEDDING_URL +
+    // GITNEXUS_EMBEDDING_MODEL, #2385) that never consults stored config, so it
+    // is not the right probe for the stored-ollama activation this command
+    // performs. readConfig still honours the stored ollama provider
+    // (ollamaBaseUrl/ollamaModel → derived /v1 endpoint), which is observable
+    // through getHttpDimensions — the readConfig-backed probe.
+    expect(getHttpDimensions()).toBe(1024);
   });
 
   it('clear command removes only embeddings config', async () => {

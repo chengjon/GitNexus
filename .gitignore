@@ -128,3 +128,8 @@ gitnexus/web/
 
 # Machine-local skill-evolution evidence (consumed by eval/workflow_bench/evolve.py)
 eval/workflow_bench/learnings.jsonl
+
+# Local agent/tool runtime state (not project files)
+.codewhale/
+.work/
+.superpowers/

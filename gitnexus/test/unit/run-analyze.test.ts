@@ -150,10 +150,14 @@ describe('run-analyze module', () => {
         deleteNodesForFile: vi.fn(async () => undefined),
         deleteAllCommunitiesAndProcesses: vi.fn(async () => undefined),
         queryImporters: vi.fn(async () => []),
+        wipeLbugDbFiles: vi.fn(async () => undefined),
       }));
       vi.doMock('../../src/core/search/fts-indexes.js', () => ({
         createSearchFTSIndexes: vi.fn(async () => undefined),
         verifySearchFTSIndexes: vi.fn(async () => []),
+        initialiseSearchFTSStemmer: vi.fn(() => 'en'),
+        buildSearchIndexesOrDegrade: vi.fn(async () => ({ ok: true })),
+        getSearchFTSStemmer: vi.fn(() => 'en'),
       }));
       vi.doMock('../../src/cli/ai-context.js', () => ({
         generateAIContextFiles: vi.fn(async () => undefined),
@@ -170,6 +174,13 @@ describe('run-analyze module', () => {
 
       expect(result.alreadyUpToDate).not.toBe(true);
       expect(loadGraphToLbug).toHaveBeenCalledTimes(1);
+    } finally {
+      if (savedHome === undefined) delete process.env.GITNEXUS_HOME;
+      else process.env.GITNEXUS_HOME = savedHome;
+      await tmpHome.cleanup();
+      await tmpRepo.cleanup();
+    }
+  });
 
   it('resumes a matching embedding checkpoint instead of taking the clean fast path', async () => {
     const tmpRepo = await createTempDir('gitnexus-run-analyze-embedding-checkpoint-');
@@ -401,7 +412,6 @@ describe('run-analyze module', () => {
       const flatMeta = await loadMeta(flat.storagePath);
       expect(flatMeta?.branch).toBe('feature/x');
       await expect(fs.access(path.dirname(branch.metaPath))).rejects.toThrow();
-
     } finally {
       if (savedHome === undefined) delete process.env.GITNEXUS_HOME;
       else process.env.GITNEXUS_HOME = savedHome;

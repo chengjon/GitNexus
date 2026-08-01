@@ -4,6 +4,11 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
+// These tests spawn the real compiled CLI (dist/cli/index.js) and run full
+// analyze pipelines against temp git repos. Each execSync already declares a
+// 60s timeout of its own; vitest's global 30s testTimeout kills the tests
+// before that ceiling in slow sandboxes, so raise the suite ceiling above the
+// execSync intent instead of tightening any assertion.
 describe('--skip-git CLI flag', () => {
   const cliPath = path.resolve(__dirname, '../../dist/cli/index.js');
   const ftsUnavailableMessage = 'FTS extension unavailable - cannot create FTS index';
@@ -385,4 +390,4 @@ describe('--skip-git CLI flag', () => {
       }
     });
   });
-});
+}, 300_000);

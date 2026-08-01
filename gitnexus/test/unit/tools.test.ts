@@ -2,7 +2,7 @@
  * Unit Tests: MCP Tool Definitions
  *
  * Tests: GITNEXUS_TOOLS from tools.ts
-* - All 18 tools are defined (per-repo + overview + check + group_list/group_sync)
+ * - All 18 tools are defined (per-repo + overview + check + group_list/group_sync)
  * - Each tool has valid name, description, inputSchema
  * - Required fields are correct
  * - Optional repo parameter is present on tools that need it
@@ -36,7 +36,7 @@ const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
 describe('GITNEXUS_TOOLS', () => {
   it('exports all tools (8 base + 1 explain + 1 pdg_query + 3 route/tool/shape + 1 api_impact + 1 trace + 1 overview + 1 check + 2 group)', () => {
     expect(GITNEXUS_TOOLS).toHaveLength(18);
-    expect(names).toEqual(
+    expect(GITNEXUS_TOOLS.map((t) => t.name)).toEqual(
       expect.arrayContaining([
         'list_repos',
         'query',
@@ -51,6 +51,9 @@ describe('GITNEXUS_TOOLS', () => {
         'pdg_query',
         'overview',
         'check',
+      ]),
+    );
+  });
 
   it('each tool has name, description, and inputSchema', () => {
     for (const tool of GITNEXUS_TOOLS) {
@@ -279,7 +282,7 @@ describe('GITNEXUS_TOOLS', () => {
 
   it('per-repo tools have an optional branch scope param (#2106); group/list tools do not', () => {
     for (const tool of GITNEXUS_TOOLS) {
-      if (tool.name === 'list_repos' || GROUP_TOOLS.has(tool.name)) {
+      if (tool.name === 'list_repos' || tool.name === 'overview' || GROUP_TOOLS.has(tool.name)) {
         expect(tool.inputSchema.properties.branch).toBeUndefined();
         continue;
       }
