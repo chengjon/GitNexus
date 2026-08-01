@@ -8,7 +8,7 @@
 
 **Tech Stack:** git (merge/3-way)、TypeScript (tsc noEmitOnError=false 已确认)、vitest 4.1.7、npm ci、gitnexus 自带 CLI（detect_changes、doctor）。
 
-**关键前置产物（已完成，勿重复）：** `/tmp/opencode/resync/` 下已有：`local-commits.txt`（本地 91 提交清单）、`conflicts-61.txt`（61 冲突文件清单）、12 个深度定制文件快照（`*.snap`，含 `git.ts.snap`、`local-backend.ts.snap`、`file-classifier.ts.snap` 等）。merge 后 diff 无法区分 upstream 变化与冲突解决引入的变化，用快照做核对基准。
+**关键前置产物（已完成，勿重复）：** `/tmp/opencode/resync/` 下已有：`local-commits.txt`（本地 91 提交清单）、`conflicts-61.txt`（61 冲突文件清单）、**7 个有效深度定制文件快照**（`*.snap`：`git.ts`、`local-backend.ts`、`file-classifier.ts`、`run-analyze.ts`、`tools.ts`、`shadow-candidates.ts`、`subgraph-extract.ts`）。曾生成 3 个 0 字节空占位（`analyze-launch`/`analyzer-identity`/`escalation-gate`）——实测为 **upstream 单方新增文件**（本地 HEAD/merge-base 均不存在，merge 自动带入、无冲突），已删除、无需快照。merge 后 diff 无法区分 upstream 变化与冲突解决引入的变化，用快照做核对基准。
 
 **安全网：** merge 全程可 `git merge --abort`；基线 `b4281859` 及 spec/plan 均已提交（`598f2a45`、`0711864d`），reflog 完整。
 
@@ -104,8 +104,25 @@ Expected: `0`
 
 - [ ] **Step 4: 验证 i18n 完整性**
 
-Run: `grep -c "zh-CN\|en:" gitnexus/src/cli/i18n/zh-CN.ts`
-Expected: 与 `en.ts` 的 key 数一致（`grep -c "^\s*[a-zA-Z]*:" gitnexus/src/cli/i18n/en.ts` 的数）——zh-CN 不能丢 key。
+Run: 提取两文件的全部 key（含嵌套）做结构化对比：
+
+```bash
+cd /opt/claude/GitNexus/gitnexus
+node -e "
+const { readFileSync } = require('fs');
+const extract = (f) => {
+  const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  const keys = new Set();
+  for (const m of src.matchAll(/(['\"])([a-zA-Z][\w.-]*)\1\s*:/g)) keys.add(m[2]);
+  return keys;
+};
+const en = extract('src/cli/i18n/en.ts'), zh = extract('src/cli/i18n/zh-CN.ts');
+const missing = [...en].filter((k) => !zh.has(k));
+console.log('en keys:', en.size, '| zh keys:', zh.size, '| zh 缺失:', JSON.stringify(missing));
+process.exit(missing.length ? 1 : 0);
+"
+```
+Expected: `zh 缺失: []`（zh-CN 不能丢 key；允许 zh 多于 en 的本地新增 key）。
 
 ## Task 4: 核心源码（core/storage/mcp 组 10 个文件）冲突解决
 
@@ -140,14 +157,20 @@ Expected: git.ts 中 ≥2（两个函数都在）；ignore-service.ts ≥2（引
 
 - [ ] **Step 4: 本地深度定制点核对（用快照 diff）**
 
+以快照为基准核对精确特征函数（宽泛特征词 P0/P1/P2 会误命中注释，弃用）：
+
 ```bash
-for f in local-backend tools run-analyze; do
-  echo "== $f 本地定制特征核对 =="
-  grep -c "P0\|P1\|P2\|stale\|freshness\|fileClassifier\|file-classifier" gitnexus/src/mcp/$f.ts 2>/dev/null || true
+cd /opt/claude/GitNexus
+for f in local-backend tools; do
+  echo "== $f =="
+  git grep -c "isTestFilePath\|resolveWorktreeCwd\|checkStalenessAsync" -- gitnexus/src/mcp/$f.ts
+  git grep -c "classifyFiles\|aggregateClasses\|loadRepoFileClassificationRules" -- gitnexus/src/mcp/$f.ts
 done
-grep -c "incremental\|shadow\|subgraph" gitnexus/src/core/run-analyze.ts
+echo "== run-analyze =="
+git grep -c "shadowCandidatesFor\|extractChangedSubgraph" -- gitnexus/src/core/run-analyze.ts
+git grep -c "extractChangedSubgraph\|buildIncrementalWriteSet" -- gitnexus/src/core/incremental/subgraph-extract.ts
 ```
-说明：只要快照中存在的本地定制特征（P0/P1/P2 相关逻辑、file-classifier 引用、incremental analyze 钩子）在合并结果中仍然存在即视为通过；具体特征词以上述命令输出与快照对比为准。
+Expected: local-backend 定制特征（staleness 检查、file-classifier 挂钩、`isTestFilePath`/`resolveWorktreeCwd`）与 run-analyze 的 incremental 钩子（`shadowCandidatesFor`、`extractChangedSubgraph`）各 ≥1 处命中；`subgraph-extract.ts` 同时含 upstream 新增逻辑（该文件 upstream +64 行，本地未改、不在冲突面，merge 自动取 upstream 新版——核对其与 run-analyze 的本地调用接口仍兼容，即上面引用不丢）。
 
 ## Task 5: 测试文件组（17 个）冲突解决
 
@@ -329,10 +352,10 @@ Expected: 通过（或仅上游既有失败，记录到决策日志）
 - [ ] **Step 1: 触发重建**
 
 ```bash
-cd /opt/claude/GitNexus/gitnexus
-npx tsx src/cli/index.ts doctor --reindex 2>&1 | tail -5   # 若 CLI 无 --reindex 参数，用实际重建入口（analyze/rebuild 相关命令）
+cd /opt/claude/GitNexus
+node .gitnexus/run.cjs analyze 2>&1 | tail -5   # 已验证入口（doctor 无 --reindex；run.cjs 为 gitnexus analyze 自带重建路径，15584B）
 ```
-说明：RING4-2 删除 legacy resolution + schema 演进后，旧 `.gitnexus/lbug` 数据不可信。重建命令以合并后 `gitnexus doctor --help` 的实际入口为准；若存在文档化重建流程（如 `gitnexus index rebuild`），用它。
+说明：RING4-2 删除 legacy resolution + schema 演进后，旧 `.gitnexus/lbug` 数据不可信。`run.cjs` 是 `gitnexus analyze`（ai-context.ts）复制到 `.gitnexus/` 的重建入口（每次 analyze 自动刷新、不会漂移）；若其执行异常，兜底 `npx tsx src/cli/index.ts analyze --force`（全量重建）。
 
 - [ ] **Step 2: 验证索引可查询**
 
@@ -346,10 +369,10 @@ Expected: 仓库全量、无 schema 错误。
 - [ ] **Step 1: MCP 冒烟**
 
 ```bash
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n' | timeout 25 gitnexus mcp 2>/dev/null | head -c 200
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n' | timeout 25 gitnexus mcp 2>/dev/null | grep -o '"tools":\[[^]]*\]' | grep -o '"name"' | wc -l
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n' | timeout 25 npx gitnexus mcp 2>/dev/null | head -c 200
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n' | timeout 25 npx gitnexus mcp 2>/dev/null | node -e "const c=require('fs').readFileSync(0,'utf8'); const m=c.match(/\{\"jsonrpc\":\"2.0\",\"id\":2.*\}/s); if(!m) process.exit(1); const t=JSON.parse(m[0]).result.tools; console.log('tools:', t.length, JSON.stringify(t.map(x=>x.name)));"
 ```
-Expected: initialize 返回 `serverInfo: gitnexus`；tools 数 ≥14（upstream 2 个月可能新增工具，只多不少）
+Expected: initialize 返回 `serverInfo: gitnexus`；tools 数 ≥14（upstream 2 个月可能新增工具，只多不少；用 JSON 精确解析 tools 数组，避免 `grep -o '"name"'` 把 serverInfo.name 误计入）
 
 - [ ] **Step 2: 本地定制抽验（清单来自 spec 验收 7）**
 
@@ -396,7 +419,7 @@ Expected: 输出合并引入的变更清单，供 commit message 引用。
 
 ```bash
 cd /opt/claude/GitNexus
-git add -A
+git add -A -- . ':(exclude).codewhale'   # .codewhale/ 未被 .gitignore 覆盖（8KB 工具状态），pathspec 排除防止混入 merge commit
 git add -f docs/superpowers/plans/2026-08-01-gitnexus-upstream-resync-merge-log.md
 git commit -m "chore: merge upstream main (planned resync 2026-08-01, 527 commits)
 
@@ -436,3 +459,4 @@ Expected: 提交链 `merge commit → 0711864d → 598f2a45 → b4281859`；工�
 - spec「验收 8 upstream 新功能抽验」→ Task 13 Step 3（✓）
 - spec「提交：决策日志 + detect_changes」→ Task 14（✓）
 - 审核建议「91 提交清单/补丁快照」→ 前置产物（✓）
+- 审核 2 轮修正已吸收：快照实际 7 有效 + 3 空占位（upstream 单方新增，已删）→ Task 1 前置产物说明；i18n 结构化 key 对比 → Task 3 Step 4；快照优先精确特征 → Task 4 Step 4；重建入口 `node .gitnexus/run.cjs analyze`（doctor 无 --reindex）→ Task 12；tools JSON 精确计数 + npx → Task 13 Step 1；`git add -A` pathspec 排除 `.codewhale/` → Task 14 Step 3（✓）
