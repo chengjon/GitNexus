@@ -115,7 +115,8 @@
   "overrides": {
     "@huggingface/transformers": {
       "onnxruntime-node": "$onnxruntime-node"
-    }
+    },
+    "brace-expansion": "^5.0.8"
   },
   "engines": {
     "node": "^22.18.0 || >=24.11.0"
