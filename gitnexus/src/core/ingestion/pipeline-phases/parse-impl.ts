@@ -242,6 +242,30 @@ function resolveChunkByteBudget(options?: PipelineOptions, effectivePoolSize = 1
   return Math.max(DEFAULT_CHUNK_BYTE_BUDGET, effectivePoolSize * CHUNK_BYTES_PER_WORKER);
 }
 
+/**
+ * Per-chunk file-count cap.
+ *
+ * parse-cache invalidates at chunk granularity: a single changed file
+ * re-parses its whole chunk (the enclosing-chunk invalidation floor noted on
+ * the parse-cache doc). Small-file repos (Python / JS / YAML) pack hundreds
+ * of files into one `poolSize × 2MB` byte-budget chunk, so a one-line edit
+ * re-parses the entire chunk — measured ~= a full analyze on a 204-file repo
+ * (incremental 49-74s vs full 38.6s). The count cap keeps the invalidation
+ * unit bounded while the byte budget still bounds per-chunk memory; a cold
+ * full-repo parse just slices into more, still-parallel chunks.
+ *
+ * Env-tunable: `GITNEXUS_CHUNK_MAX_FILES` (positive integer). Default 32
+ * keeps dispatch overhead well under the measured 5% cold-run floor while
+ * bounding a single-file incremental re-parse to at most 32 files.
+ */
+const DEFAULT_CHUNK_MAX_FILES = 32;
+
+function resolveChunkMaxFiles(): number {
+  const env = Number(process.env.GITNEXUS_CHUNK_MAX_FILES);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  return DEFAULT_CHUNK_MAX_FILES;
+}
+
 // ── Main parse + resolve function ──────────────────────────────────────────
 
 type ScannedFile = { path: string; size: number };
@@ -612,8 +636,12 @@ export async function runChunkedParseAndResolve(
   const chunks: string[][] = [];
   let currentChunk: string[] = [];
   let currentBytes = 0;
+  const chunkMaxFiles = resolveChunkMaxFiles();
   for (const file of parseableScanned) {
-    if (currentChunk.length > 0 && currentBytes + file.size > chunkByteBudget) {
+    if (
+      currentChunk.length > 0 &&
+      (currentBytes + file.size > chunkByteBudget || currentChunk.length >= chunkMaxFiles)
+    ) {
       chunks.push(currentChunk);
       currentChunk = [];
       currentBytes = 0;
