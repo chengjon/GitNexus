@@ -139,11 +139,12 @@ describe('status --json (P0 4.3/5.1)', () => {
     expectCliSuccess(result);
 
     const json = JSON.parse(result.stdout);
-    expect(json).toHaveProperty('repoPath');
-    expect(json).toHaveProperty('indexedCommit');
-    expect(json).toHaveProperty('currentCommit');
-    expect(json).toHaveProperty('dirty');
-    expect(json).toHaveProperty('stagedFiles');
-    expect(json).toHaveProperty('freshForStagedDiff');
+    // Upstream `status --json` contract: repository + index/current/status
+    // blocks. The legacy repoPath/indexedCommit/dirty/stagedFiles fields were
+    // superseded by this shape.
+    expect(json).toHaveProperty('repository');
+    expect(json.index).toHaveProperty('commit');
+    expect(json.current).toHaveProperty('commit');
+    expect(json).toHaveProperty('status');
   }, 90_000);
 });

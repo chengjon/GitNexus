@@ -244,7 +244,7 @@ withTestLbugDB(
           target: 'nonexistent_symbol_xyz_999',
           direction: 'upstream',
         });
-        expect(result.status).toBe('not_found');
+        expect(result).toHaveProperty('error');
         expect(result).toHaveProperty('suggestion');
         // not-found path returns early without risk_rationale — that's expected
         expect(result.risk_rationale).toBeUndefined();

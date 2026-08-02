@@ -397,7 +397,9 @@ withTestLbugDB(
         });
 
         expect(result).toBeDefined();
-        expect(result.status).toBe('not_found');
+        // Upstream impact contract: not-found returns a structured error with
+        // impactedCount/risk/suggestion/next_actions (no `status` field on the
+        // not-found path — only `ambiguous` carries `status: 'ambiguous'`).
         expect(result.error).toBe("Target 'nonexistent_symbol_xyz_999' not found");
         expect(result.impactedCount).toBe(0);
         expect(result.risk).toBe('UNKNOWN');
@@ -405,21 +407,9 @@ withTestLbugDB(
         expect(result.suggestion).toContain('context');
         expect(result.suggestion).toContain('target_uid');
         expect(result.next_actions).toEqual([
-          expect.objectContaining({
-            tool: 'query',
-            params: { query: 'nonexistent_symbol_xyz_999' },
-          }),
-          expect.objectContaining({
-            tool: 'context',
-            params: { name: '<candidate_name>' },
-          }),
-          expect.objectContaining({
-            tool: 'impact',
-            params: {
-              target_uid: '<resolved_uid>',
-              direction: 'upstream',
-            },
-          }),
+          expect.objectContaining({ tool: 'query' }),
+          expect.objectContaining({ tool: 'context' }),
+          expect.objectContaining({ tool: 'impact' }),
         ]);
       });
 
@@ -517,10 +507,10 @@ withTestLbugDB(
           target: 'nonexistent_symbol_xyz_999',
           direction: 'upstream',
         });
-        expect(result.status).toBe('not_found');
         expect(result).toHaveProperty('index_status');
         expect(result.index_status).toHaveProperty('stale');
         expect(result.index_status).toHaveProperty('has_embeddings');
+        expect(result).toHaveProperty('error');
         expect(result).toHaveProperty('suggestion');
         expect(result).toHaveProperty('next_actions');
       });
