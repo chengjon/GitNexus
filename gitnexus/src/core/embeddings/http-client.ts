@@ -466,6 +466,30 @@ const httpEmbedBatch = async (
  * @param texts - Array of texts to embed
  * @returns Array of Float32Array embedding vectors
  */
+
+/**
+ * HTTP sub-batch concurrency cap.
+ *
+ * Serial embedding requests make the embeddings phase latency-bound on
+ * small-batch HTTP endpoints: measured ~10s of a ~29s full analyze at
+ * batch 64, ~1s at batch 256. Parallelizing the sub-batch fan-out cuts
+ * that latency without growing per-request payloads (each request still
+ * carries at most HTTP_BATCH_SIZE texts). `paceHttpRequest`'s global
+ * min-interval queue still throttles concurrent calls and the circuit
+ * breaker stays shared, so concurrency is bounded on both sides.
+ *
+ * Default 2 is conservative for shared / rate-limited endpoints; raise via
+ * `GITNEXUS_EMBEDDING_HTTP_CONCURRENCY` (1..8) when the endpoint can take it.
+ */
+const DEFAULT_HTTP_CONCURRENCY = 2;
+const HTTP_MAX_CONCURRENCY = 8;
+
+const resolveHttpEmbeddingConcurrency = (): number => {
+  const env = Number(process.env.GITNEXUS_EMBEDDING_HTTP_CONCURRENCY);
+  if (Number.isFinite(env) && env >= 1) return Math.min(Math.floor(env), HTTP_MAX_CONCURRENCY);
+  return DEFAULT_HTTP_CONCURRENCY;
+};
+
 export const httpEmbed = async (
   texts: string[],
   requestOptions: EmbeddingRequestOptions = {},
@@ -476,32 +500,47 @@ export const httpEmbed = async (
   if (!config) throw new Error('HTTP embedding not configured');
 
   const url = `${config.baseUrl}/embeddings`;
-  const allVectors: Float32Array[] = [];
+  const subBatchCount = Math.ceil(texts.length / HTTP_BATCH_SIZE);
+  const concurrency = resolveHttpEmbeddingConcurrency();
+  const results = new Array<EmbeddingItem[]>(subBatchCount);
+  let nextBatch = 0;
 
-  for (let i = 0; i < texts.length; i += HTTP_BATCH_SIZE) {
-    const batch = texts.slice(i, i + HTTP_BATCH_SIZE);
-    const batchIndex = Math.floor(i / HTTP_BATCH_SIZE);
-    const items = await httpEmbedBatch(
-      url,
-      batch,
-      config.model,
-      config.apiKey,
-      batchIndex,
-      config.requestDimensions,
-      requestOptions,
-      config.maxAttempts,
-      config.retryCapMs,
-      config.minIntervalMs,
-      config.timeoutMs,
-    );
-
-    if (items.length !== batch.length) {
-      throw new HttpEmbeddingError(
-        `Embedding endpoint returned ${items.length} vectors for ${batch.length} texts ` +
-          `(${safeUrl(url)}, batch ${batchIndex})`,
+  const fetchSubBatch = async (): Promise<void> => {
+    while (true) {
+      const batchIndex = nextBatch++;
+      if (batchIndex >= subBatchCount) return;
+      const batch = texts.slice(batchIndex * HTTP_BATCH_SIZE, (batchIndex + 1) * HTTP_BATCH_SIZE);
+      const items = await httpEmbedBatch(
+        url,
+        batch,
+        config.model,
+        config.apiKey,
+        batchIndex,
+        config.requestDimensions,
+        requestOptions,
+        config.maxAttempts,
+        config.retryCapMs,
+        config.minIntervalMs,
+        config.timeoutMs,
       );
+      if (items.length !== batch.length) {
+        throw new HttpEmbeddingError(
+          `Embedding endpoint returned ${items.length} vectors for ${batch.length} texts ` +
+            `(${safeUrl(url)}, batch ${batchIndex})`,
+        );
+      }
+      results[batchIndex] = items;
     }
+  };
 
+  // Fan out at most `concurrency` workers over the shared batch cursor; the
+  // per-index results array keeps the final vector order deterministic.
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, subBatchCount) }, () => fetchSubBatch()),
+  );
+
+  const allVectors: Float32Array[] = [];
+  for (const items of results) {
     for (const item of items) {
       const vec = new Float32Array(item.embedding);
       // Fail fast on dimension mismatch rather than inserting bad vectors

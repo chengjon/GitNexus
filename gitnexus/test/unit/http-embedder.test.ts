@@ -829,28 +829,33 @@ describe('HTTP embedding backend', () => {
         ok: true,
         json: async () => ({ data: Array.from({ length: count }, () => ({ embedding: mockVec })) }),
       });
+      // Respond by REQUEST CONTENT, not call order: the 64- and 6-text
+      // sub-batches now run concurrently (GITNEXUS_EMBEDDING_HTTP_CONCURRENCY,
+      // default 2), so a call-order mock would hand the 64-vector body to the
+      // 6-text batch and trip the count guard. The 64-text batch's FIRST
+      // attempt still 503s to exercise the retry path; the min-interval queue
+      // keeps actual network writes serialized but the exact interleaving
+      // under concurrency is intentionally not asserted.
+      let batch0Attempts = 0;
       vi.stubGlobal(
         'fetch',
-        vi
-          .fn()
-          .mockResolvedValueOnce({ ok: false, status: 503 })
-          .mockResolvedValueOnce(makeResp(64))
-          .mockResolvedValueOnce(makeResp(6)),
+        vi.fn(async (_url: unknown, init: any) => {
+          const body = JSON.parse(init.body as string) as { input: unknown[] };
+          if (body.input.length === 64) {
+            batch0Attempts++;
+            if (batch0Attempts === 1) return { ok: false, status: 503 };
+            return makeResp(64);
+          }
+          return makeResp(6);
+        }),
       );
 
       const { embedBatch } = await import('../../src/core/embeddings/embedder.js');
       const promise = embedBatch(Array.from({ length: 70 }, (_, i) => `text ${i}`));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fetch).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(999);
-      expect(fetch).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(fetch).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(999);
-      expect(fetch).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(5000);
       await expect(promise).resolves.toHaveLength(70);
       expect(fetch).toHaveBeenCalledTimes(3);
+      expect(batch0Attempts).toBe(2);
     });
 
     it('cancels promptly while waiting for retry backoff', async () => {
