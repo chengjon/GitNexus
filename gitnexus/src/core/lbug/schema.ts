@@ -247,6 +247,14 @@ CREATE NODE TABLE BasicBlock (
 // ============================================================================
 // RELATION TABLE SCHEMA
 // Single table with 'type' property - connects all node tables
+//
+// Object-literal / exported-binding HAS_METHOD edges (#1718):
+//   `export const service = { load() {} }` → Const:file:service →
+//   Method:file:service.load; `var` bindings use the Variable node.
+// ACCESSES edges from methods to module-scope values:
+//   Method → Const / Variable (FieldRegistry accepts Const/Variable/
+//   Property/Static targets). These pairs must stay declared or the
+//   RelPairRouter fails the whole analyze as an undeclared pair.
 // ============================================================================
 
 export const RELATION_SCHEMA = `
@@ -333,6 +341,8 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
   FROM Method TO Interface,
   FROM Method TO \`Constructor\`,
   FROM Method TO \`Property\`,
+  FROM Method TO \`Const\`,
+  FROM Method TO \`Variable\`,
   FROM Method TO CodeElement,
   FROM \`Template\` TO \`Template\`,
   FROM \`Template\` TO Function,
@@ -400,8 +410,10 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
   FROM \`TypeAlias\` TO Community,
   FROM \`TypeAlias\` TO \`Trait\`,
   FROM \`TypeAlias\` TO Class,
+  FROM \`Const\` TO Method,
   FROM \`Const\` TO Community,
   FROM \`Static\` TO Community,
+  FROM \`Variable\` TO Method,
   FROM \`Variable\` TO Community,
   FROM \`Property\` TO Community,
   FROM \`Property\` TO \`Property\`,

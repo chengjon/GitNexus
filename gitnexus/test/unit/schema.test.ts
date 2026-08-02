@@ -214,7 +214,8 @@ describe('LadybugDB Schema', () => {
     });
 
     it('has all FROM/TO pairs needed for HAS_METHOD edges', () => {
-      // HAS_METHOD sources: Class, Interface, Struct, Trait, Impl, Record
+      // HAS_METHOD sources: Class, Interface, Struct, Trait, Impl, Record,
+      // plus Const/Variable for object-literal / exported-binding owners (#1718).
       // HAS_METHOD targets: Method, Constructor (Property is now HAS_PROPERTY)
       const sources = ['Class', 'Interface'];
       const backtickSources = ['Struct', 'Trait', 'Impl', 'Record'];
@@ -240,6 +241,21 @@ describe('LadybugDB Schema', () => {
           expect(RELATION_SCHEMA).toContain(`FROM \`${src}\` TO \`${tgt}\``);
         }
       }
+
+      // Object-literal / exported-binding owners (#1718): Const/Variable are
+      // HAS_METHOD sources for Method members only (never Constructor).
+      expect(RELATION_SCHEMA).toContain('FROM `Const` TO Method');
+      expect(RELATION_SCHEMA).toContain('FROM `Variable` TO Method');
+    });
+
+    it('has all FROM/TO pairs needed for method ACCESSES edges to module values', () => {
+      // FieldRegistry resolves read/write references against
+      // Variable / Property / Const / Static targets (see
+      // gitnexus-shared/src/scope-resolution/registries/field-registry.ts).
+      // Property is covered above; Const/Variable are the module-scope value
+      // labels reachable from a Method body.
+      expect(RELATION_SCHEMA).toContain('FROM Method TO `Const`');
+      expect(RELATION_SCHEMA).toContain('FROM Method TO `Variable`');
     });
   });
 
