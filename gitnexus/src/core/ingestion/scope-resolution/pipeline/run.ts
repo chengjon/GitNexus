@@ -82,6 +82,7 @@ import {
   callableFlowSiteKey,
   collectDeferredIndirectSites,
   emitCallableValueFlow,
+  type CallableValueFlowWarning,
 } from '../passes/callable-value-flow.js';
 import type { ScopeResolver } from '../contract/scope-resolver.js';
 import { findEnclosingClassDef, resolveInheritanceBaseInScope } from '../scope/walkers.js';
@@ -893,6 +894,14 @@ export function runScopeResolution(
       'property-dispatch: keys over the fan-out cap were dropped (no CALLS synthesized for them)',
     );
   }
+  // Callable-value-flow overflow warnings: one call site whose candidate set
+  // exceeds the cap can emit several warnings (one per bound cell), and a
+  // repo-wide run can emit dozens — each printed as a level-40 NDJSON line
+  // that reads like a failure while the progress bar is still moving. Dedup
+  // by context; keep the few verbatim, and collapse the rest into ONE summary
+  // warning with the count. Full per-site details stay available via
+  // `GITNEXUS_LOG_LEVEL=debug` (logger.debug below).
+  const valueFlowOverflowWarnings = new Map<string, CallableValueFlowWarning>();
   const callableValueFlow =
     calleeIdAccumulator === undefined
       ? {
@@ -912,12 +921,32 @@ export function runScopeResolution(
           collapseByCallerTarget: provider.collapseMemberCallsByCallerTarget === true,
           isCallableValueTarget: provider.isCallableValueTarget,
           hasFileLocalCallableLinkage: provider.hasFileLocalCallableLinkage,
-          onWarn: (warning) =>
-            logger.warn(
-              warning,
-              'callable-value-flow: candidate set exceeded the cap; no partial CALLS emitted',
-            ),
+          onWarn: (warning) => {
+            if (valueFlowOverflowWarnings.has(warning.context)) return;
+            valueFlowOverflowWarnings.set(warning.context, warning);
+          },
         });
+  if (valueFlowOverflowWarnings.size > 0) {
+    if (valueFlowOverflowWarnings.size <= 3) {
+      for (const warning of valueFlowOverflowWarnings.values()) {
+        logger.warn(
+          warning,
+          'callable-value-flow: candidate set exceeded the cap; no partial CALLS emitted',
+        );
+      }
+    } else {
+      for (const warning of valueFlowOverflowWarnings.values()) {
+        logger.debug(
+          warning,
+          'callable-value-flow: candidate set exceeded the cap; no partial CALLS emitted',
+        );
+      }
+      logger.warn(
+        { lang: provider.language, skippedSites: valueFlowOverflowWarnings.size },
+        `callable-value-flow: ${valueFlowOverflowWarnings.size} call sites exceeded the target cap; CALLS edges were conservatively skipped there (per-site details at GITNEXUS_LOG_LEVEL=debug)`,
+      );
+    }
+  }
   const importsEmitted = callableFlowOnly
     ? 0
     : emitImportEdges(graph, indexes.imports, indexes.scopeTree, provider.importEdgeReason);
