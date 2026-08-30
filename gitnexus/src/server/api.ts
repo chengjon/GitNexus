@@ -1808,16 +1808,29 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
                 throw new Error('Repository metadata is missing; run gitnexus analyze first');
               }
               const priorCheckpoint = embeddingMeta.embeddingCheckpoint;
-              if (priorCheckpoint && priorCheckpoint.provider !== embeddingIdentity.provider) {
-                throw new Error(
-                  'Cannot resume embedding checkpoint: the embedding provider configuration differs.',
+              const identityMismatch =
+                priorCheckpoint !== undefined &&
+                (priorCheckpoint.provider !== embeddingIdentity.provider ||
+                  priorCheckpoint.model !== embeddingIdentity.model ||
+                  priorCheckpoint.dimensions !== embeddingIdentity.dimensions);
+              // Same zero-progress exemption as the CLI path: a checkpoint
+              // whose run crashed before its first successful insert cannot
+              // carry vectors from the stale identity, so resume is safe.
+              const zeroProgressCheckpoint =
+                priorCheckpoint !== undefined &&
+                (priorCheckpoint.nodesProcessed ?? 0) === 0 &&
+                (priorCheckpoint.chunksProcessed ?? 0) === 0;
+              if (identityMismatch && zeroProgressCheckpoint) {
+                console.log(
+                  '[embed] embedding checkpoint was written by a different provider configuration ' +
+                    'but recorded no completed embeddings; resuming under the current configuration.',
                 );
-              }
-              if (
-                priorCheckpoint &&
-                (priorCheckpoint.model !== embeddingIdentity.model ||
-                  priorCheckpoint.dimensions !== embeddingIdentity.dimensions)
-              ) {
+              } else if (identityMismatch && priorCheckpoint) {
+                if (priorCheckpoint.provider !== embeddingIdentity.provider) {
+                  throw new Error(
+                    'Cannot resume embedding checkpoint: the embedding provider configuration differs.',
+                  );
+                }
                 throw new Error(
                   `Cannot resume embedding checkpoint: it uses ${priorCheckpoint.model} at ` +
                     `${priorCheckpoint.dimensions} dimensions, but this run resolves ` +

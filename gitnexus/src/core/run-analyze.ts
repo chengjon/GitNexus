@@ -1107,16 +1107,29 @@ async function runFullAnalysisInner(
       const { resolveEmbeddingIdentity } = await import('./embeddings/embedding-identity.js');
       embeddingIdentityForRun = resolveEmbeddingIdentity();
       const checkpoint = existingMeta.embeddingCheckpoint;
-      if (checkpoint.provider !== embeddingIdentityForRun.provider) {
-        throw new Error(
-          'Cannot resume embedding checkpoint: the embedding provider configuration differs. ' +
-            'Restore the matching endpoint configuration or pass --drop-embeddings to rebuild without it.',
-        );
-      }
-      if (
+      const identityMismatch =
+        checkpoint.provider !== embeddingIdentityForRun.provider ||
         checkpoint.model !== embeddingIdentityForRun.model ||
-        checkpoint.dimensions !== embeddingIdentityForRun.dimensions
-      ) {
+        checkpoint.dimensions !== embeddingIdentityForRun.dimensions;
+      // A zero-progress checkpoint means the interrupted run crashed before its
+      // first successful insert, so no vector was persisted under the stale
+      // identity and resuming cannot mix vector spaces. The pending nodes are
+      // still force-re-embedded under the current configuration below.
+      const zeroProgressCheckpoint =
+        (checkpoint.nodesProcessed ?? 0) === 0 && (checkpoint.chunksProcessed ?? 0) === 0;
+      if (identityMismatch && zeroProgressCheckpoint) {
+        log(
+          'Embedding checkpoint was written by a different embedding provider configuration but ' +
+            'recorded no completed embeddings; discarding it and re-embedding its pending nodes ' +
+            'with the current configuration.',
+        );
+      } else if (identityMismatch) {
+        if (checkpoint.provider !== embeddingIdentityForRun.provider) {
+          throw new Error(
+            'Cannot resume embedding checkpoint: the embedding provider configuration differs. ' +
+              'Restore the matching endpoint configuration or pass --drop-embeddings to rebuild without it.',
+          );
+        }
         throw new Error(
           `Cannot resume embedding checkpoint: it uses ${checkpoint.model} at ` +
             `${checkpoint.dimensions} dimensions, but this run resolves ` +

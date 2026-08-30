@@ -3,6 +3,15 @@ import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { describe, it, expect, vi } from 'vitest';
+
+// schema.ts freezes EMBEDDING_DIMS at module-import time (env ?? stored
+// ~/.gitnexus config ?? 384), and this file's import chain loads schema.ts
+// before any test body isolates the environment. Pin the env default here so a
+// developer's real stored config cannot leak into this file's DDL.
+vi.hoisted(() => {
+  process.env.GITNEXUS_EMBEDDING_DIMS ??= '384';
+});
+
 import { resolveAnalyzerRunnerIdentity } from '../../src/core/analyzer-identity.js';
 import {
   deriveEmbeddingMode,
@@ -332,6 +341,103 @@ describe('run-analyze module', () => {
         ),
       ).rejects.toThrow('Cannot resume embedding checkpoint');
       expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      const restore = (key: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      };
+      restore('GITNEXUS_HOME', saved.home);
+      restore('GITNEXUS_EMBEDDING_URL', saved.url);
+      restore('GITNEXUS_EMBEDDING_MODEL', saved.model);
+      restore('GITNEXUS_EMBEDDING_DIMS', saved.dims);
+      restore('GITNEXUS_LBUG_EXTENSION_INSTALL', saved.extension);
+      await tmpRepo.cleanup();
+      await tmpHome.cleanup();
+    }
+  }, 120_000);
+
+  it('resumes a zero-progress checkpoint stamped by a different provider configuration', async () => {
+    const tmpRepo = await createTempDir('gitnexus-run-analyze-stale-checkpoint-');
+    const tmpHome = await createTempDir('gitnexus-run-analyze-stale-checkpoint-home-');
+    const saved = {
+      home: process.env.GITNEXUS_HOME,
+      url: process.env.GITNEXUS_EMBEDDING_URL,
+      model: process.env.GITNEXUS_EMBEDDING_MODEL,
+      dims: process.env.GITNEXUS_EMBEDDING_DIMS,
+      extension: process.env.GITNEXUS_LBUG_EXTENSION_INSTALL,
+    };
+    try {
+      process.env.GITNEXUS_HOME = tmpHome.dbPath;
+      process.env.GITNEXUS_EMBEDDING_URL = 'http://test:8080/v1';
+      process.env.GITNEXUS_EMBEDDING_MODEL = 'test-model';
+      process.env.GITNEXUS_EMBEDDING_DIMS = '384';
+      process.env.GITNEXUS_LBUG_EXTENSION_INSTALL = 'never';
+      const vector = Array.from({ length: 384 }, (_, i) => i / 384);
+      const fetchMock = vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { input?: unknown[] };
+        const count = Array.isArray(body.input) ? body.input.length : 1;
+        return {
+          ok: true,
+          json: async () => ({
+            data: Array.from({ length: count }, () => ({ embedding: vector })),
+          }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      await fs.writeFile(
+        path.join(tmpRepo.dbPath, 'index.ts'),
+        'export function staleCheckpointResume() { return "ready"; }\n',
+      );
+      execSync('git init', { cwd: tmpRepo.dbPath, stdio: 'pipe' });
+      execSync('git add index.ts', { cwd: tmpRepo.dbPath, stdio: 'pipe' });
+      execSync('git -c user.name=test -c user.email=test@test commit -m init', {
+        cwd: tmpRepo.dbPath,
+        stdio: 'pipe',
+      });
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(
+        tmpRepo.dbPath,
+        { embeddings: true, skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {} },
+      );
+      const { storagePath } = getStoragePaths(tmpRepo.dbPath);
+      const completed = await loadMeta(storagePath);
+      expect(completed).not.toBeNull();
+      if (!completed) throw new Error('expected completed metadata');
+      const [pendingNodeId] = await readEmbeddingNodeIds(tmpRepo.dbPath);
+      if (!pendingNodeId) throw new Error('expected a persisted embedding node');
+      // Mirror the field scenario: a crashed run with a broken embedding
+      // configuration stamped its own identity into the checkpoint but
+      // completed zero embeddings (crashed on the first insert), so nothing
+      // was persisted under the stale identity and resume must proceed.
+      await saveMeta(storagePath, {
+        ...completed,
+        embeddingCheckpoint: {
+          at: new Date().toISOString(),
+          nodesProcessed: 0,
+          totalNodes: 707,
+          chunksProcessed: 0,
+          model: 'Snowflake/snowflake-arctic-embed-xs',
+          dimensions: 123,
+          provider: 'local',
+          pendingNodeIds: [pendingNodeId],
+        },
+      } as RepoMeta);
+      fetchMock.mockClear();
+      const logs: string[] = [];
+
+      const resumed = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(resumed.alreadyUpToDate).not.toBe(true);
+      expect(fetchMock).toHaveBeenCalled();
+      expect((await loadMeta(storagePath))?.embeddingCheckpoint).toBeUndefined();
+      expect(logs.some((message) => message.includes('no completed embeddings'))).toBe(true);
     } finally {
       vi.unstubAllGlobals();
       const restore = (key: string, value: string | undefined) => {
