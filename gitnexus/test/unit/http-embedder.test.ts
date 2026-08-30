@@ -1008,3 +1008,71 @@ describe('HTTP mode config probe (#2385)', () => {
     expect(isHttpEmbeddingError(err)).toBe(false);
   });
 });
+
+describe('stored provider config activates HTTP mode', () => {
+  const ENV_KEYS = [
+    'GITNEXUS_EMBEDDING_URL',
+    'GITNEXUS_EMBEDDING_MODEL',
+    'GITNEXUS_EMBEDDING_DIMS',
+  ] as const;
+  const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  const savedHome = process.env.GITNEXUS_HOME;
+  let tmpHome: string | null = null;
+
+  beforeEach(async () => {
+    // Isolate from the developer machine's real ~/.gitnexus config so the
+    // stored-provider fixture below is the only config in play.
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-stored-http-'));
+    process.env.GITNEXUS_HOME = tmpHome;
+    await fs.writeFile(
+      path.join(tmpHome, 'config.json'),
+      JSON.stringify({
+        embeddings: {
+          provider: 'ollama',
+          ollamaBaseUrl: 'http://localhost:11434',
+          ollamaModel: 'qwen3-embedding:0.6b',
+          embeddingDims: 1024,
+        },
+      }),
+      'utf-8',
+    );
+    // No env vars: the stored provider must be honored on its own.
+    for (const key of ENV_KEYS) {
+      delete process.env[key];
+    }
+  });
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+    if (savedHome === undefined) {
+      delete process.env.GITNEXUS_HOME;
+    } else {
+      process.env.GITNEXUS_HOME = savedHome;
+    }
+    if (tmpHome) {
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      tmpHome = null;
+    }
+  });
+
+  it('treats a stored ollama provider as HTTP mode without env vars', async () => {
+    const { isHttpMode } = await import('../../src/core/embeddings/http-client.js');
+    expect(isHttpMode()).toBe(true);
+  });
+
+  it('fingerprints the stored provider endpoint in the identity', async () => {
+    const { resolveEmbeddingIdentity } =
+      await import('../../src/core/embeddings/embedding-identity.js');
+    const identity = resolveEmbeddingIdentity();
+    expect(identity.provider).toMatch(/^http:[0-9a-f]{64}$/u);
+    expect(identity.model).toBe('qwen3-embedding:0.6b');
+  });
+});

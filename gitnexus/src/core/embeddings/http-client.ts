@@ -214,16 +214,51 @@ const readConfig = (): HttpConfig | null => {
 };
 
 /**
- * Whether HTTP embedding mode is active — i.e. both `GITNEXUS_EMBEDDING_URL` and
- * `GITNEXUS_EMBEDDING_MODEL` are set. A pure presence probe: it deliberately does
- * NOT call {@link readConfig}, so it never throws on a malformed
- * `GITNEXUS_EMBEDDING_DIMS`. This lets its ~13 call sites (analyze, doctor,
- * run-analyze, embedder, mcp) probe the mode without a defensive try/catch; the
- * DIMS value is validated where it is actually used (`readConfig` in
- * `httpEmbed`/`httpEmbedQuery`), surfacing a recognizable config error. See #2385.
+ * Whether HTTP embedding mode is active. Two activation paths, in order:
+ * the `GITNEXUS_EMBEDDING_URL` + `GITNEXUS_EMBEDDING_MODEL` env pair (set by
+ * the CLI's --embedding-base-url/--embedding-model flags), or a stored
+ * embeddings provider in the global config (`gitnexus config --provider
+ * ollama`). Honoring the stored path is a correctness fix, not just
+ * convenience: the same stored config resolves EMBEDDING_DIMS for the schema,
+ * so a stored 1024-dim provider must route to HTTP embedding — falling back
+ * to the local 384-dim model writes 384-dim vectors into a FLOAT[1024]
+ * CodeEmbedding table and every insert fails the LIST→ARRAY cast.
+ *
+ * Still a never-throwing presence probe (#2385): the env pair short-circuits
+ * before any config parsing, and via the stored path a throw from
+ * {@link readConfig} is mapped to `true` — readConfig only throws from its
+ * dims/resilience-env validation, which runs AFTER the endpoint resolved, so
+ * the endpoint is configured and the same typed error resurfaces where those
+ * values are actually used (`httpEmbed`/`httpEmbedQuery`). A `null` return
+ * (no endpoint resolvable) means local mode. Call sites (analyze, doctor,
+ * run-analyze, embedder, mcp) probe the mode without a defensive try/catch.
  */
-export const isHttpMode = (): boolean =>
-  Boolean(process.env.GITNEXUS_EMBEDDING_URL && process.env.GITNEXUS_EMBEDDING_MODEL);
+export const isHttpMode = (): boolean => {
+  if (process.env.GITNEXUS_EMBEDDING_URL && process.env.GITNEXUS_EMBEDDING_MODEL) {
+    return true;
+  }
+  try {
+    return readConfig() !== null;
+  } catch {
+    return true;
+  }
+};
+
+/**
+ * Resolve the active HTTP endpoint when {@link isHttpMode} is on, or null.
+ * Unlike `readConfig` inside `httpEmbed`/`httpEmbedQuery`, this never throws:
+ * a malformed dims/resilience env var resolves to null so metadata/label call
+ * sites (embedding-identity) stay on safe fallbacks while the typed config
+ * error still surfaces from the embed path itself.
+ */
+export const resolveHttpEndpoint = (): { baseUrl: string; model: string } | null => {
+  if (!isHttpMode()) return null;
+  try {
+    return readConfig();
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Return the configured embedding dimensions for HTTP mode, or undefined

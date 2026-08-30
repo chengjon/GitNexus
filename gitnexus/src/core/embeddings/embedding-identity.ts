@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getEmbeddingDimensions } from './embedder.js';
 import { resolveEmbeddingConfig } from './config.js';
-import { isHttpMode, safeUrl } from './http-client.js';
+import { isHttpMode, resolveHttpEndpoint, safeUrl } from './http-client.js';
 
 export interface EmbeddingIdentity {
   model: string;
@@ -15,18 +15,25 @@ export interface EmbeddingIdentity {
  * hashing, so metadata contains neither an endpoint nor a secret-derived hash.
  */
 export function resolveEmbeddingIdentity(): EmbeddingIdentity {
-  const httpMode = isHttpMode();
-  const provider = httpMode
-    ? `http:${createHash('sha256')
-        .update(safeUrl(process.env.GITNEXUS_EMBEDDING_URL ?? ''))
-        .digest('hex')}`
-    : 'local';
+  if (!isHttpMode()) {
+    return {
+      model: resolveEmbeddingConfig().modelId,
+      dimensions: getEmbeddingDimensions(),
+      provider: 'local',
+    };
+  }
 
+  // Env vars win (CLI flags); otherwise use the stored provider endpoint that
+  // activated HTTP mode. The fallbacks keep this total: resolveHttpEndpoint
+  // returns null when the stored config fails validation, and a null url only
+  // downgrades the fingerprint (never throws).
+  const endpoint = resolveHttpEndpoint();
+  const url = process.env.GITNEXUS_EMBEDDING_URL ?? endpoint?.baseUrl ?? '';
+  const model =
+    process.env.GITNEXUS_EMBEDDING_MODEL ?? endpoint?.model ?? resolveEmbeddingConfig().modelId;
   return {
-    model: httpMode
-      ? (process.env.GITNEXUS_EMBEDDING_MODEL as string)
-      : resolveEmbeddingConfig().modelId,
+    model,
     dimensions: getEmbeddingDimensions(),
-    provider,
+    provider: `http:${createHash('sha256').update(safeUrl(url)).digest('hex')}`,
   };
 }
