@@ -23,6 +23,7 @@ import {
   EMBEDDING_DIMS,
   CREATE_VECTOR_INDEX_QUERY,
 } from '../../src/core/lbug/schema.js';
+import { parseRelationSchemaPairs } from '../../src/core/lbug/rel-pair-routing.js';
 
 describe('LadybugDB Schema', () => {
   describe('NODE_TABLES', () => {
@@ -256,6 +257,25 @@ describe('LadybugDB Schema', () => {
       // labels reachable from a Method body.
       expect(RELATION_SCHEMA).toContain('FROM Method TO `Const`');
       expect(RELATION_SCHEMA).toContain('FROM Method TO `Variable`');
+    });
+
+    it('declares every function-like callable → FieldRegistry value-target pair', () => {
+      // The ACCESSES emitter (emit-references.ts buildRelationship) uses the
+      // enclosing callable as source, and isFunctionLike there accepts
+      // Function / Method / Constructor — free functions included, so Python
+      // module-scope reads emit Function→Variable (RelPairRouter fail-fast
+      // repro). FieldRegistry targets are Const / Variable / Property / Static.
+      // Every combination must be COPY-able, i.e. declared in the DDL.
+      // Asserted via the runtime parser (parseRelationSchemaPairs) so backtick
+      // quoting can never mask a missing pair again.
+      const callableSources = ['Function', 'Method', 'Constructor'];
+      const valueTargets = ['Const', 'Variable', 'Property', 'Static'];
+      const declared = parseRelationSchemaPairs(RELATION_SCHEMA);
+
+      const missing = callableSources.flatMap((src) =>
+        valueTargets.filter((tgt) => !declared.has(`${src}|${tgt}`)).map((tgt) => `${src}→${tgt}`),
+      );
+      expect(missing).toEqual([]);
     });
   });
 
