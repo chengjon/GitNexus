@@ -2,12 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { createRequire } from 'module';
+import { packageVersion } from '../../src/core/package-version.js';
 
-// Match what setup.ts emits — read the version from the same package.json
-// so the test never goes stale on a release bump.
-const PKG_VERSION = (createRequire(import.meta.url)('../../package.json') as { version: string })
-  .version;
+const PKG_VERSION = packageVersion();
 const MCP_PINNED_REF = `gitnexus@${PKG_VERSION}`;
 
 /** Flatten the spied console.log calls into one searchable string. */
@@ -274,7 +271,7 @@ describe('setupClaudeCode', () => {
     });
   });
 
-  it('copies shared hook helpers (incl. resolve-analyze-cmd.cjs) to ~/.claude/hooks/gitnexus/', async () => {
+  it('copies shared hook helpers to ~/.claude/hooks/gitnexus/', async () => {
     setPlatform('linux');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
@@ -293,6 +290,7 @@ describe('setupClaudeCode', () => {
     await expect(
       fs.access(path.join(destHooksDir, 'resolve-analyze-cmd.cjs')),
     ).resolves.toBeUndefined();
+    await expect(fs.access(path.join(destHooksDir, 'registry-query.cjs'))).resolves.toBeUndefined();
   });
 
   it('records errors and returns the failed REQUIRED helpers when copies fail', async () => {
@@ -307,13 +305,15 @@ describe('setupClaudeCode', () => {
         'Claude Code hooks',
         result,
       );
-      expect(result.errors.length).toBe(4);
+      expect(result.errors.length).toBe(5);
       expect(result.errors.some((e) => e.includes('resolve-analyze-cmd.cjs'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('registry-query.cjs'))).toBe(true);
       expect(result.errors.every((e) => e.startsWith('Claude Code hooks:'))).toBe(true);
-      // Only the hard-required .cjs trio gates registration; win-rm is best-effort.
+      // Only the hard-required .cjs helpers gate registration; win-rm is best-effort.
       expect([...failedRequired].sort()).toEqual([
         'hook-db-lock-probe.cjs',
         'hook-lock.cjs',
+        'registry-query.cjs',
         'resolve-analyze-cmd.cjs',
       ]);
       expect(failedRequired).not.toContain('win-rm-list-json.ps1');
@@ -328,8 +328,13 @@ describe('setupClaudeCode', () => {
     const destDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-helpers-dest-'));
     const result = { configured: [] as string[], skipped: [] as string[], errors: [] as string[] };
     try {
-      // Provide the three hard-required .cjs helpers; omit win-rm-list-json.ps1.
-      for (const h of ['hook-lock.cjs', 'hook-db-lock-probe.cjs', 'resolve-analyze-cmd.cjs']) {
+      // Provide all hard-required .cjs helpers; omit win-rm-list-json.ps1.
+      for (const h of [
+        'hook-lock.cjs',
+        'hook-db-lock-probe.cjs',
+        'resolve-analyze-cmd.cjs',
+        'registry-query.cjs',
+      ]) {
         await fs.writeFile(path.join(srcDir, h), '// stub\n', 'utf-8');
       }
       const failedRequired = await copyHookHelpers(srcDir, destDir, 'Claude Code hooks', result);
@@ -705,6 +710,82 @@ describe('setupQoder', () => {
   });
 
   it('leaves a corrupt ~/.qoder.json untouched', async () => {
+    const corrupt = '{ this is not valid json !!!';
+    await fs.writeFile(configPath(), corrupt, 'utf-8');
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    expect(await fs.readFile(configPath(), 'utf-8')).toBe(corrupt);
+  });
+});
+
+describe('setupDroid (Factory)', () => {
+  let tempHome: string;
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
+
+  const configPath = () => path.join(tempHome, '.factory', 'mcp.json');
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+    tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-droid-setup-'));
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+
+    // Only create ~/.factory so other editors skip and don't pollute assertions.
+    await fs.mkdir(path.join(tempHome, '.factory'), { recursive: true });
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    // Assigning undefined would set the string "undefined"; delete instead.
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+    await fs.rm(tempHome, { recursive: true, force: true });
+  });
+
+  it('writes the MCP entry to ~/.factory/mcp.json under mcpServers', async () => {
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    const config = JSON.parse(await fs.readFile(configPath(), 'utf-8'));
+    expect(config.mcpServers.gitnexus).toBeDefined();
+  });
+
+  it('preserves existing servers in ~/.factory/mcp.json', async () => {
+    await fs.writeFile(
+      configPath(),
+      JSON.stringify({ mcpServers: { other: { command: 'foo' } } }),
+      'utf-8',
+    );
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    const config = JSON.parse(await fs.readFile(configPath(), 'utf-8'));
+    expect(config.mcpServers.other).toEqual({ command: 'foo' });
+    expect(config.mcpServers.gitnexus).toBeDefined();
+  });
+
+  it('skips when ~/.factory directory does not exist', async () => {
+    await fs.rm(path.join(tempHome, '.factory'), { recursive: true, force: true });
+
+    const { setupCommand } = await import('../../src/cli/setup.js');
+    await setupCommand();
+
+    await expect(fs.access(configPath())).rejects.toThrow();
+  });
+
+  it('leaves a corrupt ~/.factory/mcp.json untouched', async () => {
     const corrupt = '{ this is not valid json !!!';
     await fs.writeFile(configPath(), corrupt, 'utf-8');
 

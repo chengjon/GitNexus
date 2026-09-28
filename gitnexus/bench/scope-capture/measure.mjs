@@ -209,10 +209,22 @@ const LANGS = [
     // Heritage-bearing: `: public Base, public Mixin` (single + multiple
     // inheritance) drives emitCppInheritanceCaptures (#1951) at scale. Added
     // (was unbenched); adding it exposed + fixed the same O(n²) root-walk (#1956).
+    //
+    // Also GENERIC-MEMBER-bearing (#2833): `Repo<Entity_n> repo;` is a member
+    // whose declared type is a bare `template_type`, and
+    // `std::vector<Entity_n> items;` is the far commoner spelling where a
+    // `qualified_identifier` WRAPS that template_type. Both were absent, and
+    // their absence is why two successive rounds of `field_declaration`
+    // type-binding rules landed with a byte-identical cpp fingerprint: the gate
+    // could not see a member field it had no instance of. With them present,
+    // reverting either round of rules drifts the fingerprint, which is the
+    // property that makes the gate worth running.
     header:
-      '#include <string>\n\nclass Base {\n public:\n  long baseId() const { return 0; }\n};\n\nclass Mixin {\n public:\n  void mix() {}\n};\n\n',
+      '#include <string>\n#include <vector>\n\ntemplate <typename T>\nclass Repo {\n public:\n  void save(T v) {}\n};\n\nclass Base {\n public:\n  long baseId() const { return 0; }\n};\n\nclass Mixin {\n public:\n  void mix() {}\n};\n\n',
     unit: (n) =>
       `class Entity${n} : public Base, public Mixin {\n public:\n  long id;\n  std::string name;\n` +
+      `  Repo<Entity${n}> repo;\n` +
+      `  std::vector<Entity${n}> items;\n` +
       `  long getId() const { return id; }\n` +
       `  void setName(std::string v) { name = v; }\n};\n\n`,
   },
@@ -255,14 +267,15 @@ const LANGS = [
     fixturePrefix: 'java',
     exts: ['.java'],
     file: 'bench.java',
-    // Java was previously unbenched. Heritage-bearing: extends Base + implements
-    // Marker (both forms) so the @reference.inherits synth (#1951) is driven at scale.
+    // Java was previously unbenched. Class and record heritage both implement
+    // Marker so the @reference.inherits synth (#1951, #2900) is driven at scale.
     header: 'package generated;\n\nclass Base {}\n\ninterface Marker {}\n\n',
     unit: (n) =>
       `class Entity${n} extends Base implements Marker {\n` +
       `  long id = 0L;\n  String name = "";\n` +
       `  public long getId() { return this.id; }\n` +
-      `  public void setName(String v) { this.name = v; }\n}\n\n`,
+      `  public void setName(String v) { this.name = v; }\n}\n\n` +
+      `record RecordEntity${n}(long id) implements Marker {}\n\n`,
   },
   {
     name: 'java-local-types',
@@ -295,6 +308,21 @@ const LANGS = [
       `  id: number = 0;\n  name: string = '';\n` +
       `  getId(): number { return this.id; }\n` +
       `  setName(v: string): void { this.name = v; }\n}\n\n`,
+  },
+  {
+    // One `a || b || …` chain whose operand count is the entity count (#3354
+    // review): each operand is one more nesting level, so this guards the
+    // callable-flow value-alternative expansion against per-leaf work that
+    // grows with chain depth (ratio ~8 before the fix, and 8000 operands
+    // overflowed the stack). No fixture corpus — the fingerprint is the synthetic
+    // source alone; `typescript` above already covers the TS fixtures.
+    name: 'typescript-deep-chain',
+    emit: emitTsScopeCaptures,
+    exts: ['.ts'],
+    file: 'bench-chain.ts',
+    header: 'function handler() {}\n\nexport function isKw(w: string) {\n  const f = handler',
+    unit: (n) => ` || w === "k${n}"`,
+    footer: ';\n  return f;\n}\n',
   },
   {
     name: 'javascript',
@@ -358,7 +386,9 @@ function measureLang(lang) {
   // Correctness fingerprint over the fixture corpus + a fixed 20-entity source.
   const perFixture = [];
   let groups = 0;
-  for (const { key, absPath } of collectFixtures(lang.fixturePrefix, lang.exts)) {
+  const fixtures =
+    lang.fixturePrefix === undefined ? [] : collectFixtures(lang.fixturePrefix, lang.exts);
+  for (const { key, absPath } of fixtures) {
     const matches = lang.emit(fs.readFileSync(absPath, 'utf8'), absPath);
     groups += matches.length;
     perFixture.push(`${key}\t${matches.length}\t${digestCaptures(matches)}`);

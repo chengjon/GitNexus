@@ -396,13 +396,16 @@ jobs:
           # cache-poisoning audit). ~30s slower per release; runs rarely.
           package-manager-cache: false
 
-      - name: Build gitnexus-shared
-        run: npm ci && npm run build
-        working-directory: gitnexus-shared
-
       - name: Install gitnexus dependencies
         run: npm ci
         working-directory: gitnexus
+
+      # The published tarball ships the web UI (`files: [... "web"]`), built
+      # by prepack during `npm publish`. Install its deps in their own step
+      # so a slow install is visible here instead of dying inside build.js.
+      - name: Install gitnexus-web dependencies
+        run: npm ci
+        working-directory: gitnexus-web
 
       # ── Stable-only: verify the tag and package.json agree ───────────────
       - name: Verify version consistency (stable)
@@ -689,7 +692,20 @@ jobs:
           git add ../gitnexus-claude-plugin/.claude-plugin/plugin.json \
             ../.claude-plugin/marketplace.json \
             ../gitnexus-claude-plugin/.codex-plugin/plugin.json \
-            ../.agents/plugins/marketplace.json
+            ../.agents/plugins/marketplace.json \
+            ../gitnexus-factory-plugin/.factory-plugin/plugin.json \
+            ../gitnexus-factory-plugin/mcp.json \
+            ../.factory-plugin/marketplace.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-plan/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-work/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-review/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-lfg/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-guide/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-cli/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-debugging/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-exploring/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-impact-analysis/mcp.json \
+            ../gitnexus-claude-plugin/skills/gitnexus-refactoring/mcp.json
           git commit -m "release: ${VTAG}" --allow-empty
           RELEASE_SHA="$(git rev-parse HEAD)"
           echo "Detached release commit: $RELEASE_SHA"
@@ -828,7 +844,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
         with:
           tag_name: ${{ steps.vtag-gate.outputs.vtag }}
           name: >-

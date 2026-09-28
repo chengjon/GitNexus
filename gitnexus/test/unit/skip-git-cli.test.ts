@@ -44,11 +44,15 @@ describe('--skip-git CLI flag', () => {
       cwd: path.resolve(__dirname, '../..'),
       encoding: 'utf8',
       timeout: 10000,
+      env: { ...process.env, GITNEXUS_LANG: 'en' },
     });
 
     expect(helpOutput).toContain('--skip-git');
-    expect(helpOutput).toContain('--skip-agents-md');
-    expect(helpOutput).toContain('--skip-skills');
+    const helpFlat = helpOutput.replace(/\s+/g, ' ');
+    expect(helpFlat).toContain('--skip-agents-md');
+    expect(helpFlat).toContain('Does not skip standard skills in .claude/skills');
+    expect(helpFlat).toContain('Community skills from --skills are unaffected');
+    expect(helpFlat).toContain('--skip-skills');
     expect(helpOutput).toContain('directly under .claude/skills/');
     expect(helpOutput).toContain('.agents/skills/');
     expect(helpOutput).toContain('.claude/skills/gitnexus-area-*');
@@ -71,6 +75,10 @@ describe('--skip-git CLI flag', () => {
       ...process.env,
       HOME: gitnexusHome,
       GITNEXUS_HOME: gitnexusHome,
+      // This suite tests repository-root selection, not extension installation.
+      // Keep child CLI runs offline so an unavailable FTS download cannot consume
+      // Vitest's per-test timeout.
+      GITNEXUS_LBUG_EXTENSION_INSTALL: 'never',
     };
 
     try {
@@ -133,6 +141,7 @@ describe('--skip-git CLI flag', () => {
       ...process.env,
       HOME: gitnexusHome,
       GITNEXUS_HOME: gitnexusHome,
+      GITNEXUS_LBUG_EXTENSION_INSTALL: 'never',
     };
 
     try {
@@ -199,6 +208,7 @@ describe('--skip-git CLI flag', () => {
         ...process.env,
         HOME: gitnexusHome,
         GITNEXUS_HOME: gitnexusHome,
+        GITNEXUS_LBUG_EXTENSION_INSTALL: 'never',
       };
     }
 

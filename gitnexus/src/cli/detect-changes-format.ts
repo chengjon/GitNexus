@@ -1,10 +1,12 @@
 import { t } from './i18n/index.js';
+import { formatSymbolLine } from './format-symbol.js';
 
 type DetectChangesSummary = {
   changed_files?: number;
   changed_count?: number;
   affected_count?: number;
   risk_level?: string;
+  message?: string;
 };
 
 type ChangedSymbol = {
@@ -38,64 +40,68 @@ type DetectChangesMetadata = {
 
 type DetectChangesResult = {
   error?: unknown;
+  partial?: boolean;
+  truncated?: boolean;
   summary?: DetectChangesSummary;
   changed_symbols?: ChangedSymbol[];
   affected_processes?: AffectedProcess[];
   metadata?: DetectChangesMetadata;
 };
 
-function formatMetadata(metadata: DetectChangesMetadata | undefined): string[] {
-  if (!metadata) return [];
-  const lines: string[] = [t('tool.detectChanges.metadataHeader')];
-  if (metadata.selected_repo || metadata.selected_repo_id) {
-    lines.push(
-      t('tool.detectChanges.metadataRepository', {
-        repo: metadata.selected_repo ?? metadata.selected_repo_id ?? '?',
-      }),
-    );
-  }
-  const repoPath = metadata.repo_path ?? metadata.git_repo_path;
-  if (repoPath) lines.push(t('tool.detectChanges.metadataRepoPath', { path: repoPath }));
-  if (metadata.git_diff_path) {
-    lines.push(t('tool.detectChanges.metadataDiffPath', { path: metadata.git_diff_path }));
-  }
-  if (metadata.process_cwd) {
-    lines.push(t('tool.detectChanges.metadataCwd', { path: metadata.process_cwd }));
-  }
-  if (typeof metadata.stale === 'boolean' || metadata.stale_severity) {
-    const status = metadata.stale ? 'stale' : 'up-to-date';
-    lines.push(t('tool.detectChanges.metadataIndexStatus', { status }));
-  }
-  if (metadata.indexed_commit || metadata.current_commit) {
-    lines.push(
-      t('tool.detectChanges.metadataCommits', {
-        indexed: metadata.indexed_commit?.slice(0, 12) ?? '?',
-        current: metadata.current_commit?.slice(0, 12) ?? '?',
-      }),
-    );
-  }
-  lines.push('');
-  return lines;
-}
-
 export function formatDetectChangesResult(result: unknown): string {
   const payload = (result ?? {}) as DetectChangesResult;
   if (payload.error) return t('common.error', { message: String(payload.error) });
 
   const summary = payload.summary ?? {};
-  const changedFiles = summary.changed_files ?? 0;
-  const changedSymbols = summary.changed_count ?? 0;
-  const lines: string[] = formatMetadata(payload.metadata);
+  // A swallowed query failure sets `partial` and leaves the counts at zero
+  // (#2283). Printing only "No changes detected." turns a degraded run into a
+  // clean bill of health for the pre-commit gate, so say so either way.
+  // `truncated` is its sibling flag: the backend caps the changed_symbols
+  // LISTING (never the counts), so a short list is not proof of a short diff.
+  // Both lead the output — a caveat printed after the summary is read too late.
+  const notes: string[] = [];
+  if (payload.partial) notes.push(t('tool.detectChanges.partial'));
+  // The plain truncation note reassures that the counts are whole. That is only
+  // true when the run did NOT also degrade — `changed_count` sums the batches
+  // that succeeded — so the two flags together get a different sentence.
+  if (payload.truncated)
+    notes.push(
+      t(payload.partial ? 'tool.detectChanges.truncatedDegraded' : 'tool.detectChanges.truncated'),
+    );
 
-  if (changedFiles === 0 && changedSymbols === 0) {
-    lines.push(t('tool.detectChanges.noChanges'));
-    return lines.join('\n').trim();
+  if ((summary.changed_count ?? 0) === 0) {
+    // Parse-fail payloads set `partial` and an honest `message` (#2915/#3131).
+    // Production *clean* trees also set English `message: 'No changes detected.'`
+    // — that must go through `t('tool.detectChanges.noChanges')` or zh-CN never
+    // fires. Only pass the backend string through on a degraded/parse-fail run.
+    if (
+      payload.partial &&
+      typeof summary.message === 'string' &&
+      summary.message.trim().length > 0
+    ) {
+      return [...notes, summary.message.trim()].join('\n');
+    }
+    // Confirmed no-overlap: files parsed, mapping succeeded, zero symbols.
+    // `queryDegraded` is `partial: true` with the same counts and no message —
+    // do not call that a confirmed mapping (#3131 honesty).
+    if (!payload.partial && (summary.changed_files ?? 0) > 0) {
+      return [
+        ...notes,
+        t('tool.detectChanges.noOverlappingSymbols', { files: summary.changed_files }),
+      ].join('\n');
+    }
+    if (payload.partial) {
+      return notes.join('\n');
+    }
+    return [...notes, t('tool.detectChanges.noChanges')].join('\n');
   }
 
+  const lines: string[] = [];
+  if (notes.length > 0) lines.push(...notes, '');
   lines.push(
     t('tool.detectChanges.changesSummary', {
-      files: changedFiles,
-      symbols: changedSymbols,
+      files: summary.changed_files ?? 0,
+      symbols: summary.changed_count ?? 0,
     }),
   );
   lines.push(t('tool.detectChanges.affectedProcesses', { count: summary.affected_count ?? 0 }));
@@ -107,15 +113,11 @@ export function formatDetectChangesResult(result: unknown): string {
   lines.push('');
 
   const changed = Array.isArray(payload.changed_symbols) ? payload.changed_symbols : [];
-  if (changed.length === 0 && changedSymbols === 0) {
-    lines.push(t('tool.detectChanges.noIndexedSymbols'));
-    lines.push('');
-  }
   if (changed.length > 0) {
     lines.push(t('tool.detectChanges.changedSymbols'));
     const shown = changed.slice(0, 15);
     for (const symbol of shown) {
-      lines.push(`  ${symbol.type ?? 'Symbol'} ${symbol.name ?? '?'} → ${symbol.filePath ?? '?'}`);
+      lines.push(formatSymbolLine(symbol.type, symbol.name, symbol.filePath));
     }
     // Overflow is measured against the TRUE total (summary.changed_count), not
     // the array length — the array may already be `--limit`-sliced, so using its

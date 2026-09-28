@@ -1,7 +1,5 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { getRuntimeCapabilities, getRuntimeFingerprint } from '../core/platform/capabilities.js';
+import { findLegacyLocalIndex } from '../storage/shared-store-lifecycle.js';
 import { resolveEmbeddingConfig } from '../core/embeddings/config.js';
 import { isHttpMode } from '../core/embeddings/http-client.js';
 import {
@@ -16,53 +14,39 @@ import {
 } from '../core/embeddings/runtime-install.js';
 import { cudaRedirectDoctorStatus } from '../core/embeddings/onnxruntime-node-resolver.js';
 import {
+  checkLbugNative,
+  ftsAvailabilityLabel,
+  type NativeCheckResult,
+  probeFtsExtensionLoad,
+  probeVectorExtensionLoad,
+} from '../core/lbug/native-check.js';
+import {
   getEffectiveBufferPoolSize,
   getOsPageSize,
   isPageSizeAwareLadybug,
 } from '../core/lbug/lbug-config.js';
-import { diagnoseExtensionLoad } from '../core/lbug/extension-load-error.js';
-import { probeFtsExtensionLoad, probeVectorExtensionLoad } from '../core/lbug/native-check.js';
-import { getExtensionInstallPolicy } from '../core/lbug/extension-loader.js';
-import { checkLbugNative, type NativeCheckResult } from '../core/lbug/native-check.js';
-import { hasIndex as hasRepoIndex } from '../storage/repo-manager.js';
-import { getGitRoot, isGitRepo } from '../storage/git.js';
+import { diagnoseExtensionLoad, extractExtensionPath } from '../core/lbug/extension-load-error.js';
+import { resolveFtsVersionPair } from '../core/lbug/vendored-extension-path.js';
+import {
+  getExtensionInstallPolicy,
+  resolveAnalyzeInstallPolicy,
+} from '../core/lbug/extension-loader.js';
+import { updateEligibleInstallSync } from '../core/install-context.js';
+import { readValidatedUpdateCacheSync, type ValidatedUpdateCache } from '../core/update-cache.js';
 import { t } from './i18n/index.js';
-import { detectMissingOptionalGrammars, type MissingGrammar } from './optional-grammars.js';
-
-type DoctorStatus = 'pass' | 'warn' | 'fail';
-
-export interface DoctorOptions {
-  host?: string;
-  repo?: string;
-  json?: boolean;
-  gpu?: boolean;
-  fix?: boolean;
-}
-
-export interface DoctorCheck {
-  name: string;
-  status: DoctorStatus;
-  detail?: string;
-  data?: Record<string, unknown>;
-}
-
-export interface DoctorResult {
-  overall: DoctorStatus;
-  checks: DoctorCheck[];
-}
-
-export interface DoctorDeps {
-  getRuntimeFingerprint: typeof getRuntimeFingerprint;
-  getRuntimeCapabilities: typeof getRuntimeCapabilities;
-  resolveEmbeddingConfig: typeof resolveEmbeddingConfig;
-  isHttpMode: typeof isHttpMode;
-  checkNative: typeof checkLbugNative;
-  detectMissingOptionalGrammars: typeof detectMissingOptionalGrammars;
-  isGitRepo: typeof isGitRepo;
-  getGitRoot: typeof getGitRoot;
-  hasIndex: typeof hasRepoIndex;
-  homeDir: () => string;
-}
+import { cachedUpdateNoticeLine } from './update-notice.js';
+import { formatSlotSize, staleReasonLabel } from './stale-branch-format.js';
+import {
+  findRegistryEntryByRepoPath,
+  findRepo,
+  listRegisteredRepos,
+} from '../storage/repo-manager.js';
+import {
+  isDeleteCandidate,
+  listStaleBranchSlots,
+  staleListingBlock,
+  type StaleBranchSlot,
+} from '../storage/stale-branch-slots.js';
 
 function isCombiningMark(codePoint: number): boolean {
   return (
@@ -107,6 +91,8 @@ export function padDisplayEnd(value: string, columns: number): string {
   return value + ' '.repeat(Math.max(0, columns - displayWidth(value)));
 }
 
+const label = (key: Parameters<typeof t>[0], width: number): string => padDisplayEnd(t(key), width);
+
 /**
  * Embedding-runtime support status for the `doctor` Embeddings section.
  * Pure and DI-friendly so it can be unit-tested without running the whole
@@ -135,12 +121,10 @@ export function localEmbeddingDoctorStatus(opts: {
   if (blocker) {
     return { status: `✗ local embeddings unavailable on ${platform}/${arch}`, detail: blocker };
   }
-  // The stack is an optionalDependency — npm prunes it when onnxruntime-node's
-  // postinstall can't download its CUDA binaries (proxy/firewall, #2370).
   const resolution = opts.resolution !== undefined ? opts.resolution : resolveEmbeddingRuntime();
   if (resolution === null) {
     return {
-      status: '✗ optional embedding stack not installed',
+      status: '✗ local embedding stack not installed',
       detail: localEmbeddingStackMissingMessage(),
     };
   }
@@ -155,195 +139,6 @@ export function localEmbeddingDoctorStatus(opts: {
     };
   }
   return { status: '✓ local embeddings supported', detail: null };
-}
-
-const label = (key: Parameters<typeof t>[0], width: number): string => padDisplayEnd(t(key), width);
-
-const defaultDeps: DoctorDeps = {
-  getRuntimeFingerprint,
-  getRuntimeCapabilities,
-  resolveEmbeddingConfig,
-  isHttpMode,
-  checkNative: checkLbugNative,
-  detectMissingOptionalGrammars,
-  isGitRepo,
-  getGitRoot,
-  hasIndex: hasRepoIndex,
-  homeDir: () => os.homedir(),
-};
-
-const statusRank = (status: DoctorStatus): number => ({ pass: 0, warn: 1, fail: 2 })[status];
-
-const overallStatus = (checks: DoctorCheck[]): DoctorStatus =>
-  checks.reduce<DoctorStatus>(
-    (overall, check) => (statusRank(check.status) > statusRank(overall) ? check.status : overall),
-    'pass',
-  );
-
-const hostConfigPaths = (
-  homeDir: string,
-): Record<string, { displayName: string; configPath: string }> => ({
-  cursor: { displayName: 'Cursor', configPath: path.join(homeDir, '.cursor', 'mcp.json') },
-  'claude-code': { displayName: 'Claude Code', configPath: path.join(homeDir, '.claude.json') },
-  antigravity: {
-    displayName: 'Antigravity',
-    configPath: path.join(homeDir, '.gemini', 'antigravity', 'mcp_config.json'),
-  },
-  opencode: {
-    displayName: 'OpenCode',
-    configPath: path.join(homeDir, '.opencode', 'opencode.json'),
-  },
-  codex: { displayName: 'Codex', configPath: path.join(homeDir, '.codex', 'config.toml') },
-});
-
-function buildNativeCheck(nativeCheck: NativeCheckResult): DoctorCheck {
-  return {
-    name: 'native-runtime',
-    status: nativeCheck.ok ? 'pass' : 'fail',
-    detail: nativeCheck.ok ? 'LadybugDB native runtime loaded' : nativeCheck.message,
-    data: {
-      ok: nativeCheck.ok,
-      binaryPath: nativeCheck.binaryPath,
-    },
-  };
-}
-
-function buildLanguageSupportCheck(missing: MissingGrammar[]): DoctorCheck {
-  if (missing.length === 0) {
-    return {
-      name: 'language-support',
-      status: 'pass',
-      detail: 'Required languages and optional native grammars available',
-      data: { missingOptionalGrammars: [] },
-    };
-  }
-
-  return {
-    name: 'language-support',
-    status: 'warn',
-    detail: missing
-      .map((grammar) => `${grammar.name}: optional=unavailable (${grammar.extensions.join(', ')})`)
-      .join('\n'),
-    data: { missingOptionalGrammars: missing },
-  };
-}
-
-async function buildRepoCheck(repoPath: string, deps: DoctorDeps): Promise<DoctorCheck> {
-  if (!deps.isGitRepo(repoPath)) {
-    return {
-      name: 'git-repo',
-      status: 'fail',
-      detail: `${repoPath} is not a Git repository`,
-      data: { requestedPath: repoPath },
-    };
-  }
-
-  const gitRoot = deps.getGitRoot(repoPath) ?? repoPath;
-  const indexed = await deps.hasIndex(gitRoot);
-  return {
-    name: 'git-repo',
-    status: indexed ? 'pass' : 'warn',
-    detail: indexed ? 'Repository has a GitNexus index' : 'Repository is not indexed yet',
-    data: { requestedPath: repoPath, gitRoot, indexed },
-  };
-}
-
-function buildHostConfigCheck(host: string, deps: DoctorDeps): DoctorCheck {
-  const hostId = host.toLowerCase();
-  const hostPaths = hostConfigPaths(deps.homeDir());
-  const hostInfo = hostPaths[hostId];
-
-  if (!hostInfo) {
-    return {
-      name: 'host-config',
-      status: 'fail',
-      detail: `Unknown host: ${host}`,
-      data: { requestedHost: host, supportedHosts: Object.keys(hostPaths) },
-    };
-  }
-
-  if (!fs.existsSync(hostInfo.configPath)) {
-    return {
-      name: 'host-config',
-      status: 'warn',
-      detail: `${hostInfo.displayName} config file was not found`,
-      data: { hostId, displayName: hostInfo.displayName, configPath: hostInfo.configPath },
-    };
-  }
-
-  const config = fs.readFileSync(hostInfo.configPath, 'utf8');
-  const configured = /\bgitnexus\b/i.test(config);
-  return {
-    name: 'host-config',
-    status: configured ? 'pass' : 'warn',
-    detail: configured
-      ? `${hostInfo.displayName} config references GitNexus`
-      : `${hostInfo.displayName} config exists but does not reference GitNexus`,
-    data: {
-      hostId,
-      displayName: hostInfo.displayName,
-      configPath: hostInfo.configPath,
-      configured,
-    },
-  };
-}
-
-export async function runDoctor(
-  options: DoctorOptions = {},
-  deps: DoctorDeps = defaultDeps,
-): Promise<DoctorResult> {
-  const fingerprint = deps.getRuntimeFingerprint();
-  const capabilities = deps.getRuntimeCapabilities();
-  const embeddingConfig = deps.resolveEmbeddingConfig();
-  const nativeCheck = deps.checkNative();
-  const missingGrammars = deps.detectMissingOptionalGrammars();
-
-  const checks: DoctorCheck[] = [
-    { name: 'runtime', status: 'pass', data: { fingerprint } },
-    buildNativeCheck(nativeCheck),
-    {
-      name: 'capabilities',
-      status: capabilities.vector === 'unavailable' ? 'warn' : 'pass',
-      detail: capabilities.reason,
-      data: { capabilities },
-    },
-    buildLanguageSupportCheck(missingGrammars),
-    {
-      name: 'embeddings',
-      status: 'pass',
-      data: {
-        backend: deps.isHttpMode() ? 'http' : 'local',
-        config: embeddingConfig,
-      },
-    },
-  ];
-
-  if (options.repo) {
-    checks.push(await buildRepoCheck(options.repo, deps));
-  }
-
-  if (options.host) {
-    checks.push(buildHostConfigCheck(options.host, deps));
-  }
-
-  if (options.gpu) {
-    checks.push({
-      name: 'gpu-readiness',
-      status: 'warn',
-      detail: 'GPU readiness is environment-specific; verify Ollama/NVIDIA setup separately.',
-      data: { requested: true, fix: Boolean(options.fix) },
-    });
-  }
-
-  return { overall: overallStatus(checks), checks };
-}
-
-function checkData<T extends object>(check: DoctorCheck, key: string): T {
-  const value = check.data?.[key];
-  if (!value || typeof value !== 'object') {
-    throw new Error(`doctor check "${check.name}" missing ${key} data`);
-  }
-  return value as T;
 }
 
 /**
@@ -409,6 +204,35 @@ export function nativeStatusLine(check: NativeCheckResult): string {
   return `  ${padDisplayEnd('native', 10)}${nativeStatusText(check)}`;
 }
 
+/**
+ * Cwd leftover-slot lines (#3331). Pure: no deletes and no registry scan.
+ * When heads cannot be listed, do not title rows as orphaned or name
+ * `clean --stale` (#3337): that command refuses to delete in the same state.
+ */
+export function leftoverBranchSlotDoctorLines(slots: StaleBranchSlot[]): string[] {
+  if (slots.length === 0) return [];
+  const listingBlock = staleListingBlock(slots);
+  if (listingBlock === 'heads-unavailable') {
+    return [t('clean.stale.headsUnavailable')];
+  }
+  if (listingBlock === 'listing-failed') {
+    return [t('clean.stale.listingFailed')];
+  }
+  const lines = [t('doctor.orphanedBranches')];
+  let total = 0;
+  for (const slot of slots) {
+    total += slot.sizeBytes;
+    lines.push(
+      `  ${slot.branch}  ${staleReasonLabel(slot.reason)}  ${formatSlotSize(slot.sizeBytes)}`,
+    );
+  }
+  lines.push(`  ${t('doctor.orphanedBranches.total', { size: formatSlotSize(total) })}`);
+  if (slots.some(isDeleteCandidate)) {
+    lines.push(`  ${t('doctor.orphanedBranches.reclaim')}`);
+  }
+  return lines;
+}
+
 function nativeStatusText(check: NativeCheckResult): string {
   if (check.ok) return '✓ lbugjs.node loaded';
   switch (check.kind) {
@@ -416,34 +240,42 @@ function nativeStatusText(check: NativeCheckResult): string {
       return '✗ @ladybugdb/core not installed';
     case 'load_failed':
       return '✗ lbugjs.node present but failed to load';
+    case 'binary_unwritable':
+      // The prebuilt exists; only the copy into node_modules was refused. Saying
+      // "missing" here would contradict the detail printed underneath (#2672).
+      return '✗ lbugjs.node not installed (node_modules not writable)';
     default:
       // 'binary_missing', and any future kind: the conservative claim.
       return '✗ lbugjs.node missing';
   }
 }
 
-async function printTextDoctor(result: DoctorResult): Promise<void> {
-  const runtime = result.checks.find((check) => check.name === 'runtime');
-  const capabilitiesCheck = result.checks.find((check) => check.name === 'capabilities');
-  const embeddingsCheck = result.checks.find((check) => check.name === 'embeddings');
-  const nativeRuntime = result.checks.find((check) => check.name === 'native-runtime');
-  if (!runtime || !capabilitiesCheck || !embeddingsCheck || !nativeRuntime) {
-    throw new Error('doctor result missing required checks');
-  }
+export function cachedUpdateDoctorLine(options: {
+  installedVersion: string;
+  eligible: boolean;
+  env: NodeJS.ProcessEnv;
+  readCache: () => ValidatedUpdateCache | null;
+}): string | null {
+  return cachedUpdateNoticeLine(options);
+}
 
-  const fingerprint = checkData<ReturnType<typeof getRuntimeFingerprint>>(runtime, 'fingerprint');
-  const capabilities = checkData<ReturnType<typeof getRuntimeCapabilities>>(
-    capabilitiesCheck,
-    'capabilities',
-  );
-  const embeddings = embeddingsCheck.data ?? {};
-  const embeddingConfig = embeddings.config as ReturnType<typeof resolveEmbeddingConfig>;
+export const doctorCommand = async () => {
+  const fingerprint = getRuntimeFingerprint();
+  const capabilities = getRuntimeCapabilities();
+  const embeddingConfig = resolveEmbeddingConfig();
 
   console.log(t('doctor.title') + '\n');
   console.log(t('doctor.runtime'));
   console.log(`  ${label('doctor.labels.os', 10)}${fingerprint.platform}/${fingerprint.arch}`);
   console.log(`  ${label('doctor.labels.node', 10)}${fingerprint.node}`);
   console.log(`  ${label('doctor.labels.gitnexus', 10)}${fingerprint.gitnexus}`);
+  const updateLine = cachedUpdateDoctorLine({
+    installedVersion: fingerprint.gitnexus,
+    eligible: updateEligibleInstallSync(),
+    env: process.env,
+    readCache: () => readValidatedUpdateCacheSync(),
+  });
+  if (updateLine) console.log(`  ${updateLine}`);
   console.log(`  ${label('doctor.labels.ladybugdb', 10)}${fingerprint.ladybugdb ?? 'unknown'}`);
   // OS page size next to the LadybugDB version because the two interact:
   // @ladybugdb/core < 0.18.0 assumed 4 KiB pages in its buffer manager and
@@ -471,9 +303,7 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
   const ftsProbe = nativeCheck.ok
     ? await probeFtsExtensionLoad()
     : { loaded: false, reason: 'LadybugDB native module (lbugjs.node) failed to load' };
-  console.log(
-    `  ${label('doctor.labels.fullTextSearch', 18)}${ftsProbe.loaded ? 'available' : 'unavailable'}`,
-  );
+  console.log(`  ${label('doctor.labels.fullTextSearch', 18)}${ftsAvailabilityLabel(ftsProbe)}`);
   if (!ftsProbe.loaded && ftsProbe.reason) {
     console.log(`  ${padDisplayEnd('', 18)}${ftsProbe.reason}`);
     // Add an actionable remedy for recognized failure classes (#2374). The
@@ -481,7 +311,15 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
     // ("specified module could not be found") is opaque, so name the fix (VC++
     // redist, then OpenSSL) instead of leaving the user to reinstall in vain.
     // `unknown`'s remedy is "run doctor", which would be circular here.
-    const { kind, remedy } = diagnoseExtensionLoad(ftsProbe.reason);
+    // Policy `never` is not a load failure — skip structural diagnosis.
+    const { kind, remedy } = ftsProbe.suppressed
+      ? { kind: 'unknown' as const, remedy: '' }
+      : diagnoseExtensionLoad(
+          ftsProbe.reason,
+          'FTS',
+          extractExtensionPath(ftsProbe.reason),
+          resolveFtsVersionPair(extractExtensionPath(ftsProbe.reason)),
+        );
     if (kind !== 'unknown') {
       console.log(`  ${padDisplayEnd('', 18)}${remedy}`);
     }
@@ -504,25 +342,30 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
       console.log(`  ${padDisplayEnd('', 18)}${remedy}`);
     }
   }
-  // Semantic mode follows the probe, not the platform: without a loadable
-  // VECTOR extension the index can be neither built nor queried, so search is
-  // really on exact scan no matter what the platform would allow.
+  // Doctor has no repository target, so this probe can report only whether the
+  // runtime can load VECTOR. It cannot claim that a repository has built the
+  // named HNSW index. Keep the capability and repository state distinct.
   console.log(
-    `  ${label('doctor.labels.semanticMode', 18)}${
-      vectorProbe.loaded ? capabilities.semanticMode : 'exact-scan'
-    }`,
+    `  ${label('doctor.labels.semanticMode', 18)}${t(
+      vectorProbe.loaded
+        ? 'doctor.vectorCapability.indexUnverified'
+        : 'doctor.vectorCapability.exactScanOnly',
+    )}`,
   );
   // Surface the optional-extension install policy so offline users can see
   // whether analyze/query will reach the network (extension.ladybugdb.com).
   // Literal label (like the 'native' line) to avoid adding i18n keys.
-  const installPolicy = getExtensionInstallPolicy();
-  const policyHint =
-    installPolicy === 'load-only'
+  const serveQueryPolicy = getExtensionInstallPolicy();
+  const analyzePolicy = resolveAnalyzeInstallPolicy();
+  const policyHint = (policy: string) =>
+    policy === 'load-only'
       ? ' (offline; load only, no network install)'
-      : installPolicy === 'never'
+      : policy === 'never'
         ? ' (optional extensions disabled)'
         : ' (installs missing extensions over network)';
-  console.log(`  ${padDisplayEnd('Ext install:', 18)}${installPolicy}${policyHint}`);
+  console.log(
+    `  ${padDisplayEnd('Ext install:', 18)}serve/query=${serveQueryPolicy}${policyHint(serveQueryPolicy)}; analyze=${analyzePolicy}${policyHint(analyzePolicy)}`,
+  );
   console.log(
     `  ${label('doctor.labels.exactScanLimit', 18)}${t('doctor.chunks', { count: capabilities.exactScanLimit })}`,
   );
@@ -530,7 +373,7 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
     console.log(`  ${label('doctor.labels.note', 18)}${capabilities.reason}`);
   console.log('');
   console.log(t('doctor.embeddings'));
-  console.log(`  ${label('doctor.labels.backend', 12)}${embeddings.backend ?? 'local'}`);
+  console.log(`  ${label('doctor.labels.backend', 12)}${isHttpMode() ? 'http' : 'local'}`);
   console.log(`  ${label('doctor.labels.device', 12)}${embeddingConfig.device}`);
   console.log(`  ${label('doctor.labels.threads', 12)}${embeddingConfig.threads}`);
   console.log(
@@ -539,7 +382,11 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
   console.log(
     `  ${label('doctor.labels.subBatch', 12)}${t('doctor.chunks', { count: embeddingConfig.subBatchSize })}`,
   );
-  const support = localEmbeddingDoctorStatus({ httpMode: embeddings.backend === 'http' });
+  // Surface local-runtime support so macOS Intel users see up front that local
+  // embeddings can't load here (the bundled ONNX Runtime ships no darwin/x64
+  // native binding, #1515) — rather than discovering it only when
+  // `analyze --embeddings` fails. Literal label like the 'native' line above.
+  const support = localEmbeddingDoctorStatus({ httpMode: isHttpMode() });
   console.log(`  ${padDisplayEnd('Support:', 12)}${support.status}`);
   if (support.detail) {
     process.stderr.write(`\n${support.detail.replace(/^/gm, '  ')}\n\n`);
@@ -554,36 +401,28 @@ async function printTextDoctor(result: DoctorResult): Promise<void> {
       console.log(`  ${padDisplayEnd('', 12)}${cudaRedirect.detail}`);
     }
   }
-
-  for (const check of result.checks) {
-    if (['runtime', 'native-runtime', 'capabilities', 'embeddings'].includes(check.name)) continue;
-    console.log('');
-    console.log(`${check.name}: ${check.status}`);
-    if (check.detail) console.log(`  ${check.detail.replace(/\n/g, '\n  ')}`);
+  // Cwd leftover-slot report only; never delete.
+  const cwdRepo = await findRepo(process.cwd());
+  if (!cwdRepo) return;
+  const entries = await listRegisteredRepos();
+  const entry = findRegistryEntryByRepoPath(entries, cwdRepo.repoPath);
+  const slots = await listStaleBranchSlots({
+    repoPath: cwdRepo.repoPath,
+    storagePath: cwdRepo.storagePath,
+    branches: entry?.branches,
+  });
+  const leftoverLines = leftoverBranchSlotDoctorLines(slots);
+  // A pre-adoption index left in <repo>/.gitnexus after this checkout moved
+  // into a shared store (#3352).
+  const legacy = await findLegacyLocalIndex(cwdRepo.repoPath, cwdRepo.storagePath);
+  if (legacy) {
+    leftoverLines.push(
+      t('status.legacyLocalIndex', { path: legacy.dir, size: formatSlotSize(legacy.bytes) }),
+    );
   }
-}
-
-function normalizeOptions(
-  pathArg?: string | DoctorOptions,
-  options?: DoctorOptions,
-): DoctorOptions {
-  if (typeof pathArg === 'string') {
-    return { ...options, repo: options?.repo ?? pathArg };
-  }
-  return pathArg ?? options ?? {};
-}
-
-export const doctorCommand = async (pathArg?: string | DoctorOptions, options?: DoctorOptions) => {
-  const normalized = normalizeOptions(pathArg, options);
-  const result = await runDoctor(normalized);
-
-  if (normalized.json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    await printTextDoctor(result);
-  }
-
-  if (result.overall === 'fail') {
-    process.exitCode = 1;
+  if (leftoverLines.length === 0) return;
+  console.log('');
+  for (const line of leftoverLines) {
+    console.log(line);
   }
 };
