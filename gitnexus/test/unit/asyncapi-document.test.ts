@@ -1023,6 +1023,9 @@ operations:
   });
 
   it('counts a subdirectory it could not list', async () => {
+    // Root bypasses directory permissions, so the "unreadable" fixture cannot
+    // be built; skip the assertion instead of reporting a false failure.
+    if (typeof process.geteuid === 'function' && process.geteuid() === 0) return;
     // Under a mixed-permission cache half the documents can be invisible while
     // the run otherwise reports a clean, complete read.
     const dir = await fixture({ 'ok.yaml': VALID, 'secret/hidden.yaml': VALID });

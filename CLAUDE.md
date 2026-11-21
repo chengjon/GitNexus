@@ -1,10 +1,10 @@
 <!-- version: 1.9.0 -->
 <!--
   Metadata: version, last reviewed, scope, model policy, reference docs, changelog.
-  Last updated: 2026-09-02
+  Last updated: 2026-10-17
 -->
 
-Last reviewed: 2026-09-02
+Last reviewed: 2026-10-17
 
 **Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
 
@@ -43,6 +43,7 @@ The global `gitnexus` binary runs **this repo's own build** (`gitnexus/dist/` vi
 
 - **This repository:** [AGENTS.md](AGENTS.md) (Cursor + monorepo notes), [ARCHITECTURE.md](ARCHITECTURE.md), [CONTRIBUTING.md](CONTRIBUTING.md), [GUARDRAILS.md](GUARDRAILS.md).
 - **Call & inheritance resolution:** See ARCHITECTURE.md § Scope-Resolution Pipeline. Shared pipeline code in `gitnexus/src/core/ingestion/` must not name languages — use `LanguageProvider` / `ScopeResolver` hooks instead (see AGENTS.md). (The legacy call-resolution DAG was removed in #942.)
+- Shared MCP, CLI, HTTP, and web Graph-RAG callers also use the provider registry. Put language-specific filename checks, parsing, and semantic rules in the owning provider or format processor. See AGENTS.md.
 - **GitNexus:** standard skills in `.claude/skills/gitnexus-*/`; MCP and indexed-repo rules in [docs/law/gitnexus-agent-rules.md](docs/law/gitnexus-agent-rules.md). See **GitNexus rules** below.
 - **Engineering plans, execution & review:** `/gitnexus-plan <task>` (implementation-ready plans via GitNexus + statement-level PDG + source verification; Deepen mode for existing plans), `/gitnexus-work [plan]` (executes a plan as impact-checked, detect_changes-gated atomic commits), `/gitnexus-review [PR|branch|range|local]` (read-only graph-backed review), `/gitnexus-lfg <task>` (plan with depth asked up front → proceed/stop gate → work → review pipeline). Specs in `.claude/skills/gitnexus-{plan,work,review,lfg}/SKILL.md` (see AGENTS.md § Engineering planning & execution).
 
@@ -50,6 +51,7 @@ The global `gitnexus` binary runs **this repo's own build** (`gitnexus/dist/` vi
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-10-17 | 1.9.0 | Require the reviewed preview's `plan_token` when applying semantic rename (#2973). |
 | 2026-09-02 | 1.9.0 | Added "Rebuild dist" rule (rebuild after `gitnexus/src/**` edits; global `gitnexus` runs this repo's dist); lean `gitnexus:keep` blocks + canonical rules moved to docs/law/gitnexus-agent-rules.md. |
 | 2026-07-20 | 1.8.0 | The CI review agent runs `gitnexus-review` as a coordinated swarm — six `ci-personas/` lanes dispatched via the `Agent` tool with a bounded critic gate. |
 | 2026-07-16 | 1.7.0 | `/gitnexus-plan` asks depth up front in interactive runs; `/gitnexus-lfg` gate slimmed to proceed/stop. |

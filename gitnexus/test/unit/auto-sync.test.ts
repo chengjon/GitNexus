@@ -19,10 +19,12 @@ import {
   resetAutoSyncState,
   saveAutoSyncState,
   shouldAnalyzeCommit,
+  getAutoSyncRepoIdentity,
   validateAutoSyncRemoteUrl,
   validateAutoSyncBranchName,
   writeProjectCommitInfo,
 } from '../../src/core/auto-sync/index.js';
+import { absoluteAutoSyncRemoteUrl } from '../../src/core/auto-sync/config.js';
 import { acquireFileLock } from '../../src/storage/file-lock.js';
 
 describe('auto-sync', () => {
@@ -31,7 +33,18 @@ describe('auto-sync', () => {
   let oldHome: string | undefined;
 
   beforeEach(async () => {
-    const base = path.join(process.cwd(), '.tmp-test');
+    // Use a base outside the unsafe auto-sync roots (/, /tmp, /opt, /root, ...).
+    // CI usually has the repo in a safe location; this environment keeps it under /opt.
+    let base = path.join(process.cwd(), '.tmp-test');
+    for (const candidate of ['/home', '/workspace', '/data', '/mnt', '/srv']) {
+      try {
+        await fs.access(candidate);
+        base = candidate;
+        break;
+      } catch {
+        // try the next candidate
+      }
+    }
     await fs.mkdir(base, { recursive: true });
     tempDir = await fs.realpath(await fs.mkdtemp(path.join(base, 'gitnexus-auto-sync-')));
     gitnexusHome = path.join(tempDir, '.gitnexus');
@@ -154,6 +167,7 @@ describe('auto-sync', () => {
     expect(loaded.config.analyzeTimeoutMs).toBe(300_000);
     expect(loaded.config.maxConcurrency).toBe(1);
     expect(loaded.config.analyzeFailureThreshold).toBe(3);
+    expect(loaded.config.allowedHosts).toEqual([]);
     expect(loaded.config.projects[0].groupName).toBeUndefined();
     expect(loaded.config.projects[0].pdg).toBeUndefined();
     expect(loaded.config.projects[0].overwriteLocalChanges).toBe(false);
@@ -284,7 +298,7 @@ describe('auto-sync', () => {
     const loaded = await loadAutoSyncConfig();
 
     expect(loaded.ok).toBe(false);
-    if (loaded.ok) throw new Error('expected invalid config');
+    if (loaded.ok !== false) throw new Error('expected invalid config');
     expect(loaded.message).toContain('analyze_failure_threshold must be an integer >= 2');
   });
 
@@ -304,7 +318,7 @@ describe('auto-sync', () => {
     const loaded = await loadAutoSyncConfig();
 
     expect(loaded.ok).toBe(false);
-    if (loaded.ok) throw new Error('expected invalid config');
+    if (loaded.ok !== false) throw new Error('expected invalid config');
     expect(loaded.reason).toBe('invalid');
     expect(loaded.message).toContain('[auto-sync] Invalid watch_config.yml:');
     expect(loaded.message).toContain('sync_interval_minutes must be a positive integer');
@@ -327,7 +341,7 @@ describe('auto-sync', () => {
     const loaded = await loadAutoSyncConfig();
 
     expect(loaded.ok).toBe(false);
-    if (loaded.ok) throw new Error('expected invalid config');
+    if (loaded.ok !== false) throw new Error('expected invalid config');
     expect(loaded.message).toContain('local_path must be an absolute path');
   });
 
@@ -571,6 +585,11 @@ describe('auto-sync', () => {
     expect(() => validateAutoSyncRemoteUrl('git@example.com:owner/repo.git')).toThrow(
       'host must be',
     );
+    expect(() => validateAutoSyncRemoteUrl('git@localhost:owner/repo.git')).toThrow('host must be');
+    expect(() => validateAutoSyncRemoteUrl('git@github.com.evil.com:owner/repo.git')).toThrow(
+      'host must be',
+    );
+    expect(() => validateAutoSyncRemoteUrl('git@..:owner/repo.git')).toThrow('DNS hostname');
     // Traversal is a whole segment; consecutive dots inside a name are not.
     expect(() => validateAutoSyncRemoteUrl('git@github.com:owner/foo..bar.git')).not.toThrow();
     expect(() => validateAutoSyncRemoteUrl('git@github.com:owner/../escape.git')).toThrow(
@@ -594,6 +613,117 @@ describe('auto-sync', () => {
     expect(() => validateAutoSyncRemoteUrl('git@github.com:owner//repo')).toThrow(
       'path must include',
     );
+  });
+
+  it('accepts a self-hosted remote only when its host is listed in allowed_hosts', () => {
+    const ssh = 'git@gitlab.mycompany.com:group/repo.git';
+    const https = 'https://gitlab.mycompany.com/group/subgroup/repo.git';
+    const allowed = ['GitLab.MyCompany.com'];
+
+    expect(() => validateAutoSyncRemoteUrl(ssh)).toThrow('allowed_hosts');
+    expect(() => validateAutoSyncRemoteUrl(ssh, allowed)).not.toThrow();
+    expect(() => validateAutoSyncRemoteUrl(https, allowed)).not.toThrow();
+    expect(() =>
+      validateAutoSyncRemoteUrl('git@git.gitlab.mycompany.com:group/repo.git', allowed),
+    ).toThrow('host must be');
+    expect(() =>
+      validateAutoSyncRemoteUrl('git@mycompany.com:group/repo.git', ['gitlab.mycompany.com']),
+    ).toThrow('host must be');
+    expect(() =>
+      validateAutoSyncRemoteUrl('https://user:token@gitlab.mycompany.com/group/repo.git', allowed),
+    ).toThrow('userinfo');
+
+    const parsed = parseAutoSyncConfig(
+      [
+        'sync_interval_minutes: 10',
+        'allowed_hosts: [GitLab.MyCompany.com, GitLab.MyCompany.com]',
+        'projects:',
+        '  - local_path: /tmp/repos',
+        '    branches: [main]',
+        '    remote_urls:',
+        `      - ${ssh}`,
+        `      - ${https}`,
+      ].join('\n'),
+      '/tmp/watch_config.yml',
+    );
+    expect(parsed.allowedHosts).toEqual(['gitlab.mycompany.com']);
+
+    expect(() =>
+      parseAutoSyncConfig(
+        [
+          'sync_interval_minutes: 10',
+          'allowed_hosts: ["*.mycompany.com"]',
+          'projects:',
+          '  - local_path: /tmp/repos',
+          '    branches: [main]',
+          '    remote_urls:',
+          '      - git@github.com:owner/repo.git',
+        ].join('\n'),
+        '/tmp/watch_config.yml',
+      ),
+    ).toThrow('allowed_hosts[0] must be a DNS hostname');
+
+    expect(() =>
+      parseAutoSyncConfig(
+        [
+          'sync_interval_minutes: 10',
+          'allowed_hosts: gitlab.mycompany.com',
+          'projects:',
+          '  - local_path: /tmp/repos',
+          '    branches: [main]',
+          '    remote_urls:',
+          '      - git@github.com:owner/repo.git',
+        ].join('\n'),
+        '/tmp/watch_config.yml',
+      ),
+    ).toThrow('allowed_hosts must be a list of DNS hostnames');
+  });
+
+  it('rejects ambiguous numeric hosts and treats one trailing dot as the same name', () => {
+    const config = (allowed: string, remote: string) =>
+      [
+        'sync_interval_minutes: 10',
+        `allowed_hosts: ["${allowed}"]`,
+        'projects:',
+        '  - local_path: /tmp/repos',
+        '    branches: [main]',
+        '    remote_urls:',
+        `      - ${remote}`,
+      ].join('\n');
+
+    for (const host of ['192.168.1', '127.1', '0x7f.0.0.1', '0177.0.0.1', '2130706433']) {
+      expect(() =>
+        parseAutoSyncConfig(config(host, 'git@github.com:owner/repo.git'), '/tmp/watch_config.yml'),
+      ).toThrow('ambiguous numeric spelling');
+      expect(() => validateAutoSyncRemoteUrl(`git@${host}:group/repo.git`, [host])).toThrow(
+        'ambiguous numeric spelling',
+      );
+    }
+
+    expect(() =>
+      validateAutoSyncRemoteUrl('git@10.0.0.1:group/repo.git', ['10.0.0.1']),
+    ).not.toThrow();
+    expect(absoluteAutoSyncRemoteUrl('git@10.0.0.1:group/repo.git')).toBe(
+      'git@10.0.0.1:group/repo.git',
+    );
+
+    const allowed = ['git', 'gitlab.mycompany.com'];
+    expect(() => validateAutoSyncRemoteUrl('git@git.:group/repo.git', allowed)).not.toThrow();
+    expect(getAutoSyncRepoIdentity('git@git.:group/repo.git', allowed)).toBe('git/group/repo');
+    expect(getAutoSyncRepoIdentity('git@gitlab.mycompany.com.:group/repo.git', allowed)).toBe(
+      'gitlab.mycompany.com/group/repo',
+    );
+    expect(absoluteAutoSyncRemoteUrl('git@git:group/repo.git')).toBe('git@git.:group/repo.git');
+    expect(absoluteAutoSyncRemoteUrl('git@git.:group/repo.git')).toBe('git@git.:group/repo.git');
+    expect(absoluteAutoSyncRemoteUrl('https://gitlab.mycompany.com/group/repo.git')).toBe(
+      'https://gitlab.mycompany.com./group/repo.git',
+    );
+
+    const parsed = parseAutoSyncConfig(
+      config('git.', 'git@git:group/repo.git'),
+      '/tmp/watch_config.yml',
+    );
+    expect(parsed.allowedHosts).toEqual(['git']);
   });
 
   it('parses repo git timeout durations', () => {
@@ -621,7 +751,7 @@ describe('auto-sync', () => {
     const loaded = await loadAutoSyncConfig();
 
     expect(loaded.ok).toBe(false);
-    if (loaded.ok) throw new Error('expected invalid config');
+    if (loaded.ok !== false) throw new Error('expected invalid config');
     expect(loaded.message).toContain('must not set both branch and branches');
   });
 

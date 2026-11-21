@@ -27,7 +27,7 @@
  * data on stdout for piping (`gitnexus query | jq`). User banners on
  * stdout would corrupt that pipeline.
  */
-import { logger } from '../core/logger.js';
+import { logger, writeCoordinatedStderr } from '../core/logger.js';
 import { t, type CliMessageKey, type CliMessageVars } from './i18n/index.js';
 
 /**
@@ -75,10 +75,12 @@ export interface CliMessageFields extends Record<string, unknown> {
 
 function writeStderr(msg: string): void {
   // Direct write — bypassing `console.*` so it cannot be intercepted by
-  // progress-bar redirection (see `cli/analyze.ts:barLog`) or other
-  // routing. The structured tee below still goes through the logger so
-  // log aggregation works either way.
-  process.stderr.write(msg.endsWith('\n') ? msg : msg + '\n');
+  // progress-bar redirection (see `cli/analyze.ts:barLog`). When the analyze
+  // progress bar owns stderr, `writeCoordinatedStderr` clears the bar line
+  // first so this text lands on its own line instead of splicing onto it.
+  // The structured tee below still goes through the logger so log
+  // aggregation works either way.
+  writeCoordinatedStderr(msg);
 }
 
 /**

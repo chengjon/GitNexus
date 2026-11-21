@@ -11,7 +11,8 @@
  * Accepts status === null (timeout) as valid on slow CI runners.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { CLI_SPAWN_PREFIX } from '../helpers/cli-entry.js';
+import { cliAnalysisEnv, CLI_SPAWN_PREFIX } from '../helpers/cli-entry.js';
+import { cleanupTempDirSync } from '../helpers/test-db.js';
 import { spawnSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -27,19 +28,12 @@ import os from 'os';
  * locally); the tsx path uses an absolute loader URL so it resolves from any cwd.
  */
 function runSkillsCli(cwd: string, timeoutMs = 45000) {
-  const testHome = path.join(cwd, '.gitnexus-test-home');
-	  return spawnSync(process.execPath, [...CLI_SPAWN_PREFIX, 'analyze', '--skills'], {
+  return spawnSync(process.execPath, [...CLI_SPAWN_PREFIX, 'analyze', '--skills'], {
     cwd,
     encoding: 'utf8',
     timeout: timeoutMs,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      GITNEXUS_HOME: path.join(testHome, '.gitnexus'),
-      HOME: testHome,
-      XDG_CONFIG_HOME: path.join(testHome, '.config'),
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=8192`.trim(),
-    },
+    env: cliAnalysisEnv(),
   });
 }
 
@@ -320,7 +314,7 @@ export function parseArgs(args: string[]) {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -474,7 +468,7 @@ module.exports = { logError, logInfo, createEntry };
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -605,7 +599,7 @@ def check_length(text, max_len=255):
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -735,7 +729,7 @@ func (u *User) Validate() bool {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -869,7 +863,7 @@ public class User {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -969,7 +963,7 @@ pub fn format_error(err: &str) -> String {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -1313,7 +1307,7 @@ namespace Data
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -1506,7 +1500,7 @@ double distance(double x1, double y1, double x2, double y2) {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -1699,7 +1693,7 @@ void log_init(void) {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -1934,7 +1928,7 @@ function db_close() {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -2123,7 +2117,7 @@ fun dbClose() {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -2258,7 +2252,7 @@ def compile_model(config):
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**
@@ -2384,7 +2378,7 @@ export function createEntry(level: string, msg: string) {
   }, 120000);
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupTempDirSync(tmpDir);
   });
 
   /**

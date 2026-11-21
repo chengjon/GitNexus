@@ -13,6 +13,7 @@
 // We use createRequire to load the CommonJS vendored files in ESM context.
 import Graph from 'graphology';
 import type { AbstractGraph, Attributes } from 'graphology-types';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -29,12 +30,9 @@ const _require = createRequire(import.meta.url);
 /** Graphology Graph instance type (AbstractGraph from graphology-types avoids CJS/ESM interop namespace issue) */
 type GraphInstance = AbstractGraph<Attributes, Attributes, Attributes>;
 
-const leiden: LeidenModule = _require(leidenPath);
-
-/** Vendored Leiden algorithm module shape */
-interface LeidenModule {
-  detailed: (graph: GraphInstance, options: Record<string, unknown>) => LeidenDetailedResult;
-}
+// The Leiden worker loads its own copy; this load keeps a missing vendor/ asset
+// failing at import time and keeps it visible to dockerfile-runtime-asset-parity.
+_require(leidenPath);
 
 /** Result returned by leiden.detailed() */
 interface LeidenDetailedResult {
@@ -110,15 +108,6 @@ interface IcebugWorkerFailure {
  * incremental-indexing equivalence test (incremental ≡ full rebuild).
  */
 const LEIDEN_SEED = 0xc0de;
-function createSeededRng(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const COMMUNITY_ENGINE_ENV = 'GITNEXUS_COMMUNITY_ENGINE';
 /**
@@ -176,7 +165,10 @@ export interface CommunityMembership {
 
 export interface CommunityDetectionResult {
   communities: CommunityNode[];
+  /** Assignments to retained communities, safe to emit as MEMBER_OF edges. */
   memberships: CommunityMembership[];
+  /** All Leiden assignments, including filtered singletons. Optional for legacy producers. */
+  rawMemberships?: CommunityMembership[];
   stats: {
     totalCommunities: number;
     modularity: number;
@@ -235,6 +227,7 @@ export const processCommunities = async (
     return {
       communities: [],
       memberships: [],
+      rawMemberships: [],
       stats: {
         totalCommunities: 0,
         modularity: 0,
@@ -258,29 +251,34 @@ export const processCommunities = async (
   onProgress?.(`Found ${details.count} communities...`, 60);
 
   // Step 3: Create community nodes with heuristic labels
+  const communityIds = stableCommunityIds(details.communities);
   const communityNodes = createCommunityNodes(
     details.communities as Record<string, number>,
-    details.count,
+    communityIds,
     graph,
-    knowledgeGraph,
   );
 
   onProgress?.('Creating membership edges...', 80);
 
-  // Step 4: Create membership mappings
+  // Step 4: Preserve all assignments for skill generation, but only emit
+  // memberships for retained communities with a corresponding graph node.
+  const retainedCommunityIds = new Set(communityNodes.map((community) => community.id));
   const memberships: CommunityMembership[] = [];
-  Object.entries(details.communities).forEach(([nodeId, communityNum]) => {
-    memberships.push({
-      nodeId,
-      communityId: `comm_${communityNum}`,
-    });
-  });
+  const rawMemberships: CommunityMembership[] = [];
+  for (const nodeId of Object.keys(details.communities)) {
+    const communityNum = details.communities[nodeId];
+    const communityId = communityIds.get(communityNum)!;
+    const membership = { nodeId, communityId };
+    rawMemberships.push(membership);
+    if (retainedCommunityIds.has(communityId)) memberships.push(membership);
+  }
 
   onProgress?.('Community detection complete!', 100);
 
   return {
     communities: communityNodes,
     memberships,
+    rawMemberships,
     stats: {
       totalCommunities: details.count,
       modularity: details.modularity,
@@ -466,28 +464,101 @@ const runCommunityEngine = async (
       35,
     );
     const fallback = await runGraphologyLeiden(graph, projection.isLarge, engineRequested);
-    return { ...fallback, fallbackReason };
+    return {
+      ...fallback,
+      fallbackReason: fallback.fallbackReason
+        ? `${fallbackReason}; ${fallback.fallbackReason}`
+        : fallbackReason,
+    };
   }
 };
 
-const runGraphologyLeiden = async (
+/**
+ * Runs the vendored Leiden in a worker so LEIDEN_TIMEOUT_MS can actually fire.
+ * leiden.detailed is synchronous and, on some graphs, never returns
+ * (graphology/graphology#557); a timer on the main thread cannot interrupt it.
+ * The worker is pure JS, so terminate() is safe (unlike the icebug N-API worker).
+ */
+const GRAPHOLOGY_WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+try {
+  const Graph = require(workerData.graphologyPath);
+  const leiden = require(workerData.leidenPath);
+  const graph = Graph.from(workerData.graph);
+  const rng = (() => {
+    let s = workerData.seed >>> 0;
+    return () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  })();
+  const d = leiden.detailed(graph, {
+    resolution: workerData.resolution,
+    maxIterations: workerData.maxIterations,
+    rng,
+  });
+  parentPort.postMessage({
+    ok: true,
+    communities: d.communities,
+    count: d.count,
+    modularity: d.modularity,
+  });
+} catch (error) {
+  parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+}
+`;
+
+export const runGraphologyLeiden = async (
   graph: GraphInstance,
   isLarge: boolean,
   engineRequested: CommunityDetectionEngine,
+  timeoutMs: number = LEIDEN_TIMEOUT_MS,
 ): Promise<CommunityEngineResult> => {
   try {
-    const details = await Promise.race([
-      Promise.resolve(
-        leiden.detailed(graph, {
+    const details = await new Promise<LeidenDetailedResult>((resolve, reject) => {
+      const worker = new Worker(GRAPHOLOGY_WORKER_SOURCE, {
+        eval: true,
+        workerData: {
+          graphologyPath: _require.resolve('graphology'),
+          leidenPath,
+          graph: graph.export(),
+          seed: LEIDEN_SEED,
           resolution: isLarge ? 2.0 : 1.0,
           maxIterations: isLarge ? 3 : 0,
-          rng: createSeededRng(LEIDEN_SEED),
-        }),
-      ),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Leiden timeout')), LEIDEN_TIMEOUT_MS),
-      ),
-    ]);
+        },
+      });
+      let settled = false;
+      const timeout = setTimeout(() => {
+        settled = true;
+        void worker.terminate();
+        reject(new Error('Leiden timeout'));
+      }, timeoutMs);
+      worker.once('message', (message) => {
+        settled = true;
+        clearTimeout(timeout);
+        if (message.ok === true) {
+          resolve({
+            communities: message.communities,
+            count: message.count,
+            modularity: message.modularity,
+          });
+        } else {
+          reject(new Error(message.error));
+        }
+      });
+      worker.once('error', (error) => {
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      });
+      worker.once('exit', (code) => {
+        if (settled) return;
+        clearTimeout(timeout);
+        reject(new Error(`Graphology Leiden worker exited with code ${code}`));
+      });
+    });
     return { ...details, engine: 'graphology', engineRequested };
   } catch (e: any) {
     if (e.message !== 'Leiden timeout') {
@@ -695,30 +766,48 @@ const normalizePartition = (
 // ============================================================================
 
 /**
- * Create Community nodes with auto-generated labels based on member file paths
+ * Anchor each community to its smallest member, independent of partition numbering.
+ * The ID stays stable while that anchor remains the smallest member. Adding a
+ * smaller member or removing the anchor changes it. Anchor order makes collision
+ * suffixes deterministic even when the engine renumbers or reorders its partition.
+ * The ID follows the anchor if clustering moves it to a different member set.
  */
+export const stableCommunityIds = (communities: Record<string, number>): Map<number, string> => {
+  const smallest = new Map<number, string>();
+  // Avoid allocating an entry tuple for every symbol in the partition.
+  for (const nodeId of Object.keys(communities)) {
+    const communityNum = communities[nodeId];
+    const current = smallest.get(communityNum);
+    if (current === undefined || nodeId < current) smallest.set(communityNum, nodeId);
+  }
+
+  const ids = new Map<number, string>();
+  const used = new Set<string>();
+  const ordered = [...smallest].sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [communityNum, memberId] of ordered) {
+    const base = `comm_${createHash('sha1').update(memberId).digest('hex').slice(0, 12)}`;
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}_${n}`;
+    used.add(id);
+    ids.set(communityNum, id);
+  }
+  return ids;
+};
+
+/** Create Community nodes with labels based on member file paths. */
 const createCommunityNodes = (
   communities: Record<string, number>,
-  communityCount: number,
+  communityIds: ReadonlyMap<number, string>,
   graph: GraphInstance,
-  knowledgeGraph: KnowledgeGraph,
 ): CommunityNode[] => {
   // Group node IDs by community
   const communityMembers = new Map<number, string[]>();
 
-  Object.entries(communities).forEach(([nodeId, commNum]) => {
-    if (!communityMembers.has(commNum)) {
-      communityMembers.set(commNum, []);
-    }
-    communityMembers.get(commNum)!.push(nodeId);
-  });
-
-  // Build node lookup for file paths
-  const nodePathMap = new Map<string, string>();
-  for (const node of knowledgeGraph.iterNodes()) {
-    if (node.properties.filePath) {
-      nodePathMap.set(node.id, node.properties.filePath);
-    }
+  for (const nodeId of Object.keys(communities)) {
+    const commNum = communities[nodeId];
+    const members = communityMembers.get(commNum);
+    if (members) members.push(nodeId);
+    else communityMembers.set(commNum, [nodeId]);
   }
 
   // Create community nodes - SKIP SINGLETONS (isolated nodes)
@@ -728,13 +817,14 @@ const createCommunityNodes = (
     // Skip singleton communities - they're just isolated nodes
     if (memberIds.length < 2) return;
 
-    const heuristicLabel = generateHeuristicLabel(memberIds, nodePathMap, graph, commNum);
+    const communityId = communityIds.get(commNum)!;
+    const heuristicLabel = generateHeuristicLabel(memberIds, graph, communityId);
 
     communityNodes.push({
-      id: `comm_${commNum}`,
+      id: communityId,
       label: heuristicLabel,
       heuristicLabel,
-      cohesion: calculateCohesion(memberIds, graph),
+      cohesion: calculateCohesion(memberIds, graph, communities, commNum),
       symbolCount: memberIds.length,
     });
   });
@@ -754,15 +844,14 @@ const createCommunityNodes = (
  */
 const generateHeuristicLabel = (
   memberIds: string[],
-  nodePathMap: Map<string, string>,
   graph: GraphInstance,
-  commNum: number,
+  communityId: string,
 ): string => {
   // Collect folder names from file paths
   const folderCounts = new Map<string, number>();
 
   memberIds.forEach((nodeId) => {
-    const filePath = nodePathMap.get(nodeId) || '';
+    const filePath: string = graph.getNodeAttribute(nodeId, 'filePath') || '';
     const parts = filePath.split('/').filter(Boolean);
 
     // Get the most specific folder (parent directory)
@@ -811,7 +900,7 @@ const generateHeuristicLabel = (
   }
 
   // Last resort: generic name with community ID for uniqueness
-  return `Cluster_${commNum}`;
+  return `Cluster_${communityId.slice('comm_'.length)}`;
 };
 
 /**
@@ -840,10 +929,13 @@ const findCommonPrefix = (strings: string[]): string => {
  * Estimate cohesion score (0-1) based on internal edge density.
  * Uses sampling for large communities to avoid O(N^2) cost.
  */
-const calculateCohesion = (memberIds: string[], graph: GraphInstance): number => {
+const calculateCohesion = (
+  memberIds: string[],
+  graph: GraphInstance,
+  communities: Record<string, number>,
+  communityNum: number,
+): number => {
   if (memberIds.length <= 1) return 1.0;
-
-  const memberSet = new Set(memberIds);
 
   // Sample up to 50 members for large communities
   const SAMPLE_SIZE = 50;
@@ -856,7 +948,7 @@ const calculateCohesion = (memberIds: string[], graph: GraphInstance): number =>
     if (!graph.hasNode(nodeId)) continue;
     graph.forEachNeighbor(nodeId, (neighbor: string) => {
       totalEdges++;
-      if (memberSet.has(neighbor)) {
+      if (communities[neighbor] === communityNum) {
         internalEdges++;
       }
     });

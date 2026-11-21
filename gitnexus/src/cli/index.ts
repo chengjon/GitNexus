@@ -3,7 +3,7 @@
 // Heap re-spawn removed — only analyze.ts needs the 8GB heap (via its own ensureHeap()).
 // Removing it from here improves MCP server startup time significantly.
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { packageVersion } from '../core/package-version.js';
 import {
   createAnalyzerLbugLazyAction,
@@ -11,11 +11,13 @@ import {
   createLbugLazyAction,
 } from './lazy-action.js';
 import { EMBEDDING_DIMS_ERROR, normalizeEmbeddingDims } from './embedding-dims.js';
+import { IntegerOptionError, parseMemoryBudgetMb } from './int-option.js';
 import { registerGroupCommands } from './group.js';
 import { localizeCliHelp } from './help-i18n.js';
 import { t } from './i18n/index.js';
 import { writeCommandBanner } from './command-banner.js';
 import { runProcessCliUpdateNotice } from './update-notice.js';
+import { memoryAutopilotDisabled } from '../core/ingestion/utils/effective-ram.js';
 
 const program = new Command();
 
@@ -97,6 +99,12 @@ program
     'Generate repo-specific skill files from detected communities ' +
       '(no-op when --index-only is also set).',
   )
+  .addOption(
+    new Option('--instruction-file <file>', 'Update only the selected instruction file').choices([
+      'AGENTS.md',
+      'CLAUDE.md',
+    ]),
+  )
   .option(
     '--skip-agents-md',
     'Skip updating the gitnexus section in AGENTS.md and CLAUDE.md. Does not skip standard skills in .claude/skills or .agents/skills; use --skip-skills for those. Community skills from --skills are unaffected.',
@@ -172,6 +180,16 @@ program
       '(integer >= -1; default: 67108864 = 64 MiB; -1 keeps Ladybug stock ~16 MiB).',
   )
   .option(
+    '--memory-budget <mb>',
+    'Main-thread V8 heap size in MB for analyze (integer >= 200). Re-runs analyze with ' +
+      'exactly this heap, overriding the RAM/cgroup auto-sizer and any --max-old-space-size ' +
+      'pin; parse workers keep their own heap caps.',
+  )
+  .option(
+    '--resource-budget <mb>',
+    'Total analysis resource budget in MiB, including native pools, workers, model and supervisor.',
+  )
+  .option(
     '--workers <n>',
     'Parse worker pool size (>=1). Default: cores-1 capped at 16, auto-sized to the repo.',
   )
@@ -234,6 +252,18 @@ program
       process.stderr.write('\n  --debounce requires --watch\n\n');
       process.exit(1);
     }
+    // Validate --memory-budget here so analyze and --watch both reject a bad
+    // value before ensureHeap sizes (and possibly respawns) the heap (#3137).
+    const budgetOpt = analyzeOpts['memoryBudget'];
+    if (budgetOpt !== undefined) {
+      try {
+        parseMemoryBudgetMb(String(budgetOpt));
+      } catch (error) {
+        if (!(error instanceof IntegerOptionError)) throw error;
+        process.stderr.write(`\n  ${error.message}\n\n`);
+        process.exit(1);
+      }
+    }
     // ONLY GITNEXUS_EMBEDDING_DIMS must be set here: schema.ts reads it at
     // module-load time during the lazy import('./analyze.js') below (via the
     // static chain analyze.ts → run-analyze.ts → schema.ts), so deferring to
@@ -270,14 +300,48 @@ program
       process.env.GITNEXUS_EMBEDDING_DIMS = dimsEnvBaseline;
     }
   })
-  .action(
-    createAnalyzerLbugLazyAction(
+  .action(async (inputPath, options) => {
+    // The connected continuation only publishes the writer's prepared graph
+    // and embeds it. Its analyzer receipt is never used: the graph writer has
+    // already finalized provenance. Keep the native check, without repeating
+    // the complete analyzer identity snapshot in this separate process.
+    // An explicit heap budget without the budget-child marker always re-execs
+    // in ensureHeap before runFullAnalysis. Its parent receipt is unused too;
+    // the child still captures provenance before importing the analyzer.
+    const budgetSupervisor =
+      !options.watch &&
+      options.memoryBudget !== undefined &&
+      process.env.GITNEXUS_HEAP_LIMIT_SOURCE !== 'budget';
+    // An unconfigured automatic-heap parent also always re-execs with the
+    // admitted old/semi-space flags. Keep conservative capture for custom Node
+    // flags, manual heaps, test overrides and every analyzing child.
+    const autoSupervisor =
+      !options.watch &&
+      options.memoryBudget === undefined &&
+      process.env.GITNEXUS_ANALYSIS_SUPERVISED !== '1' &&
+      process.env.GITNEXUS_ANALYSIS_MANUAL_HEAP !== '1' &&
+      !memoryAutopilotDisabled() &&
+      process.env.GITNEXUS_TEST_RESPAWN_HEAP_MB === undefined &&
+      process.execArgv.length === 0 &&
+      !(process.env.NODE_OPTIONS ?? '').trim();
+    if (
+      budgetSupervisor ||
+      autoSupervisor ||
+      (process.env.GITNEXUS_ANALYSIS_CONTINUATION === '1' && process.connected)
+    ) {
+      await createLbugLazyAction(() => import('./analyze.js'), 'analyzeCommand')(
+        inputPath,
+        options,
+      );
+      return;
+    }
+    await createAnalyzerLbugLazyAction(
       () => import('../core/analyzer-identity.js'),
       () => import('./analyze.js'),
       'analyzeOrWatchCommandWithRunnerIdentity',
       import.meta.url,
-    ),
-  );
+    )(inputPath, options);
+  });
 
 program
   .command('refresh-context [path]')
@@ -439,7 +503,7 @@ program
   .option('-f, --force', 'Force full regeneration even if up to date')
   .option(
     '--provider <provider>',
-    'LLM provider: minimax, openai, openrouter, azure, custom, cursor, claude, codex, opencode, or grok (default: minimax)',
+    'LLM provider: minimax, anthropic, openai, openrouter, azure, custom, cursor, claude, codex, opencode, or grok (default: minimax)',
   )
   .option('--model <model>', 'LLM model or deployment name (default: MiniMax-M3)')
   .option(
@@ -457,6 +521,10 @@ program
   .option('--timeout <seconds>', 'LLM request timeout in seconds (default: disabled)')
   .option('--retries <n>', 'Max LLM retry attempts per request (default: 3)')
   .option(
+    '--max-completion-tokens <n>',
+    'Max completion tokens for each LLM request (default: 16384)',
+  )
+  .option(
     '--allow-insecure-connection <host>',
     'Allow exact host(s) for http:// LLM base URLs (comma-separated; HTTPS is preferred)',
   )
@@ -470,8 +538,8 @@ program
   .action(createLbugLazyAction(() => import('./wiki.js'), 'wikiCommand'));
 
 program
-  .command('augment <pattern>')
-  .description('Augment a search pattern with knowledge graph context (used by hooks)')
+  .command('augment <pattern...>')
+  .description('Augment search patterns with knowledge graph context (used by hooks)')
   .action(createLbugLazyAction(() => import('./augment.js'), 'augmentCommand'));
 
 program
@@ -543,10 +611,14 @@ program
   .option('--include-tests', 'Include test files in results')
   .option(
     '-l, --limit <n>',
-    'Max symbols per depth level and affected processes/modules to return (default: 100)',
+    'Max symbols per depth level in callgraph mode (default: 30, GITNEXUS_IMPACT_DEFAULT_LIMIT=0 for all); explicit --limit also caps affected processes/modules/routes',
   )
   .option('--offset <n>', 'Skip N symbols per depth level for pagination')
   .option('--summary-only', 'Return counts and risk only, omit symbol list')
+  .option(
+    '--max-tokens <n>',
+    'Fit compact JSON into about N tokens; trim deepest callgraph symbols or fail if required content cannot fit. PDG/group results must fit intact',
+  )
   .action(createLbugLazyAction(() => import('./tool.js'), 'impactCommand'));
 
 program

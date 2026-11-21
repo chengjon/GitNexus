@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import assert from 'node:assert/strict';
 import { existsSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
@@ -6,7 +7,10 @@ import { pathToFileURL } from 'url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
 import { resolveAnalyzerRunnerIdentity } from '../../src/core/analyzer-identity.js';
+import { RebuildReasonCollector } from '../../src/core/rebuild-reasons.js';
+import { MAX_INCREMENTAL_WRITES } from '../../src/core/incremental/compaction-policy.js';
 import type { EmbeddingCheckpoint } from '../../src/core/embedding-checkpoint.js';
+import { runtimeParseIdentity } from '../helpers/runtime-parse-identity.js';
 import { SCHEMA_FINGERPRINT } from '../../src/core/lbug/schema.js';
 import {
   ensurePrivateSharedGraph,
@@ -19,6 +23,7 @@ import {
   getStoragePaths,
   listRegisteredRepos,
   loadMeta,
+  registerRepo,
   saveMeta,
 } from '../../src/storage/repo-manager.js';
 import type { RepoMeta } from '../../src/storage/repo-meta.js';
@@ -129,6 +134,75 @@ describe('shared sibling store analyze (#3352)', () => {
     }
   }, 180_000);
 
+  it.each(['expired', 'missing'] as const)(
+    'keeps a healthy private graph after edit/revert when the shared receipt is %s',
+    async (kind) => {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const options = { skipAgentsMd: true, skipSkills: true };
+      const callbacks = { onProgress: () => {} };
+      await runFullAnalysis(main, options, callbacks);
+      await runFullAnalysis(wtA, options, callbacks); // A reader keeps the shared copy alive.
+      const slot = layoutOf(main).checkoutSlot;
+      const before = await loadMeta(slot);
+      assert(before?.graphCompaction);
+      const sharedGraph = resolveGraphPath(slot, before);
+      const sharedMeta = await loadMeta(path.dirname(sharedGraph));
+      assert(sharedMeta?.graphCompaction);
+      const due =
+        kind === 'missing'
+          ? undefined
+          : { ...sharedMeta.graphCompaction, incrementalWrites: MAX_INCREMENTAL_WRITES };
+      await saveMeta(path.dirname(sharedGraph), { ...sharedMeta, graphCompaction: due });
+      await saveMeta(slot, { ...before, graphCompaction: due });
+
+      const result = await runFullAnalysis(main, options, callbacks);
+      expect(result.incrementalStats?.writeMode).toBe('full');
+      const compacted = await loadMeta(slot);
+      assert(compacted);
+      const compactGraph = resolveGraphPath(slot, compacted);
+      expect(compactGraph).toBe(path.join(slot, 'lbug'));
+      expect(compacted.graphCompaction).toEqual({
+        version: 1,
+        compactBytes: (await fs.stat(compactGraph)).size,
+        incrementalWrites: 0,
+      });
+      expect((await loadMeta(path.dirname(sharedGraph)))?.graphCompaction).toEqual(due);
+      expect((await runFullAnalysis(main, options, callbacks)).alreadyUpToDate).toBe(true);
+      const reused = await loadMeta(slot);
+      assert(reused);
+      expect(resolveGraphPath(slot, reused)).toBe(compactGraph);
+      const source = await fs.readFile(path.join(main, 'a.ts'), 'utf8');
+      for (const text of [source + '\n// dirty edit\n', source]) {
+        await fs.writeFile(path.join(main, 'a.ts'), text);
+        const edited = await runFullAnalysis(main, options, callbacks);
+        expect(edited.incrementalStats?.writeMode).toBe('incremental');
+        const meta = await loadMeta(slot);
+        assert(meta);
+        expect(resolveGraphPath(slot, meta)).toBe(compactGraph);
+      }
+      expect((await loadMeta(slot))?.graphCompaction?.incrementalWrites).toBe(2);
+      expect((await runFullAnalysis(main, options, callbacks)).alreadyUpToDate).toBe(true);
+    },
+    120_000,
+  );
+
+  it('uses the shared physical file receipt when reusing an existing commit graph', async () => {
+    const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+    const options = { skipAgentsMd: true, skipSkills: true };
+    await runFullAnalysis(main, options, { onProgress: () => {} });
+    const slot = layoutOf(main).checkoutSlot;
+    const before = await loadMeta(slot);
+    assert(before?.graphCompaction);
+    await saveMeta(slot, {
+      ...before,
+      graphCompaction: { ...before.graphCompaction, incrementalWrites: 7 },
+    });
+    expect((await runFullAnalysis(main, options, { onProgress: () => {} })).alreadyUpToDate).toBe(
+      true,
+    );
+    expect((await loadMeta(slot))?.graphCompaction).toEqual(before.graphCompaction);
+  }, 120_000);
+
   it('reports a checkout that reads a commit graph as indexed', async () => {
     const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
     await runFullAnalysis(wtA, {}, { onProgress: () => {} });
@@ -185,9 +259,9 @@ describe('shared sibling store analyze (#3352)', () => {
     const conn = new lbug.Connection(db);
     let rows: { p: string }[];
     try {
-      rows = (await (
-        await conn.query('MATCH (f:File) RETURN f.filePath AS p ORDER BY p')
-      ).getAll()) as { p: string }[];
+      const result = await conn.query('MATCH (f:File) RETURN f.filePath AS p ORDER BY p');
+      if (Array.isArray(result)) throw new Error('Expected a single query result');
+      rows = (await result.getAll()) as { p: string }[];
     } finally {
       await conn.close();
       await db.close();
@@ -219,12 +293,20 @@ describe('shared sibling store analyze (#3352)', () => {
     const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
     await fs.writeFile(path.join(wtA, 'a.ts'), 'export function uncommitted() { return 9; }\n');
     await runFullAnalysis(wtA, {}, { onProgress: () => {} });
-    git(wtA, 'checkout', '--', 'a.ts');
-    await runFullAnalysis(wtA, {}, { onProgress: () => {} });
 
     const layout = layoutOf(wtA);
     expect(await listCommitDirs(layout)).toEqual([]);
     expect(existsSync(path.join(layout.checkoutSlot, 'lbug'))).toBe(true);
+
+    git(wtA, 'checkout', '--', 'a.ts');
+    await runFullAnalysis(wtA, {}, { onProgress: () => {} });
+
+    const meta = await loadMeta(layout.checkoutSlot);
+    expect(meta?.indexCoverage?.dirtyPaths).toEqual([]);
+    expect(await listCommitDirs(layout)).toEqual([
+      path.basename(path.dirname(meta?.graphPath as string)),
+    ]);
+    expect(existsSync(path.join(layout.checkoutSlot, 'lbug'))).toBe(false);
   }, 180_000);
 });
 
@@ -249,6 +331,7 @@ describe('featureKeyOf', () => {
         branch: 'feature',
         fileHashes: { 'a.ts': 'h' },
         stats: { nodes: 9 },
+        graphCompaction: { version: 1, compactBytes: 1024, incrementalWrites: 7 },
       }),
     ).toBe(featureKeyOf(base));
   });
@@ -307,10 +390,53 @@ describe('publishSharedGraph race (#3352)', () => {
         storagePath: slot,
         lastCommit: head,
         indexedAt: new Date().toISOString(),
+        parseCacheIdentity: { base: (await runtimeParseIdentity()).base },
       });
     }
     return { checkouts: [main, wt], head };
   };
+
+  it.each(['main', 'custom-alias'])(
+    'preserves explicit registry name %s after shared-store registration',
+    async (registryName) => {
+      const { checkouts, head } = await setup();
+      const [main] = checkouts;
+      const layout = layoutOf(main);
+      const meta = await loadMeta(layout.checkoutSlot);
+      if (!meta) throw new Error('Shared-store fixture is missing metadata');
+      git(main, 'remote', 'add', 'origin', 'https://example.com/team/remote-name.git');
+      await registerRepo(main, meta, { name: registryName, storagePath: layout.checkoutSlot });
+
+      await publishSharedGraph(layout, main, head, () => {}, { name: registryName });
+
+      const entry = (await listRegisteredRepos()).find((repo) => repo.path === main);
+      expect(entry?.name).toBe(registryName);
+      expect(entry?.storagePath).toBe(layout.checkoutSlot);
+    },
+  );
+
+  it('keeps an explicitly permitted duplicate name through shared publication', async () => {
+    const { checkouts, head } = await setup();
+    for (const checkout of checkouts) {
+      const slot = layoutOf(checkout).checkoutSlot;
+      const meta = await loadMeta(slot);
+      if (!meta) throw new Error('Shared-store fixture is missing metadata');
+      await registerRepo(checkout, meta, {
+        name: 'shared-alias',
+        allowDuplicateName: true,
+        storagePath: slot,
+      });
+    }
+
+    const checkout = checkouts[1];
+    await publishSharedGraph(layoutOf(checkout), checkout, head, () => {}, {
+      name: 'shared-alias',
+      allowDuplicateName: true,
+    });
+
+    const entry = (await listRegisteredRepos()).find((repo) => repo.path === checkout);
+    expect(entry?.name).toBe('shared-alias');
+  });
 
   it('Covers AE6: two checkouts publishing one new commit produce exactly one graph', async () => {
     const { checkouts } = await setup();
@@ -536,7 +662,10 @@ describe('up-to-date fast path over a missing shared graph (#3374)', () => {
     await tmpHome.cleanup();
   });
 
-  it('rebuilds a slot whose metadata is at HEAD but whose graph is gone', async () => {
+  /** A linked-worktree checkout slot whose metadata is current in every stamp. */
+  const currentCheckoutSlot = async (
+    overrides: Partial<RepoMeta> = {},
+  ): Promise<{ wt: string; slot: string }> => {
     const root = await fs.realpath(tmpRepo.dbPath);
     const main = path.join(root, 'main');
     await fs.mkdir(main);
@@ -563,20 +692,27 @@ describe('up-to-date fast path over a missing shared graph (#3374)', () => {
       lastCommit: git(wt, 'rev-parse', 'HEAD'),
       indexedAt: new Date().toISOString(),
       schemaFingerprint: SCHEMA_FINGERPRINT,
+      parseCacheIdentity: { base: (await runtimeParseIdentity()).base },
       analysisFeatures: {
         [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
       },
       runnerIdentity: resolveAnalyzerRunnerIdentity(
         pathToFileURL(path.resolve(__dirname, '../../src/core/run-analyze.ts')).href,
       ),
-      // Same FTS mode as the run below, so only the missing graph can
-      // decide against the fast path.
+      // Same FTS mode as the runs below, so only the graph can decide
+      // against the fast path.
       capabilities: {
         graph: { provider: 'ladybugdb', status: 'available' },
         fts: { provider: 'ladybugdb-fts', status: 'unavailable', skipReason: 'disabled-by-flag' },
         vectorSearch: { provider: 'exact-scan', status: 'unavailable', exactScanLimit: 0 },
       },
+      ...overrides,
     });
+    return { wt, slot };
+  };
+
+  it('rebuilds a slot whose metadata is at HEAD but whose graph is gone', async () => {
+    const { wt, slot } = await currentCheckoutSlot();
 
     const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
     const result = await runFullAnalysis(
@@ -586,7 +722,44 @@ describe('up-to-date fast path over a missing shared graph (#3374)', () => {
     );
 
     expect(result.alreadyUpToDate).not.toBe(true);
+    expect(result.rebuildReasons).toEqual(['shared-store-missing-graph']);
     expect(existsSync(resolveGraphPath(slot))).toBe(true);
+  }, 120_000);
+
+  it('names a failed shared-graph copy in the summary, not in a follow-up (#3137)', async () => {
+    // The slot records an older commit, so the run reaches the copy, and
+    // points at a published commit graph that exists but cannot be copied (a
+    // directory where the graph file belongs).
+    const olderCommit = '0'.repeat(40);
+    const { wt, slot } = await currentCheckoutSlot({ lastCommit: olderCommit });
+    const unreadableGraph = path.join(
+      commitGraphDir(layoutOf(wt), olderCommit, 'deadbeefdeadbeef'),
+      'lbug',
+    );
+    await fs.mkdir(unreadableGraph, { recursive: true });
+    const meta = await loadMeta(slot);
+    if (meta === null) throw new Error('slot metadata missing');
+    await saveMeta(slot, { ...meta, graphPath: unreadableGraph });
+    expect(resolveGraphPath(slot)).toBe(unreadableGraph);
+
+    const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+    const logs: string[] = [];
+    const result = await runFullAnalysis(
+      wt,
+      { skipAgentsMd: true, skipSkills: true, skipFts: true },
+      { onProgress: () => {}, onLog: (m) => logs.push(m) },
+    );
+
+    expect(result.rebuildReasons).toEqual(['private-graph-unavailable']);
+    const single = new RebuildReasonCollector();
+    single.add({ key: 'private-graph-unavailable', text: '' });
+    const summaryPrefix = single.formatSummary() ?? '';
+    const late = new RebuildReasonCollector();
+    late.formatSummary();
+    late.add({ key: 'private-graph-unavailable', text: '' });
+    const followUpPrefix = late.formatFollowUp() ?? '';
+    expect(logs.filter((m) => m.startsWith(summaryPrefix))).toHaveLength(1);
+    expect(logs.filter((m) => m.startsWith(followUpPrefix))).toEqual([]);
   }, 120_000);
 });
 

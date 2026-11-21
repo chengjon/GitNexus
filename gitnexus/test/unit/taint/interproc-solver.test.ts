@@ -42,6 +42,144 @@ function summary(
 
 const map = (...ss: FunctionSummary[]) => new Map(ss.map((s) => [s.fnId, s]));
 
+describe('guard value composition', () => {
+  it('caps retained worklist payload across weakening alternatives', () => {
+    const source = summary('source', {
+      paramCount: 0,
+      sourceToCallArg: ['a', 'b', 'c'].map((chars) => ({
+        sourceKind: 'remote-input',
+        callLine: 1,
+        argIndex: 0,
+        calleeName: 'sink',
+        valueEffect: {
+          kind: 'concat',
+          parts: [
+            { kind: 'literal', value: 'git show ' },
+            { kind: 'restrict', value: { kind: 'input' }, restriction: { chars, min: 1, max: 1 } },
+          ],
+        },
+      })),
+    });
+    const sink = summary('sink', {
+      paramToSink: [
+        {
+          param: 0,
+          sinkKind: 'command-injection',
+          inertCommandPrefixes: ['git show '],
+          valueEffect: { kind: 'input' },
+        },
+      ],
+    });
+    const result = solveInterprocTaint(
+      map(source, sink),
+      [{ callerId: source.fnId, calleeId: sink.fnId, calleeName: 'sink' }],
+      { maxRefinementBytes: 150 },
+    );
+    expect(result.refinementFallback).toBe(true);
+    expect(result.findings).toHaveLength(1);
+  });
+
+  const safeValue = {
+    kind: 'concat',
+    parts: [
+      { kind: 'literal', value: 'git show ' },
+      {
+        kind: 'restrict',
+        value: { kind: 'input' },
+        restriction: { chars: '0123456789abcdef', min: 7, max: 40 },
+      },
+    ],
+  } as const;
+  const source = (id: string, unsafe = false) =>
+    summary(id, {
+      paramCount: 0,
+      sourceToCallArg: [
+        {
+          sourceKind: 'remote-input',
+          callLine: 1,
+          argIndex: 0,
+          calleeName: 'sink',
+          valueEffect: safeValue,
+        },
+        ...(unsafe
+          ? [{ sourceKind: 'remote-input' as const, callLine: 2, argIndex: 0, calleeName: 'sink' }]
+          : []),
+      ],
+    });
+  const sink = () =>
+    summary('sink', {
+      paramToSink: [
+        {
+          param: 0,
+          sinkKind: 'command-injection',
+          valueEffect: { kind: 'input' },
+          inertCommandPrefixes: ['git show '],
+        },
+      ],
+    });
+
+  it('suppresses only the source whose complete command meets the sink contract', () => {
+    const safe = source('safe');
+    const unsafe = summary('unsafe', {
+      sourceToCallArg: [
+        { sourceKind: 'remote-input', callLine: 1, argIndex: 0, calleeName: 'sink' },
+      ],
+    });
+    const result = solveInterprocTaint(map(safe, unsafe, sink()), [
+      { callerId: 'safe', calleeId: 'sink', calleeName: 'sink' },
+      { callerId: 'unsafe', calleeId: 'sink', calleeName: 'sink' },
+    ]);
+    expect(result.findings.map((finding) => finding.sourceFnId)).toEqual(['unsafe']);
+  });
+
+  it('keeps a mixed safe/unsafe route from the same source reported', () => {
+    const mixed = source('mixed', true);
+    const result = solveInterprocTaint(map(mixed, sink()), [
+      { callerId: 'mixed', calleeId: 'sink', calleeName: 'sink' },
+    ]);
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('reconsiders earlier clean states when the global proof budget is exhausted', () => {
+    const result = solveInterprocTaint(
+      map(source('first'), source('second'), sink()),
+      [
+        { callerId: 'first', calleeId: 'sink', calleeName: 'sink' },
+        { callerId: 'second', calleeId: 'sink', calleeName: 'sink' },
+      ],
+      { maxRefinementBytes: 150 },
+    );
+    expect(result.refinementFallback).toBe(true);
+    expect(result.findings.map((finding) => finding.sourceFnId)).toEqual(['first', 'second']);
+  });
+
+  it('widens recursive command growth instead of enumerating paths', () => {
+    const recursive = sink();
+    const result = solveInterprocTaint(
+      map(source('source'), {
+        ...recursive,
+        paramToCallArg: [
+          {
+            param: 0,
+            callLine: 3,
+            argIndex: 0,
+            calleeName: 'sink',
+            valueEffect: {
+              kind: 'concat',
+              parts: [{ kind: 'literal', value: 'again ' }, { kind: 'input' }],
+            },
+          },
+        ],
+      }),
+      [
+        { callerId: 'source', calleeId: 'sink', calleeName: 'sink' },
+        { callerId: 'sink', calleeId: 'sink', calleeName: 'sink' },
+      ],
+    );
+    expect(result.findings).toHaveLength(1);
+  });
+});
+
 describe('solveInterprocTaint — seed path respects maxHops (#2084 review P2-7)', () => {
   it('caps the seed path at maxHops:1 (truncated prefix, not a 2-entry path)', () => {
     const A = summary('Function:a.ts:A', {
@@ -96,6 +234,42 @@ describe('solveInterprocTaint — one-hop source→callee-sink', () => {
       { callerId: A.fnId, calleeId: B.fnId, calleeName: 'B' },
     ]);
     expect(r.findings).toHaveLength(0);
+  });
+});
+
+// #2977: the join key is the callee's declared name, which is not an identity.
+describe('solveInterprocTaint — call-arg edges join CALLS edges by callee name', () => {
+  const sinkingCallee = (fnId: string) =>
+    summary(fnId, { paramCount: 1, paramToSink: [{ param: 0, sinkKind: 'command-injection' }] });
+
+  it('reports a flow into every distinct callee that shares the name', () => {
+    const A = summary('Function:a.ts:A', {
+      paramCount: 0,
+      sourceToCallArg: [
+        { sourceKind: 'remote-input', callLine: 5, argIndex: 0, calleeName: 'process' },
+      ],
+    });
+    const first = sinkingCallee('Method:queue.ts:Queue.process');
+    const second = sinkingCallee('Method:image.ts:Image.process');
+    const r = solveInterprocTaint(map(A, first, second), [
+      { callerId: A.fnId, calleeId: first.fnId, calleeName: 'process' },
+      { callerId: A.fnId, calleeId: second.fnId, calleeName: 'process' },
+    ]);
+    expect(r.findings.map((f) => f.sinkFnId).sort()).toEqual([second.fnId, first.fnId].sort());
+  });
+
+  it('matches every outgoing call when the call-arg edge has no callee name', () => {
+    const A = summary('Function:a.ts:A', {
+      paramCount: 0,
+      sourceToCallArg: [{ sourceKind: 'remote-input', callLine: 5, argIndex: 0 }],
+    });
+    const first = sinkingCallee('Function:b.ts:B');
+    const second = sinkingCallee('Function:c.ts:C');
+    const r = solveInterprocTaint(map(A, first, second), [
+      { callerId: A.fnId, calleeId: first.fnId, calleeName: 'B' },
+      { callerId: A.fnId, calleeId: second.fnId, calleeName: 'C' },
+    ]);
+    expect(r.findings.map((f) => f.sinkFnId).sort()).toEqual([first.fnId, second.fnId].sort());
   });
 });
 

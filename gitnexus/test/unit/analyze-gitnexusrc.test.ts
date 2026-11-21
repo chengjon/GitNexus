@@ -1,3 +1,4 @@
+import '../helpers/mock-analysis-host.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
@@ -17,13 +18,19 @@ const {
   runFullAnalysisMock,
   generateAIContextFilesMock,
   refreshBaseRefLineMock,
+  refreshStatsLineMock,
   generateSkillFilesMock,
   cliErrorMock,
   getDefaultBranchMock,
 } = vi.hoisted(() => ({
   runFullAnalysisMock: vi.fn(),
-  generateAIContextFilesMock: vi.fn(async () => ({ files: [] as string[] })),
-  refreshBaseRefLineMock: vi.fn(async () => ({ files: [] as string[] })),
+  generateAIContextFilesMock: vi.fn<
+    typeof import('../../src/cli/ai-context.js').generateAIContextFiles
+  >(async () => ({ files: [] as string[] })),
+  refreshBaseRefLineMock: vi.fn<typeof import('../../src/cli/ai-context.js').refreshBaseRefLine>(
+    async () => ({ files: [] as string[] }),
+  ),
+  refreshStatsLineMock: vi.fn(async () => ({ files: [] as string[] })),
   generateSkillFilesMock: vi.fn(async () => ({
     skills: [{ name: 'c', label: 'Community', symbolCount: 1, fileCount: 1 }],
     outputPath: '/repo/.claude/skills',
@@ -36,6 +43,7 @@ vi.mock('../../src/core/run-analyze.js', () => ({ runFullAnalysis: runFullAnalys
 vi.mock('../../src/cli/ai-context.js', () => ({
   generateAIContextFiles: generateAIContextFilesMock,
   refreshBaseRefLine: refreshBaseRefLineMock,
+  refreshStatsLine: refreshStatsLineMock,
 }));
 vi.mock('../../src/cli/skill-gen.js', () => ({ generateSkillFiles: generateSkillFilesMock }));
 vi.mock('../../src/cli/cli-message.js', () => ({ cliError: cliErrorMock }));
@@ -46,9 +54,11 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
 }));
 
 vi.mock('../../src/storage/repo-manager.js', () => ({
+  loadMeta: vi.fn(async () => null),
   getStoragePaths: vi.fn((repoPath: string) => ({
     storagePath: path.join(repoPath, '.gitnexus'),
     lbugPath: path.join(repoPath, '.gitnexus', 'lbug'),
+    metaPath: path.join(repoPath, '.gitnexus', 'gitnexus.json'),
   })),
   getGlobalRegistryPath: vi.fn(() => 'registry.json'),
   RegistryNameCollisionError: class RegistryNameCollisionError extends Error {},
@@ -85,6 +95,8 @@ describe('analyzeCommand .gitnexusrc wiring (#243)', () => {
     generateAIContextFilesMock.mockResolvedValue({ files: [] });
     refreshBaseRefLineMock.mockReset();
     refreshBaseRefLineMock.mockResolvedValue({ files: [] });
+    refreshStatsLineMock.mockReset();
+    refreshStatsLineMock.mockResolvedValue({ files: [] });
     generateSkillFilesMock.mockReset();
     generateSkillFilesMock.mockResolvedValue({
       skills: [{ name: 'c', label: 'Community', symbolCount: 1, fileCount: 1 }],

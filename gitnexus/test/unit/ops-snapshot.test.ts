@@ -5,8 +5,38 @@ import {
   isGitNexusVercelOrigin,
   serializeOpsJob,
   summarizeOpsLane,
+  publicOpsProgress,
 } from '../../src/server/ops-snapshot.js';
 import { publicRepoId } from '../../src/server/public-repo-id.js';
+import type { AnalyzeJobProgress } from '../../src/server/analyze-job.js';
+
+it('copies only enumerated phases and finite numeric progress fields', () => {
+  const input = {
+    phase: 'embedding',
+    percent: 90,
+    message: 'Embedding',
+    graphPhase: '/private/path',
+    modelDownloadPercent: Infinity,
+    embeddingProgress: {
+      phase: 'embedding',
+      totalUnits: 'secret',
+      completedUnits: -1,
+      reusedUnits: NaN,
+      failedUnits: 1.5,
+      pendingUnits: 2,
+      activeUnit: '/secret',
+      chunks: 7,
+      identity: 'hidden',
+      endpoint: 'https://secret',
+    },
+  } as unknown as AnalyzeJobProgress;
+  expect(publicOpsProgress(input)).toEqual({
+    phase: 'embedding',
+    percent: 90,
+    message: 'Embedding',
+    embeddingProgress: { phase: 'embedding', pendingUnits: 2, chunks: 7 },
+  });
+});
 
 describe('serializeOpsJob / summarizeOpsLane', () => {
   let manager: JobManager;
@@ -27,8 +57,8 @@ describe('serializeOpsJob / summarizeOpsLane', () => {
     expect(view.durationMs).toBe(5_000);
     expect(view.lane).toBe('analyze');
     expect(view.repoName).toBe('repo');
-    expect(view.repoUrl).toBeUndefined();
-    expect(view.repoPath).toBeUndefined();
+    expect(view).not.toHaveProperty('repoUrl');
+    expect(view).not.toHaveProperty('repoPath');
     expect(view.branch).toBeUndefined();
   });
 
@@ -72,7 +102,7 @@ describe('serializeOpsJob / summarizeOpsLane', () => {
     const view = serializeOpsJob(manager.getJob(job.id)!, 'analyze');
     expect(view.repoName).toBe('repo');
     expect(view.repoName).not.toContain('access_token');
-    expect(view.repoUrl).toBeUndefined();
+    expect(view).not.toHaveProperty('repoUrl');
   });
 
   it('redacts the full repository URL from job.error on the public ops view', () => {

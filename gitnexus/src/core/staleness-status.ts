@@ -18,21 +18,35 @@
  * provably stale index indistinguishable from a fresh one. `status` is the
  * additive channel that separates them for a caller that wants to act on it:
  *
- * - `current`  — the index is at HEAD: `rev-list` answered 0, or it could not
- *   answer but HEAD alone resolved to the indexed commit.
- * - `behind`   — `rev-list` answered N > 0; `commitsBehind` is N.
- * - `diverged` — `rev-list` could not answer, but HEAD resolved and is not the
- *   indexed commit. The index is provably not at HEAD; only the count is
- *   unknown. A branch-pinned `serve` clone reaches this once git prunes the
- *   commit a failed re-index left behind — the pinned update is a
- *   `fetch --depth 1`, which orphans it — and a rewritten history reaches it
- *   directly. It is the rule the Claude hook already applies:
- *   HEAD !== lastCommit.
- * - `unknown`  — HEAD could not be resolved at all: not a git repository, git
- *   timed out, or no commit was recorded.
+ * The successful probe is `rev-list --left-right --count lastCommit...HEAD`:
+ * the left count is indexed-only commits, and the right is HEAD-only commits.
+ * Both counts come from one HEAD snapshot, without a follow-up process.
  *
- * `isStale` and `commitsBehind` keep their historical values in every case, so
- * no existing consumer changes behaviour unless it reads `status`.
+ * - `current`  — both counts are 0, or `rev-list` could not answer but a
+ *   fallback `rev-parse HEAD` resolved to the indexed commit.
+ * - `behind`   — the right count is N > 0; `commitsBehind` is N, including
+ *   when the left count is positive too (divergent or shallow history).
+ * - `diverged` — the index is provably not at HEAD, reached two different ways:
+ *     - The left count is positive and the right is 0: HEAD is an ancestor
+ *       of the indexed commit (#3127). The working tree checked out an older
+ *       commit than the one indexed, or a release branch behind the indexed
+ *       tip. The mismatch is established: `isStale` is `true` and
+ *       `commitsBehind` stays 0 (there is no forward count to report).
+ *     - `rev-list` could not answer at all, but HEAD resolved and is not the
+ *       indexed commit: only the count is unknown. A branch-pinned `serve`
+ *       clone reaches this once git prunes the commit a failed re-index left
+ *       behind — the pinned update is a `fetch --depth 1`, which orphans it —
+ *       and a rewritten history reaches it directly. This arm keeps the
+ *       historical fail-open `isStale: false` (see below).
+ * - `unknown`  — the probe could not establish the relationship: no readable
+ *   HEAD, a timeout, no recorded commit, or malformed count output.
+ *
+ * `isStale` and `commitsBehind` keep their historical fail-open values
+ * (`false` / `0`) whenever the check could not fully answer — every `unknown`,
+ * and the `rev-list`-failure arm of `diverged` — so no existing consumer
+ * changes behaviour there unless it reads `status`. The other arm of
+ * `diverged` (the confirmed rollback) is a successful, computed
+ * answer rather than a failure, so `isStale` reflects it (`true`) instead.
  */
 export type StalenessStatus = 'current' | 'behind' | 'diverged' | 'unknown';
 
@@ -66,16 +80,13 @@ export interface IndexedRef {
 }
 
 /**
- * The wire shape for staleness on every surface: MCP `list_repos`, the hot read
- * tools, and the `serve` repo routes. One builder so one fact has one shape
- * (#3232 review: "same sentinel as MCP").
+ * The wire shape for staleness on MCP tools and the `serve` repo routes.
  *
  * Two forms, chosen by whether the caller supplies a {@link IndexedRef}:
  *
- * - **Without a ref** — absent for `current`, as before. That is what
- *   `list_repos` and the `serve` routes emit; they already report the ref
- *   through their own top-level `branch` / `lastCommit` / `indexedAt` fields
- *   (#3226), so repeating it inside the payload would duplicate it.
+ * - **Without a ref** — absent for measured `current`. The `serve` routes
+ *   already report the ref in their top-level `branch`, `lastCommit` and
+ *   `indexedAt` fields (#3226).
  * - **With a ref** — emitted for EVERY status, naming the index it describes.
  *   The hot read tools have nowhere else to put it: `attachToolStaleness` may
  *   add exactly one key to an arbitrary tool result. Without it `current` is
@@ -120,9 +131,6 @@ export const stalenessPayload = (
   const status = stalenessStatus(info);
   const hint = info.hint ? { hint: info.hint } : {};
 
-  // No ref: bit-identical to the pre-#3291 output for every status. This is
-  // what keeps `list_repos` and both `serve` routes byte-stable, and their
-  // exact-match tests passing unmodified.
   if (!opts.ref) {
     if (status === 'current') return undefined;
     if (status === 'unknown') return opts.includeUnknown ? { status } : undefined;

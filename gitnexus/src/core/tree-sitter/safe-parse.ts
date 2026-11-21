@@ -50,7 +50,7 @@ function resolveParseTimeoutMs(): number {
 }
 
 /**
- * Minimal surface of the timeout knob we depend on. tree-sitter@0.21.x
+ * Minimal surface of the timeout knob we depend on. Native tree-sitter@0.25.1
  * exposes `setTimeoutMicros(micros)`; the parse returns `null` once the
  * budget is exceeded and the parser must be `reset()` before reuse.
  */
@@ -60,16 +60,15 @@ interface TimeoutCapableParser {
 }
 
 /**
- * Tiny shim around the runtime's parse-interruption knob so the future
- * 0.25/0.26 swap (where `setTimeoutMicros` is removed in favour of
- * `Parser.Options.progressCallback`) is a single-function change.
+ * Tiny shim around the native runtime's parse-interruption knob. Version
+ * 0.25.1 still exposes setTimeoutMicros, so the runtime upgrade preserves
+ * the existing timeout/reset contract.
  *
  * Returns `true` when a budget was armed (caller must clear it afterwards),
  * `false` when the runtime offers no interruption mechanism (older/newer
  * runtimes) so the caller can skip the reset/clear dance.
  *
- * Only the `setTimeoutMicros` branch is implemented today; add the
- * `progressCallback` branch here when the runtime moves to 0.25+.
+ * If a future native binding replaces this API, adapt interruption here.
  */
 function armParseBudget(parser: Parser, budgetMs: number): boolean {
   if (budgetMs <= 0) return false;
@@ -178,6 +177,17 @@ export function getParseDiagnostics(tree: Parser.Tree): {
   return { hasError: root.hasError, isMissing: root.isMissing };
 }
 
+interface TreeTextSource {
+  input: unknown;
+  getText: (node: { readonly startIndex: number; readonly endIndex: number }) => string;
+}
+
+function useSourceText(tree: Parser.Tree, source: string): void {
+  const textSource = tree as unknown as TreeTextSource;
+  textSource.input = source;
+  textSource.getText = (node) => source.substring(node.startIndex, node.endIndex);
+}
+
 /**
  * Parse `sourceText` safely on every platform.
  *
@@ -242,6 +252,11 @@ export function parseSourceSafe(
         return parserInput.slice(index, index + SAFE_PARSE_CHUNK_CHARS);
       };
       tree = parser.parse(input, oldTree, options);
+      // node-tree-sitter reads `node.text` of a callback-parsed tree by calling
+      // the callback again and concatenating chunks: a fresh copy of the
+      // node's source on every read. Read it from the string instead, as it
+      // already does for a string-parsed tree: an O(1) substring.
+      if (tree !== null) useSourceText(tree, parserInput);
     }
   } finally {
     // Always clear the budget — otherwise it leaks onto the next parse on a

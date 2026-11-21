@@ -81,6 +81,43 @@ describe('type imports', () => {
   });
 });
 
+describe('one package+type declared under several source roots', () => {
+  // Not legal within one compilation, but one repository can hold several
+  // build modules or sample projects that each declare `models.User`. The
+  // import cannot say which one it means; the importer's location does, and a
+  // tie refuses rather than binding whichever file was parsed first.
+  const ROOTS = indexOf({
+    'alpha/src/main/java/models/User.java': 'models',
+    'beta/src/main/java/models/User.java': 'models',
+    'beta/src/test/java/models/User.java': 'models',
+    'beta/src/main/java/services/UserService.java': 'services',
+  });
+
+  it.each<[string, string | undefined, string | null]>([
+    [
+      'its own module',
+      'beta/src/main/java/services/UserService.java',
+      'beta/src/main/java/models/User.java',
+    ],
+    [
+      'its own source root over a sibling root',
+      'beta/src/test/java/services/UserServiceTest.java',
+      'beta/src/test/java/models/User.java',
+    ],
+    ['another module', 'alpha/src/main/java/app/App.java', 'alpha/src/main/java/models/User.java'],
+    ['nowhere nearer one copy than another', 'gamma/src/main/java/app/App.java', null],
+    ['an unknown importer', undefined, null],
+  ])('resolves an import from %s', (_title, fromFile, expected) => {
+    expect(resolveJavaModule('models.User', ROOTS, fromFile)).toBe(expected);
+  });
+
+  it('leaves a type declared once independent of the importer', () => {
+    expect(resolveJavaModule('services.UserService', ROOTS, 'gamma/App.java')).toBe(
+      'beta/src/main/java/services/UserService.java',
+    );
+  });
+});
+
 describe('imports of things outside the repository (#2953)', () => {
   it('does not resolve a JDK import onto a same-named local file', () => {
     // The reported defect. `vendor/java/util/List.java` ends in `java/util/List`
@@ -137,7 +174,11 @@ describe('wildcard imports', () => {
       '@import.name': capture('*'),
     } as CaptureMatch);
 
-    expect(parsed).toEqual({ kind: 'wildcard', targetRaw: 'com.example.Utils' });
+    expect(parsed).toEqual({
+      kind: 'wildcard',
+      targetRaw: 'com.example.Utils',
+      reexportsName: false,
+    });
     if (parsed === null || parsed.targetRaw === null) throw new Error('import was not interpreted');
     expect(resolveJavaModule(parsed.targetRaw, index)).toBe('src/main/java/com/example/Utils.java');
     expect(resolveJavaModule('com.example.Utils.*', index)).toEqual([

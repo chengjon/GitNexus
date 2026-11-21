@@ -85,7 +85,7 @@ describe('assertKnownMcpToolArguments (#3261)', () => {
 
   it('skips tools that have no advertised schema', () => {
     expect(() =>
-      assertKnownMcpToolArguments('overview', { showClusters: true, extra: 1 }),
+      assertKnownMcpToolArguments('__unadvertised_tool__', { showClusters: true, extra: 1 }),
     ).not.toThrow();
   });
 });

@@ -3,6 +3,7 @@ import {
   getLanguageFromFilename,
   getSyntaxLanguageFromFilename,
   isBladeTemplateFilename,
+  isNotebookFilename,
   SupportedLanguages,
 } from 'gitnexus-shared';
 import { getProvider, getProviderForFile } from '../../src/core/ingestion/languages/index.js';
@@ -49,6 +50,13 @@ describe('getLanguageFromFilename', () => {
   describe('Python', () => {
     it('detects .py files', () => {
       expect(getLanguageFromFilename('main.py')).toBe(SupportedLanguages.Python);
+    });
+
+    it('detects .ipynb files as Python', () => {
+      expect(getLanguageFromFilename('analysis.ipynb')).toBe(SupportedLanguages.Python);
+      expect(getProviderForFile('notebooks/analysis.ipynb')?.id).toBe(SupportedLanguages.Python);
+      expect(isNotebookFilename('notebooks/analysis.ipynb')).toBe(true);
+      expect(getSyntaxLanguageFromFilename('analysis.ipynb')).toBe('json');
     });
   });
 
@@ -147,8 +155,26 @@ describe('getLanguageFromFilename', () => {
     });
   });
 
+  describe('R', () => {
+    it.each(['.r', '.R'])('detects %s files', (ext) => {
+      expect(getLanguageFromFilename(`analysis${ext}`)).toBe(SupportedLanguages.R);
+    });
+
+    // docs/languages/r-provider.md: only `.r` / `.R` are handled.
+    it.each([
+      'analysis.Rmd',
+      'report.qmd',
+      '.Rprofile',
+      '.Renviron',
+      'Rprofile.site',
+      'x.Rhistory',
+    ])('returns null for %s', (name) => {
+      expect(getLanguageFromFilename(name)).toBeNull();
+    });
+  });
+
   describe('unsupported', () => {
-    it.each(['.scala', '.r', '.lua', '.txt', '.md', '.json', '.yaml'])(
+    it.each(['.scala', '.lua', '.txt', '.md', '.json', '.yaml'])(
       'returns null for %s files',
       (ext) => {
         expect(getLanguageFromFilename(`file${ext}`)).toBeNull();

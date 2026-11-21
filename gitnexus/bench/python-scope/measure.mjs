@@ -1,6 +1,6 @@
 /**
- * Build-free measurement harness for `emitPythonScopeCaptures`
- * (ce-optimize: python-scope-capture).
+ * Python capture and value-reference measurement harness.
+ * Capture measurements import source; value-reference resolution needs a build.
  *
  * This is Python's counterpart to `bench/scope-capture/measure.mjs` (which
  * covers go/csharp/rust/php/ruby/cobol). Python lives here, NOT in that unified
@@ -27,12 +27,15 @@
  *     captures changes the fingerprint. Entity-count-fixed so it is comparable
  *     across experiments regardless of the timing sizes.
  *   - capture_groups_fp / fixture_count: corpus sanity.
+ *   - value_references: capture/resolution samples, exact semantic checks,
+ *     fingerprints and normalized scaling through 512/2048 entities respectively.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { emitPythonScopeCaptures } from '../../src/core/ingestion/languages/python/captures.ts';
+import { measurePythonValueReferences } from './value-references.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = path.resolve(__dirname, '..', '..', 'test', 'fixtures', 'lang-resolution');
@@ -155,7 +158,9 @@ function computeFingerprint() {
   const perFixtureDigests = [];
   for (const { key, absPath } of collectPythonFixtures()) {
     const src = fs.readFileSync(absPath, 'utf8');
-    const matches = emitPythonScopeCaptures(src, absPath);
+    // Lexical policies carry scope IDs containing the input path. Keep the
+    // fingerprint independent of the checkout's absolute location.
+    const matches = emitPythonScopeCaptures(src, key);
     groups += matches.length;
     perFixtureDigests.push(`${key}\t${matches.length}\t${digestCaptures(matches)}`);
   }
@@ -180,6 +185,7 @@ const fp = computeFingerprint();
 const small = measureSize(250, REPS);
 const large = measureSize(800, REPS);
 const scalingRatio = small.ms > 0 ? large.ms / small.ms / (800 / 250) : 0;
+const valueReferences = await measurePythonValueReferences({ check: CHECK });
 
 const result = {
   elapsed_ms_250: Number(small.ms.toFixed(2)),
@@ -190,6 +196,7 @@ const result = {
   fingerprint: fp.fingerprint,
   capture_groups_fp: fp.groups,
   fixture_count: fp.fixtureCount,
+  value_references: valueReferences,
 };
 
 if (!CHECK) {
@@ -199,9 +206,12 @@ if (!CHECK) {
   // the path is still linear (scaling ratio under budget). Re-baseline a
   // legitimate capture change with `node --import tsx measure.mjs` (no --check)
   // and commit the new baseline-fingerprint.txt deliberately.
+  // #3531: Tree-sitter 0.25 adds one zero-width module scope to each of the
+  // 15 empty __init__.py fixtures (3982 -> 3997 groups). All non-empty fixture
+  // captures and the synthetic DAO are unchanged; the golden test pins this.
   const baselinePath = path.resolve(__dirname, 'baseline-fingerprint.txt');
   const baseline = fs.readFileSync(baselinePath, 'utf8').trim();
-  const failures = [];
+  const failures = [...valueReferences.errors];
   if (result.fingerprint !== baseline) {
     failures.push(
       `capture fingerprint drift: got ${result.fingerprint}, expected ${baseline} ` +

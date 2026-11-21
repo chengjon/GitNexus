@@ -19,6 +19,8 @@ import {
 } from '../storage/storage-resolver.js';
 import { WikiGenerator, type WikiOptions } from '../core/wiki/generator.js';
 import {
+  ANTHROPIC_BASE_URL,
+  ANTHROPIC_DEFAULT_MODEL,
   MINIMAX_MODEL_IDS,
   MINIMAX_OPENAI_BASE_URLS,
   parseLLMAllowedInsecureHttpHosts,
@@ -29,6 +31,7 @@ import { detectCursorCLI } from '../core/wiki/cursor-client.js';
 import { detectGrokCLI } from '../core/wiki/grok-client.js';
 import { detectLocalCLI } from '../core/wiki/local-cli-client.js';
 import { logger } from '../core/logger.js';
+import { parseIntegerOption } from './int-option.js';
 
 export interface WikiCommandOptions {
   force?: boolean;
@@ -46,23 +49,7 @@ export interface WikiCommandOptions {
   retries?: string;
   lang?: string;
   allowInsecureConnection?: string;
-}
-
-function parsePositiveIntegerOption(
-  value: string | undefined,
-  flag: string,
-  multiplier = 1,
-): number | undefined {
-  if (value === undefined) return undefined;
-  const trimmed = value.trim();
-  if (!/^[1-9]\d*$/.test(trimmed)) {
-    throw new Error(`${flag} must be a positive integer`);
-  }
-  const parsed = parseInt(trimmed, 10);
-  if (parsed > Math.floor(Number.MAX_SAFE_INTEGER / multiplier)) {
-    throw new Error(`${flag} is too large`);
-  }
-  return parsed;
+  maxCompletionTokens?: string;
 }
 
 function isLocalProvider(
@@ -205,13 +192,26 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
   let timeoutSeconds: number | undefined;
   let retries: number | undefined;
   let allowedInsecureHttpHosts: string[] | undefined;
+  let maxCompletionTokens: number | undefined;
   try {
-    timeoutSeconds = parsePositiveIntegerOption(options?.timeout, '--timeout', 1000);
-    retries = parsePositiveIntegerOption(options?.retries, '--retries');
+    timeoutSeconds =
+      options?.timeout === undefined
+        ? undefined
+        : parseIntegerOption(options.timeout, '--timeout', { minimum: 1, scale: 1000 });
+    retries =
+      options?.retries === undefined
+        ? undefined
+        : parseIntegerOption(options.retries, '--retries', { minimum: 1 });
     allowedInsecureHttpHosts =
       options?.allowInsecureConnection === undefined
         ? undefined
         : parseLLMAllowedInsecureHttpHosts(options.allowInsecureConnection);
+    maxCompletionTokens =
+      options?.maxCompletionTokens === undefined
+        ? undefined
+        : parseIntegerOption(options.maxCompletionTokens, '--max-completion-tokens', {
+            minimum: 1,
+          });
   } catch (error) {
     console.log(`  Error: ${(error as Error).message}\n`);
     process.exitCode = 1;
@@ -254,6 +254,14 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
         updates.model = MINIMAX_MODEL_IDS[0];
       }
     }
+    if (options.provider === 'anthropic') {
+      if (!options.baseUrl && (providerChanged || !existing.baseUrl)) {
+        updates.baseUrl = ANTHROPIC_BASE_URL;
+      }
+      if (!options.model && (providerChanged || !existing.model)) {
+        updates.model = ANTHROPIC_DEFAULT_MODEL;
+      }
+    }
     // Save model to appropriate field based on provider.
     if (options.model) {
       const targetProvider = options.provider ?? existing.provider;
@@ -281,15 +289,23 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
     options?.reasoningModel !== undefined
   );
 
-  let llmConfig = await resolveLLMConfig({
-    model: options?.model,
-    baseUrl: options?.baseUrl,
-    apiKey: options?.apiKey,
-    provider: options?.provider,
-    apiVersion: options?.apiVersion,
-    isReasoningModel: options?.reasoningModel,
-    allowedInsecureHttpHosts,
-  });
+  let llmConfig;
+  try {
+    llmConfig = await resolveLLMConfig({
+      model: options?.model,
+      baseUrl: options?.baseUrl,
+      apiKey: options?.apiKey,
+      provider: options?.provider,
+      apiVersion: options?.apiVersion,
+      isReasoningModel: options?.reasoningModel,
+      allowedInsecureHttpHosts,
+      maxTokens: maxCompletionTokens,
+    });
+  } catch (error) {
+    console.log(`  Error: ${(error as Error).message}\n`);
+    process.exitCode = 1;
+    return;
+  }
 
   // Run interactive setup if no saved config and no CLI flags provided
   // (even if env vars exist — let user explicitly choose their provider)
@@ -298,7 +314,9 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
       // Non-interactive mode — need either API key or Cursor CLI
       if (!llmConfig.apiKey && !isLocalProvider(llmConfig.provider)) {
         console.log('  Error: No LLM API key found.');
-        console.log('  Set MINIMAX_API_KEY, GITNEXUS_API_KEY, or OPENAI_API_KEY,');
+        console.log(
+          '  Set MINIMAX_API_KEY, ANTHROPIC_API_KEY, GITNEXUS_API_KEY, or OPENAI_API_KEY,',
+        );
         console.log(
           '  or pass --api-key <key>, or use --provider cursor|claude|codex|opencode|grok.\n',
         );
@@ -308,7 +326,7 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
       // Non-interactive with env var or cursor — just use it
     } else {
       console.log("  No LLM configured. Let's set it up.\n");
-      console.log('  Supports MiniMax, OpenAI-compatible APIs, and local agent CLIs.\n');
+      console.log('  Supports MiniMax, Anthropic, OpenAI-compatible APIs, and local agent CLIs.\n');
 
       // Check if local agent CLIs are available.
       const hasCursor = detectCursorCLI();
@@ -328,7 +346,8 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
       console.log('  [4] Custom endpoint');
       console.log('  [5] MiniMax Global (api.minimax.io)');
       console.log('  [6] MiniMax China (api.minimaxi.com)');
-      let nextChoice = 7;
+      console.log('  [7] Anthropic (api.anthropic.com)');
+      let nextChoice = 8;
       if (hasCursor) {
         const choice = String(nextChoice++);
         localChoices.push({
@@ -476,6 +495,10 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
             choice === '6' ? MINIMAX_OPENAI_BASE_URLS.cn_zh : MINIMAX_OPENAI_BASE_URLS.global_en;
           defaultModel = MINIMAX_MODEL_IDS[0];
           provider = 'minimax';
+        } else if (choice === '7') {
+          baseUrl = ANTHROPIC_BASE_URL;
+          defaultModel = ANTHROPIC_DEFAULT_MODEL;
+          provider = 'anthropic';
         } else {
           baseUrl = 'https://api.openai.com/v1';
           defaultModel = 'gpt-4o-mini';
@@ -496,8 +519,9 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
         // API key — pre-fill hint if env var exists
         const envKey =
           (provider === 'minimax' ? process.env.MINIMAX_API_KEY : undefined) ||
+          (provider === 'anthropic' ? process.env.ANTHROPIC_API_KEY : undefined) ||
           process.env.GITNEXUS_API_KEY ||
-          process.env.OPENAI_API_KEY ||
+          (provider === 'anthropic' ? undefined : process.env.OPENAI_API_KEY) ||
           '';
         if (envKey) {
           const masked = envKey.slice(0, 6) + '...' + envKey.slice(-4);
@@ -697,7 +721,10 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
       bar.stop();
 
       const totalElapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`\n  Wiki generated successfully (${totalElapsed}s)\n`);
+      const incomplete = !!continueResult.failedModules?.length;
+      console.log(
+        `\n  ${incomplete ? 'Wiki generation incomplete' : 'Wiki generated successfully'} (${totalElapsed}s)\n`,
+      );
       console.log(`  Mode: ${continueResult.mode}`);
       console.log(`  Pages: ${continueResult.pagesGenerated}`);
       console.log(`  Output: ${wikiDir}`);
@@ -708,6 +735,9 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
         for (const mod of continueResult.failedModules) {
           console.log(`    - ${mod}`);
         }
+        console.log('  Re-run to retry failed modules (pages will be regenerated).\n');
+        process.exitCode = 1;
+        return;
       }
 
       console.log('');
@@ -724,7 +754,10 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
       return;
     }
 
-    console.log(`\n  Wiki generated successfully (${elapsed}s)\n`);
+    const incomplete = !!result.failedModules?.length;
+    console.log(
+      `\n  ${incomplete ? 'Wiki generation incomplete' : 'Wiki generated successfully'} (${elapsed}s)\n`,
+    );
     console.log(`  Mode: ${result.mode}`);
     console.log(`  Pages: ${result.pagesGenerated}`);
     console.log(`  Output: ${wikiDir}`);
@@ -736,6 +769,9 @@ const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions)
         console.log(`    - ${mod}`);
       }
       console.log('  Re-run to retry failed modules (pages will be regenerated).');
+      console.log('');
+      process.exitCode = 1;
+      return;
     }
 
     console.log('');

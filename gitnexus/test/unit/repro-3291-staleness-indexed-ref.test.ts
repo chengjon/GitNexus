@@ -162,9 +162,10 @@ describe('#3291 — tool staleness names the indexed ref', () => {
 
     // The graph answer itself is held constant so the only thing that can differ
     // between the two responses is the freshness signalling under test.
-    vi.spyOn(backend as unknown as { impact: unknown }, 'impact').mockResolvedValue(
-      IMPACT_RESULT as never,
-    );
+    vi.spyOn(
+      backend as unknown as { impact: () => Promise<typeof IMPACT_RESULT> },
+      'impact',
+    ).mockResolvedValue(IMPACT_RESULT as never);
 
     const fromMain = (await backend.callTool('impact', {
       target: 'doWork',
@@ -207,6 +208,30 @@ describe('#3291 — tool staleness names the indexed ref', () => {
     expect(serialized).toContain(branchHead);
   });
 
+  it('measures each checkout HEAD separately when both handles share one graph and ref', async () => {
+    const { mainClone, branchClone } = makeClones();
+    // Both checkouts call their branch main, but one is one commit behind.
+    git(branchClone, 'checkout', '-B', 'main', 'origin/main~1');
+    const indexedCommit = git(branchClone, 'rev-parse', 'HEAD');
+    expect(git(mainClone, 'rev-list', '--count', `${indexedCommit}..HEAD`)).toBe('1');
+    const sharedHandle = handleFor(branchClone, indexedCommit, 'main');
+    vi.spyOn(backend, 'selectToolRepository')
+      .mockResolvedValueOnce(sharedHandle as never)
+      .mockResolvedValueOnce({ ...sharedHandle, repoPath: mainClone } as never);
+    vi.spyOn(
+      backend as unknown as { impact: () => Promise<typeof IMPACT_RESULT> },
+      'impact',
+    ).mockResolvedValue(IMPACT_RESULT as never);
+    const current = await backend.callTool('impact', { target: 'doWork', repo: 'current' });
+    const behind = await backend.callTool('impact', { target: 'doWork', repo: 'advanced' });
+    expect(current.staleness).toMatchObject({ status: 'current', lastCommit: indexedCommit });
+    expect(behind.staleness).toMatchObject({
+      status: 'behind',
+      commitsBehind: 1,
+      lastCommit: indexedCommit,
+    });
+  });
+
   // Negative control. The same wiring — real git, real `checkStalenessAsync`,
   // real `attachToolStaleness` — must still report a counted gap when the index
   // is behind its own checkout. Without this, the ref-carrying payload above
@@ -218,9 +243,10 @@ describe('#3291 — tool staleness names the indexed ref', () => {
     vi.spyOn(backend, 'selectToolRepository').mockResolvedValue(
       handleFor(mainClone, twoBack, 'main') as never,
     );
-    vi.spyOn(backend as unknown as { impact: unknown }, 'impact').mockResolvedValue(
-      IMPACT_RESULT as never,
-    );
+    vi.spyOn(
+      backend as unknown as { impact: () => Promise<typeof IMPACT_RESULT> },
+      'impact',
+    ).mockResolvedValue(IMPACT_RESULT as never);
 
     const result = (await backend.callTool('impact', {
       target: 'doWork',
@@ -244,9 +270,10 @@ describe('#3291 — tool staleness names the indexed ref', () => {
     const { branch: _unlabelled, ...unlabelledHandle } = handleFor(mainClone, head, 'main');
 
     vi.spyOn(backend, 'selectToolRepository').mockResolvedValue(unlabelledHandle as never);
-    vi.spyOn(backend as unknown as { impact: unknown }, 'impact').mockResolvedValue(
-      IMPACT_RESULT as never,
-    );
+    vi.spyOn(
+      backend as unknown as { impact: () => Promise<typeof IMPACT_RESULT> },
+      'impact',
+    ).mockResolvedValue(IMPACT_RESULT as never);
 
     const result = (await backend.callTool('impact', {
       target: 'doWork',

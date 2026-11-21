@@ -1,3 +1,8 @@
+import {
+  type FetchWrapperCall,
+  type FetchWrapperFacts,
+  type FetchWrapperReexport,
+} from '../route-extractors/fetch-wrapper.js';
 import { parentPort, threadId, workerData } from 'node:worker_threads';
 import {
   boundCallableStartPosition,
@@ -6,19 +11,8 @@ import {
   positionQualifiedCallableName,
 } from './callable-id.js';
 import Parser from 'tree-sitter';
-import JavaScript from 'tree-sitter-javascript';
-import TypeScript from 'tree-sitter-typescript';
-import Python from 'tree-sitter-python';
-import Java from 'tree-sitter-java';
-import CPP from 'tree-sitter-cpp';
-// Explicit subpath import — see parser-loader.ts for rationale (#1013).
-import CSharp from 'tree-sitter-c-sharp/bindings/node/index.js';
-import Go from 'tree-sitter-go';
-import Rust from 'tree-sitter-rust';
-import PHP from 'tree-sitter-php';
-import Ruby from 'tree-sitter-ruby';
-import { requireVendoredGrammar } from '../../tree-sitter/vendored-grammars.js';
-import { SupportedLanguages } from 'gitnexus-shared';
+import { getLanguageGrammar, isLanguageAvailable } from '../../tree-sitter/parser-loader.js';
+import { buildPositionIndex, SupportedLanguages, type PositionIndex } from 'gitnexus-shared';
 import { getLanguageForFileContent, getProvider } from '../languages/index.js';
 import {
   getTreeSitterBufferSize,
@@ -32,9 +26,13 @@ import {
   isBlockedCallbackRegistrationCall,
 } from '../ts-js-hoc-utils.js';
 import { parseSourceSafe } from '../../tree-sitter/safe-parse.js';
-import type { SkippedPath } from './clone-safety.js';
+import { makeWorkerResultCloneSafe, type SkippedPath } from './clone-safety.js';
 import { postResultCloneSafe } from './post-result.js';
 import { mergeResult } from './result-merge.js';
+import {
+  encodeFileResultSection,
+  type EncodedFileResult,
+} from '../../../storage/file-result-codec.js';
 import type { SymbolTableReader } from '../model/symbol-table.js';
 import type {
   ExtractedRouterConstructorPrefix,
@@ -43,56 +41,6 @@ import type {
   ExtractedRouterModuleAlias,
 } from '../route-extractors/fastapi-router-bindings.js';
 
-/** Language grammar type accepted by Parser.setLanguage(). */
-type TreeSitterLanguage = Parameters<typeof Parser.prototype.setLanguage>[0];
-
-// ── Worker grammar loading — enforcement boundary (#2091/#2093, #2101) ───────
-// The worker maintains its own grammar table (the guarded vendored-grammar
-// loads below + `languageMap`) and intentionally does NOT consult the runtime
-// `GITNEXUS_SKIP_OPTIONAL_GRAMMARS` opt-out. It does not need to: the MAIN
-// THREAD's `parseableScanned` filter (pipeline-phases/parse-impl.ts, gated on
-// `parser-loader.isLanguageAvailable`, which honors the runtime opt-out and a
-// genuinely-absent binding alike) excludes files of an unavailable/opted-out
-// language BEFORE any chunk is dispatched, so the worker never receives them.
-// That main-thread filter is the single enforcement point. Any future change
-// that dispatches files to the worker WITHOUT first passing them through
-// `isLanguageAvailable` must re-introduce the gate here. (The cleaner end-state
-// — routing this table through `parser-loader.getLanguageGrammar` so there is
-// one loader — is the deferred Tier-1 consolidation.)
-// Swift/Dart/Kotlin/C/Zig are vendored grammars loaded from `vendor/` by absolute
-// path (NEVER copied into node_modules — see vendored-grammars.ts / #2111). Each
-// may be absent on a platform without a prebuild or a toolchain-less /
-// `--ignore-scripts` install, so every load is guarded so a missing binding
-// cannot crash the worker at module-load (#2091/#2093, #2116).
-let Swift: TreeSitterLanguage | null = null;
-try {
-  Swift = requireVendoredGrammar('tree-sitter-swift') as TreeSitterLanguage;
-} catch {}
-
-let Dart: TreeSitterLanguage | null = null;
-try {
-  Dart = requireVendoredGrammar('tree-sitter-dart') as TreeSitterLanguage;
-} catch {}
-
-let Kotlin: TreeSitterLanguage | null = null;
-try {
-  Kotlin = requireVendoredGrammar('tree-sitter-kotlin') as TreeSitterLanguage;
-} catch {}
-
-let C: TreeSitterLanguage | null = null;
-try {
-  C = requireVendoredGrammar('tree-sitter-c') as TreeSitterLanguage;
-} catch {}
-
-let Zig: TreeSitterLanguage | null = null;
-try {
-  Zig = requireVendoredGrammar('tree-sitter-zig') as TreeSitterLanguage;
-} catch {}
-
-let ObjectiveC: TreeSitterLanguage | null = null;
-try {
-  ObjectiveC = requireVendoredGrammar('tree-sitter-objc') as TreeSitterLanguage;
-} catch {}
 import { getLanguageFromFilename } from 'gitnexus-shared';
 import {
   buildDefinitionPreScan,
@@ -123,18 +71,22 @@ import {
   LOCAL_SCOPE_BODY_NODE_TYPES,
   type SyntaxNode,
 } from '../utils/ast-helpers.js';
+import { climbAncestors } from '../utils/ancestor-climb.js';
 import { isPositionQualifiedLocalLabel } from '../utils/callable-labels.js';
-import { extractCallArgTypes, type MixedChainStep } from '../utils/call-analysis.js';
+import type { MixedChainStep } from '../utils/call-analysis.js';
 import { buildTypeEnv } from '../type-env.js';
 import type { ConstructorBinding } from '../type-env.js';
 import { detectFrameworkFromAST } from '../framework-detection.js';
 import { generateId } from '../../../lib/utils.js';
+import { createOwnerEdgeGuard, type OwnerEdgeGuard } from './owner-edge-guard.js';
 import { defaultExportNameCollides } from '../languages/typescript/cjs-export-assignment.js';
+import { extractVueScript, isVueSetupTopLevel } from '../vue-sfc-extractor.js';
 import {
-  extractVueScript,
-  extractTemplateComponents,
-  isVueSetupTopLevel,
-} from '../vue-sfc-extractor.js';
+  extractNotebookPython,
+  isNotebookPath,
+  mapExtractLine,
+  type NotebookLineSegment,
+} from '../ipynb-extractor.js';
 import type { NodeLabel, ParameterTypeClass } from 'gitnexus-shared';
 import type { FieldInfo, FieldExtractorContext } from '../field-types.js';
 import type { MethodInfo, MethodExtractorContext } from '../method-types.js';
@@ -196,6 +148,8 @@ const DURABLE_PARSED_FILE_STORAGE_PATH: string | undefined = (
   workerData as { durableParsedFileStoragePath?: string } | undefined
 )?.durableParsedFileStoragePath;
 let shardSeq = 0;
+const FILE_RESULTS_ENABLED =
+  (workerData as { fileResults?: boolean } | undefined)?.fileResults === true;
 
 // ── PDG/CFG opt-in (#2081 M1) ───────────────────────────────────────────────
 // Read ONCE at worker init from `workerData` (the worker never sees
@@ -254,6 +208,8 @@ interface ParsedNode {
 }
 
 interface ParsedRelationship {
+  /** File that emitted this fact; distinct files may share either endpoint id. */
+  originFilePath?: string;
   id: string;
   sourceId: string;
   targetId: string;
@@ -331,11 +287,24 @@ export interface ExtractedFetchCall {
   filePath: string;
   fetchURL: string;
   lineNumber: number;
+  /**
+   * generateId of the callable whose body holds the call, from the AST;
+   * null for a confirmed top-level call, absent when attribution is unknown
+   * (text scans or callable forms the identity walk cannot name) (#3644).
+   */
+  enclosingId?: string | null;
 }
 
-export interface FetchWrapperDef {
+export interface FetchWrapperDef extends FetchWrapperFacts {
   filePath: string;
   functionName: string;
+}
+
+/** See {@link ExtractedDecoratorRoute.handlerReceiver}. */
+export interface RouteHandlerReceiver {
+  kind: 'type' | 'constructor' | 'module';
+  name?: string;
+  qualifier?: string;
 }
 
 export interface ExtractedDecoratorRoute {
@@ -383,6 +352,32 @@ export interface ExtractedDecoratorRoute {
    */
   handlerName?: string;
   /**
+   * Static hint for what the receiver of a qualified {@link handlerName}
+   * (`h.Method`, `pkg.Func`) is, read from the registering file's own syntax.
+   * The worker sees one file, so it records only what that file says:
+   *   - `type` — the receiver was declared or built as `name` (`h := &T{}`,
+   *     `var h *T`, a `h *pkg.T` parameter);
+   *   - `constructor` — the receiver was returned by the function `name`
+   *     (`h := NewT(...)`), whose declared result type names the owner;
+   *   - `module` — the receiver is the import `qualifier` (`pkg.Func`).
+   * `qualifier` is the import local name the type or constructor was reached
+   * through, when there is one. Only the route file's provider reads this, via
+   * `LanguageProvider.resolveRouteHandler`; absent when nothing was inferred.
+   */
+  handlerReceiver?: RouteHandlerReceiver;
+  /**
+   * The handler slot held a call `callee(inner, …)` instead of a designator.
+   * `callee` is the call's designator as written (`common.Wrapper`); the inner
+   * argument's designator and receiver hint travel alongside. A provider uses
+   * it only when the user configured `callee` as a handler wrapper; otherwise
+   * the route keeps no handler, as before.
+   */
+  handlerWrapper?: {
+    callee: string;
+    handlerName: string;
+    handlerReceiver?: RouteHandlerReceiver;
+  };
+  /**
    * Provenance for the `HANDLES_ROUTE` edge, overriding the default
    * `decorator-<decoratorName>`. Present when the route was extracted from a
    * shape that is not a decorator at all — today, JS/TS dispatch guards
@@ -412,6 +407,8 @@ export interface ExtractedToolDef {
   description: string;
   lineNumber: number;
   handlerNodeId?: string;
+  /** Unresolved registrations must not inherit unrelated same-file flows. */
+  allowFileFallback?: false;
 }
 
 export interface ExtractedORMQuery {
@@ -458,16 +455,28 @@ export interface FileScopeBindings {
   bindings: [string, string][];
 }
 
+export type FileWorkerResult =
+  | { key: string; path: string; encoded: EncodedFileResult }
+  | { key: string; path: string; raw: ParseWorkerResult };
+
 export interface ParseWorkerResult {
+  /** File-local output, delivered only when the batched job reaches flush. */
+  fileResults?: FileWorkerResult[];
   nodes: ParsedNode[];
   relationships: ParsedRelationship[];
   symbols: ParsedSymbol[];
+  /** Legacy wire fields; scope resolution consumes references from parsedFiles. */
   calls: ExtractedCall[];
   assignments: ExtractedAssignment[];
   routes: ExtractedRoute[];
   fetchCalls: ExtractedFetchCall[];
   fetchWrapperDefs: FetchWrapperDef[];
+  /** URL-bearing candidates, kept separate from confirmed outward-call sinks. */
+  fetchWrapperCalls?: FetchWrapperCall[];
+  fetchWrapperReexports?: FetchWrapperReexport[];
   decoratorRoutes: ExtractedDecoratorRoute[];
+  /** JSON-safe per-file provider facts; relationships are resolved on every run. */
+  routeFacts?: { filePath: string; facts: unknown; routePosition: number }[];
   routerIncludes: ExtractedRouterInclude[];
   routerImports: ExtractedRouterImport[];
   routerConstructorPrefixes?: ExtractedRouterConstructorPrefix[];
@@ -543,6 +552,7 @@ export interface ParseWorkerResult {
 export interface ParseWorkerInput {
   path: string;
   content: string;
+  cacheKey?: string;
 }
 
 type WorkerIncomingMessage =
@@ -550,54 +560,14 @@ type WorkerIncomingMessage =
   | { type: 'flush'; chunkHash?: string };
 
 // ============================================================================
-// Worker-local parser + language map
+// Worker-local parser
 // ============================================================================
 
 const parser = new Parser();
 
-const languageMap: Record<string, TreeSitterLanguage> = {
-  [SupportedLanguages.JavaScript]: JavaScript,
-  [SupportedLanguages.TypeScript]: TypeScript.typescript,
-  [`${SupportedLanguages.TypeScript}:tsx`]: TypeScript.tsx,
-  [SupportedLanguages.Python]: Python,
-  [SupportedLanguages.Java]: Java,
-  ...(C ? { [SupportedLanguages.C]: C } : {}),
-  [SupportedLanguages.CPlusPlus]: CPP,
-  ...(ObjectiveC ? { [SupportedLanguages.ObjectiveC]: ObjectiveC } : {}),
-  [SupportedLanguages.CSharp]: CSharp,
-  [SupportedLanguages.Go]: Go,
-  [SupportedLanguages.Rust]: Rust,
-  ...(Kotlin ? { [SupportedLanguages.Kotlin]: Kotlin } : {}),
-  [SupportedLanguages.PHP]: PHP.php_only,
-  [SupportedLanguages.Ruby]: Ruby,
-  [SupportedLanguages.Vue]: TypeScript.typescript,
-  ...(Dart ? { [SupportedLanguages.Dart]: Dart } : {}),
-  ...(Swift ? { [SupportedLanguages.Swift]: Swift } : {}),
-  ...(Zig ? { [SupportedLanguages.Zig]: Zig } : {}),
-};
-
-/**
- * Check if a language grammar is available in this worker.
- * Duplicated from parser-loader.ts because workers can't import from the main thread.
- * Extra filePath parameter needed to distinguish .tsx from .ts (different grammars
- * under the same SupportedLanguages.TypeScript key).
- */
-const isLanguageAvailable = (language: SupportedLanguages, filePath: string): boolean => {
-  const key =
-    language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
-      ? `${language}:tsx`
-      : language;
-  return key in languageMap && languageMap[key] != null;
-};
-
+// The shared loader caches each grammar in this worker and selects TSX by file path.
 const setLanguage = (language: SupportedLanguages, filePath: string): void => {
-  const key =
-    language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
-      ? `${language}:tsx`
-      : language;
-  const lang = languageMap[key];
-  if (!lang) throw new Error(`Unsupported language: ${language}`);
-  parser.setLanguage(lang);
+  parser.setLanguage(getLanguageGrammar(language, filePath));
 };
 
 // ============================================================================
@@ -608,12 +578,10 @@ const setLanguage = (language: SupportedLanguages, filePath: string): void => {
 // ============================================================================
 
 const classIdCache = new Map<SyntaxNode, EnclosingClassInfo | null>();
-const functionIdCache = new Map<SyntaxNode, string | null>();
 const exportCache = new Map<SyntaxNode, boolean>();
 
 const clearCaches = (): void => {
   classIdCache.clear();
-  functionIdCache.clear();
   exportCache.clear();
   fieldInfoCache.clear();
   methodInfoCache.clear();
@@ -624,7 +592,7 @@ const clearCaches = (): void => {
 // Keyed by class node startIndex (unique per AST node within a file).
 // ============================================================================
 
-const fieldInfoCache = new Map<number, Map<string, FieldInfo>>();
+const fieldInfoCache = new Map<number, Map<string, FieldInfo[]>>();
 
 /**
  * Walk up from a definition node to find the nearest enclosing class/struct/interface
@@ -650,7 +618,9 @@ function findEnclosingClassNode(node: SyntaxNode): SyntaxNode | null {
  * a type (`resolveFileTypeOwner`, e.g. a Zig file-struct), the tree root is
  * the owner node the method/field extractors should read members from. Same
  * root, same name as `findEnclosingClassInfo`'s root branch, so member ids and
- * owner ids agree.
+ * owner ids agree. Failing both, the provider's `resolveMemberOwnerNode` gets
+ * the last word (languages whose members belong to a call/assignment rather
+ * than an enclosing container node, e.g. a class built by a constructor call).
  */
 function findEnclosingClassNodeOrFileOwner(
   node: SyntaxNode,
@@ -659,10 +629,12 @@ function findEnclosingClassNodeOrFileOwner(
 ): SyntaxNode | null {
   const container = findEnclosingClassNode(node);
   if (container !== null) return container;
-  if (provider.resolveFileTypeOwner === undefined) return null;
-  let root: SyntaxNode = node;
-  while (root.parent) root = root.parent;
-  return provider.resolveFileTypeOwner(root, filePath) !== null ? root : null;
+  if (provider.resolveFileTypeOwner !== undefined) {
+    let root: SyntaxNode = node;
+    while (root.parent) root = root.parent;
+    if (provider.resolveFileTypeOwner(root, filePath) !== null) return root;
+  }
+  return provider.resolveMemberOwnerNode?.(node) ?? null;
 }
 
 /**
@@ -753,14 +725,14 @@ const NOOP_SYMBOL_TABLE: SymbolTableReader = {
 
 /**
  * Get (or extract and cache) field info for a class node.
- * Returns a name→FieldInfo map, or undefined if the provider has no field extractor
+ * Returns a name→declarations map, or undefined if the provider has no field extractor
  * or the class yielded no fields.
  */
 function getFieldInfo(
   classNode: SyntaxNode,
   provider: LanguageProvider,
   context: FieldExtractorContext,
-): Map<string, FieldInfo> | undefined {
+): Map<string, FieldInfo[]> | undefined {
   if (!provider.fieldExtractor) return undefined;
 
   const cacheKey = classNode.startIndex;
@@ -770,12 +742,50 @@ function getFieldInfo(
   const result = provider.fieldExtractor.extract(classNode, context);
   if (!result?.fields?.length) return undefined;
 
-  cached = new Map<string, FieldInfo>();
+  cached = new Map<string, FieldInfo[]>();
   for (const field of result.fields) {
-    cached.set(field.name, field);
+    const declarations = cached.get(field.name);
+    if (declarations !== undefined) declarations.push(field);
+    else cached.set(field.name, [field]);
+  }
+  for (const declarations of cached.values()) {
+    if (declarations.length > 1) {
+      declarations.sort((a, b) => a.line - b.line || (a.column ?? -1) - (b.column ?? -1));
+    }
   }
   fieldInfoCache.set(cacheKey, cached);
   return cached;
+}
+
+function fieldInfoLowerBound(
+  declarations: readonly FieldInfo[],
+  line: number,
+  column: number,
+): number {
+  let lo = 0;
+  let hi = declarations.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const field = declarations[mid]!;
+    if (field.line < line || (field.line === line && (field.column ?? -1) < column)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function selectFieldInfo(
+  declarations: readonly FieldInfo[] | undefined,
+  line: number,
+  column?: number,
+): FieldInfo | undefined {
+  if (declarations === undefined || declarations.length === 0) return undefined;
+  if (declarations.length === 1) return declarations[0];
+  const start = fieldInfoLowerBound(declarations, line, -1);
+  const end = fieldInfoLowerBound(declarations, line + 1, -1);
+  if (end - start === 1) return declarations[start];
+  if (column === undefined) return undefined;
+  const index = fieldInfoLowerBound(declarations, line, column);
+  return index < end && declarations[index]?.column === column ? declarations[index] : undefined;
 }
 
 // ============================================================================
@@ -784,6 +794,20 @@ function getFieldInfo(
 // ============================================================================
 
 const methodInfoCache = new Map<number, Map<string, MethodInfo>>();
+const methodCollisionGroups = new WeakMap<Map<string, MethodInfo>, Map<string, MethodInfo[]>>();
+
+/** Method maps are complete before publication and immutable for this file.
+ * Reuse their overload groups in both definition and enclosing-callable IDs.
+ * Weak ownership releases the groups with the per-file method cache.
+ */
+function getMethodCollisionGroups(methods: Map<string, MethodInfo>): Map<string, MethodInfo[]> {
+  let groups = methodCollisionGroups.get(methods);
+  if (!groups) {
+    groups = buildCollisionGroups(methods);
+    methodCollisionGroups.set(methods, groups);
+  }
+  return groups;
+}
 
 /**
  * Get (or extract and cache) method info for a class node.
@@ -955,7 +979,10 @@ const callableOwnQualifiedName = (
   // An anonymous callable has no name of its own, so it IS its position: the
   // `ownName === null` branch below carries the position INSTEAD of a name,
   // never in addition to one, so the two spellings cannot stack.
-  const ownName = efnResult?.funcName ?? genericFuncName(fnNode) ?? null;
+  const ownName =
+    efnResult?.identityName !== undefined
+      ? efnResult.identityName
+      : (efnResult?.funcName ?? genericFuncName(fnNode) ?? null);
   let finalLabel = efnResult?.label ?? inferFunctionLabel(fnNode.type);
   if (provider.labelOverride) {
     const override = provider.labelOverride(fnNode, finalLabel);
@@ -964,16 +991,7 @@ const callableOwnQualifiedName = (
 
   const prefix = enclosingCallablePrefix(fnNode, filePath, provider);
   const classInfo =
-    prefix === undefined
-      ? cachedFindEnclosingClassInfo(
-          fnNode,
-          filePath,
-          provider.resolveEnclosingOwner,
-          undefined,
-          provider.resolveFileTypeOwner,
-          provider.resolveContainerTypeOwner,
-        )
-      : null;
+    prefix === undefined ? cachedFindEnclosingClassInfo(fnNode, filePath, provider) : null;
   const objectOwner =
     prefix === undefined && classInfo === null && shouldObjectOwnerQualifyCallable(finalLabel)
       ? findObjectLiteralBindingInfo(fnNode, filePath, { includeOwnerName: true })?.ownerName
@@ -1007,206 +1025,204 @@ const findEnclosingFunctionId = (
   node: SyntaxNode,
   filePath: string,
   provider: LanguageProvider,
+  functionIdAtAncestor: Map<number, string | null>,
 ): string | null => {
-  const cached = functionIdCache.get(node);
-  if (cached !== undefined) return cached;
+  // The answer at an ancestor does not depend on where the climb started, so
+  // every ancestor this climb examines keeps it, and the next climb through it
+  // stops there (`climbAncestors`). A native `parent` read re-descends from the
+  // root and costs the node's depth, so deep climbs switch to a parent index.
+  return climbAncestors(
+    node,
+    functionIdAtAncestor,
+    (current) => enclosingFunctionIdAt(current, filePath, provider),
+    null,
+  );
+};
 
-  let current = node.parent;
-  while (current) {
-    if (FUNCTION_NODE_TYPES.has(current.type)) {
-      const efnResult = provider.methodExtractor?.extractFunctionName?.(current, filePath);
-      const funcName = efnResult?.funcName ?? genericFuncName(current);
-      const label = efnResult?.label ?? inferFunctionLabel(current.type);
-      if (funcName) {
-        // Apply labelOverride so label matches definition phase (e.g., Kotlin Function→Method).
-        // null means "skip as definition" — keep original label for scope identification.
-        let finalLabel = label;
-        if (provider.labelOverride) {
-          const override = provider.labelOverride(current, label);
-          if (override !== null) finalLabel = override;
-        }
-        // Qualify with enclosing class to match definition-phase node IDs
-        const classInfo = cachedFindEnclosingClassInfo(
-          current,
-          filePath,
-          provider.resolveEnclosingOwner,
-          undefined,
-          provider.resolveFileTypeOwner,
-          provider.resolveContainerTypeOwner,
-        );
-        const encLang = getLanguageFromFilename(filePath);
-        const standaloneMethodInfo =
-          (finalLabel === 'Method' || finalLabel === 'Constructor') &&
-          encLang === SupportedLanguages.Go &&
-          provider.methodExtractor?.extractFromNode
-            ? provider.methodExtractor.extractFromNode(current, {
-                filePath,
-                language: encLang,
-              })
-            : null;
-        // A nested callable is qualified by its enclosing callable (#2699) and
-        // wins over the class/receiver owner: a closure inside a method belongs
-        // to the METHOD, not directly to the class, and a Go receiver method can
-        // never itself be nested inside another callable.
-        const nestedPrefix = enclosingCallablePrefix(current, filePath, provider);
-        const objectOwnerName =
-          nestedPrefix === undefined &&
-          classInfo === null &&
-          shouldObjectOwnerQualifyCallable(finalLabel)
-            ? findObjectLiteralBindingInfo(current, filePath, { includeOwnerName: true })?.ownerName
-            : undefined;
-        const ownerName =
-          nestedPrefix ??
-          classInfo?.className ??
-          standaloneMethodInfo?.receiverType ??
-          objectOwnerName;
-        const needsArrayPosition =
-          ownerName === undefined &&
-          shouldObjectOwnerQualifyCallable(finalLabel) &&
-          isArrayContainedObjectLiteralMember(current);
-        // Lockstep with the other two id-building phases — see
-        // `nestedCallableQualifiedName`, which is the shared rule. When a
-        // nested prefix exists it IS `ownerName`, so this branch and the
-        // owner branch below cannot disagree about which prefix applies.
-        const qualifiedName =
-          nestedPrefix !== undefined
+/** The caller id `current` itself names, or undefined when the climb goes on past it. */
+const enclosingFunctionIdAt = (
+  current: SyntaxNode,
+  filePath: string,
+  provider: LanguageProvider,
+): string | undefined => {
+  if (FUNCTION_NODE_TYPES.has(current.type)) {
+    const efnResult = provider.methodExtractor?.extractFunctionName?.(current, filePath);
+    const funcName = efnResult?.funcName ?? genericFuncName(current);
+    const label = efnResult?.label ?? inferFunctionLabel(current.type);
+    if (funcName) {
+      // Apply labelOverride so label matches definition phase (e.g., Kotlin Function→Method).
+      // null means "skip as definition" — keep original label for scope identification.
+      let finalLabel = label;
+      if (provider.labelOverride) {
+        const override = provider.labelOverride(current, label);
+        if (override !== null) finalLabel = override;
+      }
+      // Qualify with enclosing class to match definition-phase node IDs
+      const classInfo = cachedFindEnclosingClassInfo(current, filePath, provider);
+      const encLang = getLanguageFromFilename(filePath);
+      const standaloneMethodInfo =
+        (finalLabel === 'Method' || finalLabel === 'Constructor') &&
+        encLang === SupportedLanguages.Go &&
+        provider.methodExtractor?.extractFromNode
+          ? provider.methodExtractor.extractFromNode(current, {
+              filePath,
+              language: encLang,
+            })
+          : null;
+      // A nested callable is qualified by its enclosing callable (#2699) and
+      // wins over the class/receiver owner: a closure inside a method belongs
+      // to the METHOD, not directly to the class, and a Go receiver method can
+      // never itself be nested inside another callable.
+      const nestedPrefix = enclosingCallablePrefix(current, filePath, provider);
+      const objectOwnerName =
+        nestedPrefix === undefined &&
+        classInfo === null &&
+        shouldObjectOwnerQualifyCallable(finalLabel)
+          ? findObjectLiteralBindingInfo(current, filePath, { includeOwnerName: true })?.ownerName
+          : undefined;
+      const ownerName =
+        nestedPrefix ??
+        classInfo?.className ??
+        standaloneMethodInfo?.receiverType ??
+        objectOwnerName;
+      const needsArrayPosition =
+        ownerName === undefined &&
+        shouldObjectOwnerQualifyCallable(finalLabel) &&
+        isArrayContainedObjectLiteralMember(current);
+      // Lockstep with the other two id-building phases — see
+      // `nestedCallableQualifiedName`, which is the shared rule. When a
+      // nested prefix exists it IS `ownerName`, so this branch and the
+      // owner branch below cannot disagree about which prefix applies.
+      const qualifiedName =
+        efnResult?.identityName === null
+          ? callableOwnQualifiedName(current, filePath, provider)
+          : nestedPrefix !== undefined
             ? nestedCallableQualifiedName(nestedPrefix, current, funcName)
             : ownerName
               ? `${ownerName}.${funcName}`
               : needsArrayPosition
                 ? positionQualifiedCallableName(funcName, current.startPosition)
                 : funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
-        // Use the same MethodExtractor (getMethodInfo) as the definition phase.
-        // When same-arity collisions exist, also append ~type1,type2.
-        let arity: number | undefined;
-        let encTypeTag = '';
-        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
-          if (standaloneMethodInfo) {
-            arity = standaloneMethodInfo.parameters.some((p) => p.isVariadic)
-              ? undefined
-              : standaloneMethodInfo.parameters.length;
-          } else {
-            // Same owner lookup as the definition-phase Method id builder: a Zig
-            // file-struct's top-level fn is owned by the file root, and its
-            // id carries the `#<arity>` suffix only if that owner is found.
-            const classNode =
-              findEnclosingClassNodeOrFileOwner(current, provider, filePath) ??
-              findClassNodeByQualifiedName(current);
-            if (classNode && encLang) {
-              const methodMap = getMethodInfo(classNode, provider, {
-                filePath,
-                language: encLang,
-              });
-              const defLine = current.startPosition.row + 1;
-              const info = methodMap?.get(
-                methodInfoKey(funcName, defLine, current.startPosition.column),
-              );
-              if (info) {
-                arity = info.parameters.some((p) => p.isVariadic)
-                  ? undefined
-                  : info.parameters.length;
-                if (methodMap && arity !== undefined) {
-                  const g = buildCollisionGroups(methodMap);
-                  encTypeTag =
-                    typeTagForId(methodMap, funcName, arity, info, encLang, g) +
-                    constTagForId(methodMap, funcName, arity, info, g);
-                }
-              }
-            }
-          }
-        }
-        const arityTag = arity !== undefined ? `#${arity}${encTypeTag}` : '';
-        const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
-        functionIdCache.set(node, result);
-        return result;
-      }
-    }
-
-    // Language-specific enclosing function resolution (e.g., Dart where
-    // function_body is a sibling of function_signature, not a child).
-    if (provider.enclosingFunctionFinder) {
-      const customResult = provider.enclosingFunctionFinder(current);
-      if (customResult) {
-        let finalLabel: NodeLabel = customResult.label;
-        if (provider.labelOverride) {
-          const override = provider.labelOverride(current.previousSibling, finalLabel);
-          if (override !== null) finalLabel = override;
-        }
-        // Qualify custom result with enclosing class
-        const classInfo = cachedFindEnclosingClassInfo(
-          current.previousSibling ?? current,
-          filePath,
-          provider.resolveEnclosingOwner,
-          undefined,
-          provider.resolveFileTypeOwner,
-          provider.resolveContainerTypeOwner,
-        );
-        // Same nesting rule as the generic branch above (#2699). Anchored on
-        // `sigNode`-equivalent (`current.previousSibling ?? current`) so Dart,
-        // whose body is a SIBLING of the signature, walks from the same node
-        // the class lookup already uses.
-        const nestedPrefix2 = enclosingCallablePrefix(
-          current.previousSibling ?? current,
-          filePath,
-          provider,
-        );
-        const customOwner = nestedPrefix2 ?? classInfo?.className;
-        const qualifiedName = customOwner
-          ? `${customOwner}.${customResult.funcName}`
-          : customResult.funcName;
-        // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
-        // When same-arity collisions exist, also append ~type1,type2.
-        const sigNode = current.previousSibling ?? current;
-        let arity2: number | undefined;
-        let encTypeTag2 = '';
-        if (finalLabel === 'Method' || finalLabel === 'Constructor') {
-          const encLang2 = getLanguageFromFilename(filePath);
-          const classNode2 =
-            findEnclosingClassNode(sigNode) ?? findClassNodeByQualifiedName(sigNode);
-          if (classNode2 && encLang2) {
-            const methodMap2 = getMethodInfo(classNode2, provider, {
+      // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
+      // Use the same MethodExtractor (getMethodInfo) as the definition phase.
+      // When same-arity collisions exist, also append ~type1,type2.
+      let arity: number | undefined;
+      let encTypeTag = '';
+      if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+        if (standaloneMethodInfo) {
+          arity = standaloneMethodInfo.parameters.some((p) => p.isVariadic)
+            ? undefined
+            : standaloneMethodInfo.parameters.length;
+        } else {
+          // Same owner lookup as the definition-phase Method id builder: a Zig
+          // file-struct's top-level fn is owned by the file root, and its
+          // id carries the `#<arity>` suffix only if that owner is found.
+          const classNode =
+            findEnclosingClassNodeOrFileOwner(current, provider, filePath) ??
+            findClassNodeByQualifiedName(current);
+          if (classNode && encLang) {
+            const methodMap = getMethodInfo(classNode, provider, {
               filePath,
-              language: encLang2,
+              language: encLang,
             });
-            const defLine2 = sigNode.startPosition.row + 1;
-            const info2 = methodMap2?.get(
-              methodInfoKey(customResult.funcName, defLine2, sigNode.startPosition.column),
+            const defLine = current.startPosition.row + 1;
+            const info = methodMap?.get(
+              methodInfoKey(funcName, defLine, current.startPosition.column),
             );
-            if (info2) {
-              arity2 = info2.parameters.some((p) => p.isVariadic)
+            if (info) {
+              arity = info.parameters.some((p) => p.isVariadic)
                 ? undefined
-                : info2.parameters.length;
-              if (methodMap2 && arity2 !== undefined) {
-                const g2 = buildCollisionGroups(methodMap2);
-                encTypeTag2 =
-                  typeTagForId(methodMap2, customResult.funcName, arity2, info2, encLang2, g2) +
-                  constTagForId(methodMap2, customResult.funcName, arity2, info2, g2);
+                : info.parameters.length;
+              if (methodMap && arity !== undefined) {
+                const g = getMethodCollisionGroups(methodMap);
+                encTypeTag =
+                  typeTagForId(methodMap, funcName, arity, info, encLang, g) +
+                  constTagForId(methodMap, funcName, arity, info, g);
               }
             }
           }
         }
-        const arityTag2 = arity2 !== undefined ? `#${arity2}${encTypeTag2}` : '';
-        const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
-        functionIdCache.set(node, result);
-        return result;
       }
+      const arityTag = arity !== undefined ? `#${arity}${encTypeTag}` : '';
+      const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag}`);
+      return result;
     }
-
-    current = current.parent;
   }
-  functionIdCache.set(node, null);
-  return null;
+
+  // Language-specific enclosing function resolution (e.g., Dart where
+  // function_body is a sibling of function_signature, not a child).
+  if (provider.enclosingFunctionFinder) {
+    const customResult = provider.enclosingFunctionFinder(current);
+    if (customResult) {
+      let finalLabel: NodeLabel = customResult.label;
+      if (provider.labelOverride) {
+        const override = provider.labelOverride(current.previousSibling, finalLabel);
+        if (override !== null) finalLabel = override;
+      }
+      // Qualify custom result with enclosing class
+      const classInfo = cachedFindEnclosingClassInfo(
+        current.previousSibling ?? current,
+        filePath,
+        provider,
+      );
+      // Same nesting rule as the generic branch above (#2699). Anchored on
+      // `sigNode`-equivalent (`current.previousSibling ?? current`) so Dart,
+      // whose body is a SIBLING of the signature, walks from the same node
+      // the class lookup already uses.
+      const nestedPrefix2 = enclosingCallablePrefix(
+        current.previousSibling ?? current,
+        filePath,
+        provider,
+      );
+      const customOwner = nestedPrefix2 ?? classInfo?.className;
+      const qualifiedName = customOwner
+        ? `${customOwner}.${customResult.funcName}`
+        : customResult.funcName;
+      // Include #<arity> suffix to match definition-phase Method/Constructor IDs.
+      // When same-arity collisions exist, also append ~type1,type2.
+      const sigNode = current.previousSibling ?? current;
+      let arity2: number | undefined;
+      let encTypeTag2 = '';
+      if (finalLabel === 'Method' || finalLabel === 'Constructor') {
+        const encLang2 = getLanguageFromFilename(filePath);
+        const classNode2 = findEnclosingClassNode(sigNode) ?? findClassNodeByQualifiedName(sigNode);
+        if (classNode2 && encLang2) {
+          const methodMap2 = getMethodInfo(classNode2, provider, {
+            filePath,
+            language: encLang2,
+          });
+          const defLine2 = sigNode.startPosition.row + 1;
+          const info2 = methodMap2?.get(
+            methodInfoKey(customResult.funcName, defLine2, sigNode.startPosition.column),
+          );
+          if (info2) {
+            arity2 = info2.parameters.some((p) => p.isVariadic)
+              ? undefined
+              : info2.parameters.length;
+            if (methodMap2 && arity2 !== undefined) {
+              const g2 = getMethodCollisionGroups(methodMap2);
+              encTypeTag2 =
+                typeTagForId(methodMap2, customResult.funcName, arity2, info2, encLang2, g2) +
+                constTagForId(methodMap2, customResult.funcName, arity2, info2, g2);
+            }
+          }
+        }
+      }
+      const arityTag2 = arity2 !== undefined ? `#${arity2}${encTypeTag2}` : '';
+      const result = generateId(finalLabel, `${filePath}:${qualifiedName}${arityTag2}`);
+      return result;
+    }
+  }
+
+  return undefined;
 };
 
 /** Cached wrapper for findEnclosingClassInfo — avoids repeated parent walks. */
 const cachedFindEnclosingClassInfo = (
   node: SyntaxNode,
   filePath: string,
-  resolveEnclosingOwner?: (node: SyntaxNode) => SyntaxNode | null,
+  provider: LanguageProvider,
   getQualifiedOwnerName?: (node: SyntaxNode, simpleName: string) => string | null,
-  resolveFileTypeOwner?: LanguageProvider['resolveFileTypeOwner'],
-  resolveContainerTypeOwner?: LanguageProvider['resolveContainerTypeOwner'],
 ): EnclosingClassInfo | null => {
   const cached = classIdCache.get(node);
   if (cached !== undefined) return cached;
@@ -1214,10 +1230,11 @@ const cachedFindEnclosingClassInfo = (
   const result = findEnclosingClassInfo(
     node,
     filePath,
-    resolveEnclosingOwner,
+    provider.resolveEnclosingOwner,
     getQualifiedOwnerName,
-    resolveFileTypeOwner,
-    resolveContainerTypeOwner,
+    provider.resolveFileTypeOwner,
+    provider.resolveContainerTypeOwner,
+    provider.resolveDetachedOwnerName,
   );
   classIdCache.set(node, result);
   return result;
@@ -1383,62 +1400,11 @@ const processBatch = (
   return result;
 };
 
-// Express/Hono method names that register routes
-const EXPRESS_ROUTE_METHODS = new Set([
-  'get',
-  'post',
-  'put',
-  'delete',
-  'patch',
-  'all',
-  'use',
-  'route',
-]);
-
-/**
- * Walk a tree-sitter AST subtree looking for a call to the global `fetch()` function.
- * Returns `true` if found within `maxDepth` levels of nesting — keeps the check
- * lightweight so it doesn't slow down parse-worker on large function bodies.
- */
-const checkForFetchCall = (node: SyntaxNode, depth = 0, maxDepth = 5): boolean => {
-  if (depth > maxDepth) return false;
-  if (node.type === 'call_expression') {
-    const fn = node.childForFieldName('function');
-    if (fn?.type === 'identifier' && fn.text === 'fetch') return true;
-  }
-  for (let i = 0; i < node.childCount; i++) {
-    if (checkForFetchCall(node.child(i)!, depth + 1, maxDepth)) return true;
-  }
-  return false;
-};
-
 // HTTP client methods that are ONLY used by clients, not Express route registration.
 // Methods like get/post/put/delete/patch overlap with Express — those are captured by
-// the express_route handler as route definitions, not consumers. The fetch() global
+// provider route facts as registrations, not consumers. The fetch() global
 // function is captured separately by the route.fetch query.
 const HTTP_CLIENT_ONLY_METHODS = new Set(['head', 'options', 'request', 'ajax']);
-
-// Known HTTP client receivers u2014 skip these, they're API consumers not routes
-const HTTP_CLIENT_RECEIVERS = new Set([
-  'axios',
-  'request',
-  'fetch',
-  'http',
-  'https',
-  'got',
-  'ky',
-  'superagent',
-  'needle',
-  'undici',
-  'apiclient',
-  'client',
-  'httpclient',
-  'api',
-  '$http',
-  'session',
-  'httpservice',
-  'conn',
-]);
 
 // Decorator names that indicate HTTP route handlers (NestJS, Flask, FastAPI, Spring)
 const ROUTE_DECORATOR_NAMES = new Set([
@@ -1542,7 +1508,9 @@ import { unfoldableDeclarationsOf } from '../route-extractors/constant-resolver.
  * group-aborting errors go through the message handler's
  * `{ type: 'error', errorStack }` channel instead.
  */
+let warningSequence = 0;
 function reportWarning(message: string): void {
+  warningSequence++;
   if (parentPort) {
     parentPort.postMessage({ type: 'warning', message });
   } else {
@@ -1559,6 +1527,23 @@ const processFileGroup = (
   language: SupportedLanguages,
   queryString: string,
   result: ParseWorkerResult,
+  onFileProcessed?: () => void,
+): void => {
+  const ownerEdgeGuard = createOwnerEdgeGuard(result);
+  try {
+    processFileGroupFiles(files, language, queryString, result, ownerEdgeGuard, onFileProcessed);
+  } finally {
+    // Also on a throw: processBatch keeps the partial result of a failed group.
+    ownerEdgeGuard.settle();
+  }
+};
+
+const processFileGroupFiles = (
+  files: ParseWorkerInput[],
+  language: SupportedLanguages,
+  queryString: string,
+  result: ParseWorkerResult,
+  ownerEdgeGuard: OwnerEdgeGuard,
   onFileProcessed?: () => void,
 ): void => {
   let query: Parser.Query;
@@ -1580,6 +1565,8 @@ const processFileGroup = (
   }
 
   for (const file of files) {
+    // Settles the previous file, so every `continue` below still gets checked.
+    ownerEdgeGuard.open(file.path);
     // Skip files larger than the max tree-sitter buffer (32 MB)
     if (getTreeSitterContentByteLength(file.content) > TREE_SITTER_MAX_BUFFER) continue;
 
@@ -1595,21 +1582,52 @@ const processFileGroup = (
     // Vue SFC preprocessing: extract <script> block content
     let parseContent = file.content;
     let scopeSourceKind: ScopeCaptureSourceKind = 'full-file';
+    let scriptLanguage: string | undefined;
     let lineOffset = 0;
+    let sourceLineMap: readonly number[] | undefined;
     let isVueSetup = false;
+    let notebookSegments: readonly NotebookLineSegment[] | undefined;
+    const mapRow = (row: number): number =>
+      notebookSegments
+        ? mapExtractLine(row, notebookSegments)
+        : (sourceLineMap?.[row] ?? row + lineOffset);
     if (language === SupportedLanguages.Vue) {
       const extracted = extractVueScript(file.content);
       if (!extracted) continue; // skip .vue files with no script block
       parseContent = extracted.scriptContent;
       scopeSourceKind = 'pre-extracted-script';
       lineOffset = extracted.lineOffset;
+      sourceLineMap = extracted.sourceLineMap;
+      scriptLanguage = extracted.lang;
       isVueSetup = extracted.isSetup;
+    } else if (language === SupportedLanguages.Python && isNotebookPath(file.path)) {
+      const extracted = extractNotebookPython(file.content);
+      if (!extracted) continue;
+      parseContent = extracted.pythonSource;
+      scopeSourceKind = 'pre-extracted-script';
+      notebookSegments = extracted.segments;
     }
 
     // Per-language source-text transform (e.g., UE macro stripping for C++).
     // Length-preserving — see LanguageProvider.preprocessSource contract.
     parseContent =
       getProvider(language).preprocessSource?.(parseContent, file.path) ?? parseContent;
+
+    const embeddedGrammar =
+      scriptLanguage !== undefined
+        ? getProvider(language).selectEmbeddedGrammar?.(scriptLanguage)
+        : undefined;
+    if (embeddedGrammar && parser.getLanguage() !== embeddedGrammar) {
+      parser.setLanguage(embeddedGrammar);
+      let queries = compiledQueries.get(embeddedGrammar);
+      if (!queries) {
+        queries = new Map();
+        compiledQueries.set(embeddedGrammar, queries);
+      }
+      const cached = queries.get(queryString);
+      query = cached ?? new Parser.Query(embeddedGrammar, queryString);
+      if (!cached) queries.set(queryString, query);
+    }
 
     clearCaches(); // Reset memoization before each new file
 
@@ -1649,6 +1667,7 @@ const processFileGroup = (
     // node id → graph node id for classes THIS file's capture loop materialized.
     // Keyed by in-memory AST identity (never persisted); filled below.
     const classOwnersByNodeId = new Map<number, string>();
+    const callableBindings = new Map<number, string>();
 
     // #2687: ONE pass over `matches` yields both suppression sets — the
     // definition-name claims by rank (callable > Property > value), so the dedup
@@ -1676,8 +1695,28 @@ const processFileGroup = (
       },
       tree,
       scopeSourceKind,
+      notebookSegments,
+      lineOffset,
+      scriptLanguage,
+      sourceLineMap,
     );
     if (scopeExtractionFailed) (result.scopeExtractionFailures ??= []).push(file.path);
+    let requestScopeIndex: PositionIndex | undefined;
+    // Native node ids can be reused by a later tree. Keep this memo in the
+    // file's closure so isolation does not depend on clearing a global map.
+    const functionIdAtAncestor = new Map<number, string | null>();
+    const requestEnclosingId = (node: SyntaxNode): string | null | undefined => {
+      const id = findEnclosingFunctionId(node, file.path, provider, functionIdAtAncestor);
+      if (id !== null) return id;
+      if (parsedFile === undefined || scopeExtractionFailed) return undefined;
+      requestScopeIndex ??= buildPositionIndex(
+        parsedFile.scopes.filter((scope) => scope.kind === 'Function'),
+      );
+      const { row, column } = node.startPosition;
+      return requestScopeIndex.atPosition(file.path, mapRow(row) + 1, column) === undefined
+        ? null
+        : undefined;
+    };
     if (parsedFile !== undefined) {
       // Capture-time side-channel (#1983): `extractParsedFile` just ran the
       // provider's `emitScopeCaptures`, which (for C++ ADL/namespace marks,
@@ -1702,7 +1741,7 @@ const processFileGroup = (
       // serializable data. Only on a --pdg run and only for languages with a
       // cfgVisitor (TS/JS in M1). The same disk-store/warm-cache machinery that
       // carries captureSideChannel carries this — its coherence rests on the
-      // SCHEMA_BUMP + the pdg-folded chunk-hash key (see parse-cache.ts).
+      // base/PDG artifact identities in the chunk key (see parse-cache.ts).
       if (PDG_ENABLED && provider.cfgVisitor) {
         // Isolate the CFG build per file: a throw here (an unexpected tree-sitter
         // node shape) must NOT propagate — it would escape processFileGroup to the
@@ -1722,6 +1761,8 @@ const processFileGroup = (
             // `lineOffset` in the file — shift the CFG into file coordinates so
             // it joins its graph node and BasicBlock lines map to source.
             lineOffset,
+            notebookSegments || sourceLineMap ? mapRow : undefined,
+            sourceLineMap ? 'parse-buffer' : 'source',
           );
           if (cfgs.length) withChannels = { ...withChannels, cfgSideChannel: cfgs };
           // Surface per-function CFG skips per-language (#2195): merged + logged
@@ -1762,7 +1803,11 @@ const processFileGroup = (
           relationship.type === 'HAS_METHOD' ||
           relationship.type === 'HAS_PROPERTY'
         ) {
-          result.relationships.push({ ...relationship, type: relationship.type });
+          result.relationships.push({
+            ...relationship,
+            type: relationship.type,
+            originFilePath: file.path,
+          });
         }
       }
       for (const symbol of semanticGraph.symbols) {
@@ -1834,6 +1879,7 @@ const processFileGroup = (
     }
 
     // Per-file map: decorator end-line → decorator info, for associating with definitions
+    const routePosition = result.decoratorRoutes.length;
     const fileDecorators = new Map<number, { name: string; arg?: string; isTool?: boolean }>();
 
     // Track start indices of definition nodes already processed by higher-priority captures
@@ -1841,6 +1887,19 @@ const processFileGroup = (
     // patterns overlap with the same source range.
     const processedDefinitionNodes = new Set<string>();
     const variableInfoCache = new Map<number, Map<string, VariableInfo>>();
+    // HTTP facts are all or nothing per file. A throwing hook must not escape to
+    // the language-group catch, which would drop every remaining file of the
+    // group; it drops only this file's HTTP facts.
+    const wrapperDefs: FetchWrapperDef[] = [];
+    const wrapperFunctions: { name: string; node: SyntaxNode }[] = [];
+    let httpFailed = false;
+    const httpFailure = (err: unknown) => {
+      if (!httpFailed)
+        reportWarning(
+          `HTTP fact extraction failed for ${file.path}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      httpFailed = true;
+    };
 
     for (const match of matches) {
       const captureMap: Record<string, SyntaxNode> = {};
@@ -1857,31 +1916,12 @@ const processFileGroup = (
         continue;
       }
 
-      // Extract assignment sites (field write access)
+      // Field writes are emitted by scope resolution from parsedFiles.
       if (
         captureMap['assignment'] &&
         captureMap['assignment.receiver'] &&
         captureMap['assignment.property']
       ) {
-        const receiverText = captureMap['assignment.receiver'].text;
-        const propertyName = captureMap['assignment.property'].text;
-        if (receiverText && propertyName) {
-          const srcId =
-            findEnclosingFunctionId(captureMap['assignment'], file.path, provider) ||
-            generateId('File', file.path);
-          let receiverTypeName: string | undefined;
-          if (typeEnv) {
-            receiverTypeName = typeEnv.lookup(receiverText, captureMap['assignment']) ?? undefined;
-          }
-          result.assignments.push({
-            filePath: file.path,
-            sourceId: srcId,
-            receiverText,
-            propertyName,
-            line: captureMap['assignment'].startPosition.row + 1,
-            ...(receiverTypeName ? { receiverTypeName } : {}),
-          });
-        }
         if (!captureMap['call']) continue;
       }
 
@@ -1913,7 +1953,7 @@ const processFileGroup = (
             filePath: file.path,
             httpMethod,
             decoratorName,
-            lineNumber: decoratorNode.startPosition.row + lineOffset,
+            lineNumber: mapRow(decoratorNode.startPosition.row),
             ...(decoratorReceiver ? { decoratorReceiver } : {}),
             ...(handlerName ? { handlerName } : {}),
           };
@@ -1964,331 +2004,162 @@ const processFileGroup = (
         // Measured before this: 44 of 47 fetch calls in this repo pass a
         // variable, so the sink signal was absent from 94% of them and
         // sink-terminated flows could effectively never fire.
+        const fetchEnclosingId = requestEnclosingId(captureMap['route.fetch']);
         result.fetchCalls.push({
           filePath: file.path,
           fetchURL: urlNode ? urlNode.text : '',
           lineNumber: captureMap['route.fetch'].startPosition.row + lineOffset,
+          enclosingId: fetchEnclosingId,
         });
         continue;
       }
 
       // HTTP client calls: axios.get('/path'), $.post('/path'), requests.get('/path')
-      // Skip methods also in EXPRESS_ROUTE_METHODS to avoid double-registering Express
-      // routes as both route definitions AND consumers (both queries match same AST node)
+      // Verbs shared with provider registrations are handled by dedicated consumer captures.
       if (captureMap['http_client'] && captureMap['http_client.url']) {
         const method = captureMap['http_client.method']?.text;
         const url = captureMap['http_client.url'].text;
         if (method && HTTP_CLIENT_ONLY_METHODS.has(method) && url.startsWith('/')) {
+          const clientEnclosingId = requestEnclosingId(captureMap['http_client']);
           result.fetchCalls.push({
             filePath: file.path,
             fetchURL: url,
             lineNumber: captureMap['http_client'].startPosition.row + lineOffset,
+            enclosingId: clientEnclosingId,
           });
         }
         continue;
       }
 
-      // Express/Hono route registration: app.get('/path', handler)
-      if (
-        captureMap['express_route'] &&
-        captureMap['express_route.method'] &&
-        captureMap['express_route.path']
-      ) {
-        const method = captureMap['express_route.method'].text;
-        const routePath = captureMap['express_route.path'].text;
-        if (EXPRESS_ROUTE_METHODS.has(method) && routePath.startsWith('/')) {
-          // Extract the receiver (the object the method is called on) to filter out
-          // HTTP client calls like axios.get('/api/users') that match the same pattern
-          // as Express route registrations.
-          const callNode = captureMap['express_route'];
-          const funcNode = callNode.childForFieldName?.('function') ?? callNode.children?.[0];
-          // Walk through nested member_expressions and call_expressions to
-          // reach the innermost receiver identifier.  Handles chains like:
-          //   this.httpService.get('/path')   -> member chain    -> 'httpservice'
-          //   getClient().get('/path')         -> call_expression -> 'getclient'
-          //   axios.get('/path')               -> bare identifier -> 'axios'
-          let receiverNode = funcNode?.childForFieldName?.('object') ?? funcNode?.children?.[0];
-          while (
-            receiverNode?.type === 'member_expression' ||
-            receiverNode?.type === 'call_expression'
-          ) {
-            if (receiverNode.type === 'member_expression') {
-              // Drill into the property (rightmost part) of the member expression
-              const propNode = receiverNode.childForFieldName?.('property');
-              if (propNode) {
-                receiverNode = propNode;
-              } else {
-                break;
-              }
-            } else {
-              // call_expression: unwrap to the function being called
-              const innerFunc =
-                receiverNode.childForFieldName?.('function') ?? receiverNode.children?.[0];
-              if (innerFunc && innerFunc !== receiverNode) {
-                receiverNode = innerFunc;
-              } else {
-                break;
-              }
-            }
-          }
-          const receiverText = receiverNode?.text?.toLowerCase() ?? '';
-
-          if (HTTP_CLIENT_RECEIVERS.has(receiverText)) {
-            // This is an HTTP client call, not a route definition u2014 skip it
-            continue;
-          }
-
-          const httpMethod =
-            method === 'all' || method === 'use' || method === 'route'
-              ? 'GET'
-              : method.toUpperCase();
-          result.decoratorRoutes.push({
-            filePath: file.path,
-            routePath,
-            httpMethod,
-            decoratorName: `express.${method}`,
-            lineNumber: captureMap['express_route'].startPosition.row + lineOffset,
-          });
-        }
-        continue;
-      }
-
-      // Extract call sites
+      // Calls are resolved from parsedFiles. Retain call-routed structure
+      // declarations here, but do not compute unused legacy call records.
       if (captureMap['call']) {
-        const callNode = captureMap['call'];
         const callNameNode = captureMap['call.name'];
-        const callExtractor = provider.callExtractor;
+        if (!callNameNode) continue;
 
-        if (callExtractor) {
-          // ── Path 1: Language-specific call site (bypasses routing) ────
-          // Try language-specific extraction (e.g. Java `::` method references)
-          // without callNameNode.  If successful, skip routing and the generic
-          // path entirely.
-          const langCallSite = callExtractor.extract(callNode, undefined);
-          if (langCallSite) {
-            if (!provider.isBuiltInName(langCallSite.calledName)) {
-              const sourceId =
-                findEnclosingFunctionId(callNode, file.path, provider) ||
-                generateId('File', file.path);
-              const receiverName =
-                langCallSite.callForm === 'member' ? langCallSite.receiverName : undefined;
-              let receiverTypeName = receiverName
-                ? typeEnv.lookup(receiverName, callNode)
-                : undefined;
-              // Type-as-receiver heuristic (e.g. Java `User::getName`)
-              if (
-                langCallSite.typeAsReceiverHeuristic &&
-                receiverName !== undefined &&
-                receiverTypeName === undefined &&
-                langCallSite.callForm === 'member'
-              ) {
-                const c0 = receiverName.charCodeAt(0);
-                if (c0 >= 65 && c0 <= 90) receiverTypeName = receiverName;
-              }
-              result.calls.push({
-                filePath: file.path,
-                calledName: langCallSite.calledName,
-                sourceId,
-                callForm: langCallSite.callForm,
-                ...(receiverName !== undefined ? { receiverName } : {}),
-                ...(receiverTypeName !== undefined ? { receiverTypeName } : {}),
-              });
-            }
-            continue;
+        const routed = callRouter?.(callNameNode.text, captureMap['call']);
+        if (routed?.kind !== 'properties') continue;
+
+        // #1978: thread the qualifier so a routed property's owner edge
+        // points at the *qualified* nested-class node (Outer.Inner) rather
+        // than a now-nonexistent simple `Class:file:Inner` id. Gated on the
+        // flag → byte-identical when off. Mirrors the main owner path.
+        const propGetQualifiedOwnerName =
+          provider.classExtractor?.qualifiedNodeId === true
+            ? (node: SyntaxNode, simpleName: string): string | null =>
+                provider.classExtractor!.extractQualifiedName(node, simpleName)
+            : undefined;
+        const propEnclosingInfo = cachedFindEnclosingClassInfo(
+          captureMap['call'],
+          file.path,
+          provider,
+          propGetQualifiedOwnerName,
+        );
+        const propEnclosingClassId =
+          propEnclosingInfo?.qualifiedClassId ?? propEnclosingInfo?.classId ?? null;
+        // Enrich routed properties with FieldExtractor metadata
+        let routedFieldMap: Map<string, FieldInfo[]> | undefined;
+        if (provider.fieldExtractor && typeEnv) {
+          const classNode = findEnclosingClassNode(captureMap['call']);
+          if (classNode) {
+            routedFieldMap = getFieldInfo(classNode, provider, {
+              typeEnv,
+              symbolTable: NOOP_SYMBOL_TABLE,
+              filePath: file.path,
+              language,
+            });
           }
-
-          // ── Path 2: Generic extraction via @call.name ────────────────
-          if (callNameNode) {
-            const calledName = callNameNode.text;
-
-            // Dispatch: route language-specific calls (properties, imports).
-            // Call-based heritage (Ruby include/extend/prepend) is no longer
-            // routed here — those calls return 'skip' from the router and the
-            // mixin edges are emitted by scope-resolution (emitHeritageEdges).
-            const routed = callRouter?.(calledName, captureMap['call']);
-            if (routed) {
-              if (routed.kind === 'skip') continue;
-
-              if (routed.kind === 'import') {
-                // Call-routed imports (e.g. Ruby `require`) are emitted as
-                // IMPORTS edges by the scope-resolution phase; the legacy
-                // per-file extraction that consumed these was removed in
-                // RING4-2 (#943). Skip.
-                continue;
-              }
-
-              if (routed.kind === 'properties') {
-                // #1978: thread the qualifier so a routed property's owner edge
-                // points at the *qualified* nested-class node (Outer.Inner) rather
-                // than a now-nonexistent simple `Class:file:Inner` id. Gated on the
-                // flag → byte-identical when off. Mirrors the main owner path.
-                const propGetQualifiedOwnerName =
-                  provider.classExtractor?.qualifiedNodeId === true
-                    ? (node: SyntaxNode, simpleName: string): string | null =>
-                        provider.classExtractor!.extractQualifiedName(node, simpleName)
-                    : undefined;
-                const propEnclosingInfo = cachedFindEnclosingClassInfo(
-                  captureMap['call'],
-                  file.path,
-                  provider.resolveEnclosingOwner,
-                  propGetQualifiedOwnerName,
-                  provider.resolveFileTypeOwner,
-                  provider.resolveContainerTypeOwner,
-                );
-                const propEnclosingClassId =
-                  propEnclosingInfo?.qualifiedClassId ?? propEnclosingInfo?.classId ?? null;
-                // Enrich routed properties with FieldExtractor metadata
-                let routedFieldMap: Map<string, FieldInfo> | undefined;
-                if (provider.fieldExtractor && typeEnv) {
-                  const classNode = findEnclosingClassNode(captureMap['call']);
-                  if (classNode) {
-                    routedFieldMap = getFieldInfo(classNode, provider, {
-                      typeEnv,
-                      symbolTable: NOOP_SYMBOL_TABLE,
-                      filePath: file.path,
-                      language,
-                    });
-                  }
-                }
-                for (const item of routed.items) {
-                  const routedFieldInfo = routedFieldMap?.get(item.propName);
-                  const propQualifiedName = propEnclosingInfo
-                    ? `${propEnclosingInfo.className}.${item.propName}`
-                    : item.propName;
-                  const nodeId = generateId('Property', `${file.path}:${propQualifiedName}`);
-                  result.nodes.push({
-                    id: nodeId,
-                    label: 'Property',
-                    properties: {
-                      name: item.propName,
-                      filePath: file.path,
-                      startLine: item.startLine,
-                      endLine: item.endLine,
-                      language,
-                      isExported: true,
-                      description: item.accessorType,
-                      ...(item.declaredType
-                        ? { declaredType: item.declaredType }
-                        : routedFieldInfo?.type
-                          ? { declaredType: routedFieldInfo.type }
-                          : {}),
-                      ...(routedFieldInfo?.rawDeclaredType !== undefined
-                        ? { rawDeclaredType: routedFieldInfo.rawDeclaredType }
-                        : {}),
-                      ...(routedFieldInfo?.annotations !== undefined &&
-                      routedFieldInfo.annotations.length > 0
-                        ? { annotations: routedFieldInfo.annotations }
-                        : {}),
-                      ...(routedFieldInfo?.visibility !== undefined
-                        ? { visibility: routedFieldInfo.visibility }
-                        : {}),
-                      ...(routedFieldInfo?.isStatic !== undefined
-                        ? { isStatic: routedFieldInfo.isStatic }
-                        : {}),
-                      ...(routedFieldInfo?.isReadonly !== undefined
-                        ? { isReadonly: routedFieldInfo.isReadonly }
-                        : {}),
-                    },
-                  });
-                  result.symbols.push({
-                    filePath: file.path,
-                    name: item.propName,
-                    nodeId,
-                    type: 'Property',
-                    ...(propEnclosingClassId ? { ownerId: propEnclosingClassId } : {}),
-                    ...(item.declaredType
-                      ? { declaredType: item.declaredType }
-                      : routedFieldInfo?.type
-                        ? { declaredType: routedFieldInfo.type }
-                        : {}),
-                    ...(routedFieldInfo?.visibility !== undefined
-                      ? { visibility: routedFieldInfo.visibility }
-                      : {}),
-                    ...(routedFieldInfo?.isStatic !== undefined
-                      ? { isStatic: routedFieldInfo.isStatic }
-                      : {}),
-                    ...(routedFieldInfo?.isReadonly !== undefined
-                      ? { isReadonly: routedFieldInfo.isReadonly }
-                      : {}),
-                  });
-                  // Only emit File -> Property DEFINES for top-level properties
-                  // (issue #1944); class members are reached via HAS_PROPERTY.
-                  if (!propEnclosingClassId) {
-                    const fileId = generateId('File', file.path);
-                    const relId = generateId('DEFINES', `${fileId}->${nodeId}`);
-                    result.relationships.push({
-                      id: relId,
-                      sourceId: fileId,
-                      targetId: nodeId,
-                      type: 'DEFINES',
-                      confidence: 1.0,
-                      reason: '',
-                    });
-                  }
-                  if (propEnclosingClassId) {
-                    result.relationships.push({
-                      id: generateId('HAS_PROPERTY', `${propEnclosingClassId}->${nodeId}`),
-                      sourceId: propEnclosingClassId,
-                      targetId: nodeId,
-                      type: 'HAS_PROPERTY',
-                      confidence: 1.0,
-                      reason: '',
-                    });
-                  }
-                }
-                continue;
-              }
-
-              // kind === 'call' — fall through to normal call processing below
-            }
-
-            if (!provider.isBuiltInName(calledName)) {
-              const callSite = callExtractor.extract(callNode, callNameNode);
-              if (callSite) {
-                const sourceId =
-                  findEnclosingFunctionId(callNode, file.path, provider) ||
-                  generateId('File', file.path);
-                let receiverTypeName = callSite.receiverName
-                  ? typeEnv.lookup(callSite.receiverName, callNode)
-                  : undefined;
-
-                // Type-as-receiver heuristic
-                if (
-                  callSite.typeAsReceiverHeuristic &&
-                  callSite.receiverName !== undefined &&
-                  receiverTypeName === undefined &&
-                  callSite.callForm === 'member'
-                ) {
-                  const c0 = callSite.receiverName.charCodeAt(0);
-                  if (c0 >= 65 && c0 <= 90) receiverTypeName = callSite.receiverName;
-                }
-
-                const inferLiteralType = provider.typeConfig?.inferLiteralType;
-                // Skip when no arg list / zero args: nothing to infer for overload typing
-                const argTypes =
-                  inferLiteralType && callSite.argCount !== undefined && callSite.argCount > 0
-                    ? extractCallArgTypes(callNode, inferLiteralType, (varName, cn) =>
-                        typeEnv.lookup(varName, cn),
-                      )
-                    : undefined;
-
-                result.calls.push({
-                  filePath: file.path,
-                  calledName: callSite.calledName,
-                  sourceId,
-                  ...(callSite.argCount !== undefined ? { argCount: callSite.argCount } : {}),
-                  ...(callSite.callForm !== undefined ? { callForm: callSite.callForm } : {}),
-                  ...(callSite.receiverName !== undefined
-                    ? { receiverName: callSite.receiverName }
-                    : {}),
-                  ...(receiverTypeName !== undefined ? { receiverTypeName } : {}),
-                  ...(callSite.receiverMixedChain !== undefined
-                    ? { receiverMixedChain: callSite.receiverMixedChain }
-                    : {}),
-                  ...(argTypes !== undefined ? { argTypes } : {}),
-                });
-              }
-            }
+        }
+        for (const item of routed.items) {
+          const routedFieldInfo = selectFieldInfo(
+            routedFieldMap?.get(item.propName),
+            captureMap['call'].startPosition.row + 1,
+            captureMap['call'].startPosition.column,
+          );
+          const propQualifiedName = propEnclosingInfo
+            ? `${propEnclosingInfo.className}.${item.propName}`
+            : item.propName;
+          const nodeId = generateId('Property', `${file.path}:${propQualifiedName}`);
+          result.nodes.push({
+            id: nodeId,
+            label: 'Property',
+            properties: {
+              name: item.propName,
+              filePath: file.path,
+              startLine: item.startLine,
+              endLine: item.endLine,
+              language,
+              isExported: true,
+              description: item.accessorType,
+              ...(item.declaredType
+                ? { declaredType: item.declaredType }
+                : routedFieldInfo?.type
+                  ? { declaredType: routedFieldInfo.type }
+                  : {}),
+              ...(routedFieldInfo?.rawDeclaredType !== undefined
+                ? { rawDeclaredType: routedFieldInfo.rawDeclaredType }
+                : {}),
+              ...(routedFieldInfo?.annotations !== undefined &&
+              routedFieldInfo.annotations.length > 0
+                ? { annotations: routedFieldInfo.annotations }
+                : {}),
+              ...(routedFieldInfo?.visibility !== undefined
+                ? { visibility: routedFieldInfo.visibility }
+                : {}),
+              ...(routedFieldInfo?.isStatic !== undefined
+                ? { isStatic: routedFieldInfo.isStatic }
+                : {}),
+              ...(routedFieldInfo?.isReadonly !== undefined
+                ? { isReadonly: routedFieldInfo.isReadonly }
+                : {}),
+            },
+          });
+          result.symbols.push({
+            filePath: file.path,
+            name: item.propName,
+            nodeId,
+            type: 'Property',
+            ...(propEnclosingClassId ? { ownerId: propEnclosingClassId } : {}),
+            ...(item.declaredType
+              ? { declaredType: item.declaredType }
+              : routedFieldInfo?.type
+                ? { declaredType: routedFieldInfo.type }
+                : {}),
+            ...(routedFieldInfo?.visibility !== undefined
+              ? { visibility: routedFieldInfo.visibility }
+              : {}),
+            ...(routedFieldInfo?.isStatic !== undefined
+              ? { isStatic: routedFieldInfo.isStatic }
+              : {}),
+            ...(routedFieldInfo?.isReadonly !== undefined
+              ? { isReadonly: routedFieldInfo.isReadonly }
+              : {}),
+          });
+          // Only emit File -> Property DEFINES for top-level properties
+          // (issue #1944); class members are reached via HAS_PROPERTY.
+          if (!propEnclosingClassId) {
+            const fileId = generateId('File', file.path);
+            const relId = generateId('DEFINES', `${fileId}->${nodeId}`);
+            result.relationships.push({
+              originFilePath: file.path,
+              id: relId,
+              sourceId: fileId,
+              targetId: nodeId,
+              type: 'DEFINES',
+              confidence: 1.0,
+              reason: '',
+            });
+          }
+          if (propEnclosingClassId) {
+            result.relationships.push({
+              originFilePath: file.path,
+              id: generateId('HAS_PROPERTY', `${propEnclosingClassId}->${nodeId}`),
+              sourceId: propEnclosingClassId,
+              targetId: nodeId,
+              type: 'HAS_PROPERTY',
+              confidence: 1.0,
+              reason: '',
+            });
           }
         }
         continue;
@@ -2409,6 +2280,11 @@ const processFileGroup = (
       const cjsDefaultExportName = isCjsDefaultExport
         ? (cjsDefaultExportOwnName ?? deriveDefaultExportHocName(file.path))
         : null;
+      const inferredFunction =
+        !nameNode && nodeLabel === 'Function' && definitionNode
+          ? provider.methodExtractor?.extractFunctionName?.(definitionNode, file.path)
+          : undefined;
+      const inferredFunctionName = inferredFunction?.funcName;
 
       // Synthesize name for constructors without explicit @name capture (e.g. Swift init)
       if (
@@ -2416,7 +2292,8 @@ const processFileGroup = (
         nodeLabel !== 'Constructor' &&
         !extractedClassSymbol &&
         !defaultExportHocName &&
-        !cjsDefaultExportName
+        !cjsDefaultExportName &&
+        !inferredFunctionName
       )
         continue;
 
@@ -2424,6 +2301,7 @@ const processFileGroup = (
         extractedClassSymbol?.name ??
         defaultExportHocName ??
         cjsDefaultExportName ??
+        inferredFunctionName ??
         (nameNode ? nameNode.text : 'init');
       // Dedup: variable captures (Const/Static/Variable) may overlap with higher-priority
       // captures (e.g. `const fn = () => {}` matches both @definition.function and @definition.const).
@@ -2472,6 +2350,7 @@ const processFileGroup = (
       // (ids still use `definitionNode` via `localIdentity`).
       const startPosition =
         definitionNode &&
+        !inferredFunctionName &&
         (nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor')
           ? boundCallableStartPosition(
               definitionNode,
@@ -2483,10 +2362,10 @@ const processFileGroup = (
           : definitionNode?.startPosition;
       const startLine =
         startPosition !== undefined
-          ? startPosition.row + lineOffset
+          ? mapRow(startPosition.row)
           : nameNode
-            ? nameNode.startPosition.row + lineOffset
-            : lineOffset;
+            ? mapRow(nameNode.startPosition.row)
+            : mapRow(0);
       const startColumn = startPosition?.column ?? nameNode?.startPosition.column ?? 0;
 
       // Compute enclosing class BEFORE node ID — needed to qualify method IDs
@@ -2552,10 +2431,8 @@ const processFileGroup = (
           ? cachedFindEnclosingClassInfo(
               nameNode || definitionNode,
               file.path,
-              provider.resolveEnclosingOwner,
+              provider,
               getQualifiedOwnerName,
-              provider.resolveFileTypeOwner,
-              provider.resolveContainerTypeOwner,
             )
           : null;
       const enclosingClassId =
@@ -2679,27 +2556,29 @@ const processFileGroup = (
           : undefined;
 
       const qualifiedNameBeforeModScope =
-        rustImplQualifiedName !== undefined
-          ? rustImplQualifiedName
-          : // #1991: LOCKSTEP — include Trait so a Ruby mixin module's qualified
-            // scope id keys the worker-path node, matching the sequential path.
-            (isClassLikeLabel || isQualifiableScopeLabel(nodeLabel)) &&
-              provider.classExtractor?.qualifiedNodeId === true &&
-              qualifiedTypeName !== undefined
-            ? qualifiedTypeName
-            : nestedCallablePrefix !== undefined && definitionNode
-              ? nestedCallableQualifiedName(nestedCallablePrefix, definitionNode, nodeName)
-              : enclosingClassInfo
-                ? `${enclosingClassInfo.className}.${nodeName}`
-                : // A member whose owner is named by the assignment rather than
-                  // by an enclosing container (`Foo.prototype.bar = …`) qualifies
-                  // by that owner, so two constructors in one file that both
-                  // define `bar` stay distinct nodes.
-                  objectLiteralOwnerInfo?.ownerName !== undefined
-                  ? `${objectLiteralOwnerInfo.ownerName}.${nodeName}`
-                  : isArrayContainedObjectCallable
-                    ? positionQualifiedCallableName(nodeName, startPosition)
-                    : nodeName;
+        inferredFunction?.identityName === null && definitionNode
+          ? callableOwnQualifiedName(definitionNode, file.path, provider)
+          : rustImplQualifiedName !== undefined
+            ? rustImplQualifiedName
+            : // #1991: LOCKSTEP — include Trait so a Ruby mixin module's qualified
+              // scope id keys the worker-path node, matching the sequential path.
+              (isClassLikeLabel || isQualifiableScopeLabel(nodeLabel)) &&
+                provider.classExtractor?.qualifiedNodeId === true &&
+                qualifiedTypeName !== undefined
+              ? qualifiedTypeName
+              : nestedCallablePrefix !== undefined && definitionNode
+                ? nestedCallableQualifiedName(nestedCallablePrefix, definitionNode, nodeName)
+                : enclosingClassInfo
+                  ? `${enclosingClassInfo.className}.${nodeName}`
+                  : // A member whose owner is named by the assignment rather than
+                    // by an enclosing container (`Foo.prototype.bar = …`) qualifies
+                    // by that owner, so two constructors in one file that both
+                    // define `bar` stay distinct nodes.
+                    objectLiteralOwnerInfo?.ownerName !== undefined
+                    ? `${objectLiteralOwnerInfo.ownerName}.${nodeName}`
+                    : isArrayContainedObjectCallable
+                      ? positionQualifiedCallableName(nodeName, startPosition)
+                      : nodeName;
 
       // #2742: qualify by the enclosing `mod` chain, so two same-named items at
       // different module depths in one file are DISTINCT nodes. Without this,
@@ -2810,16 +2689,24 @@ const processFileGroup = (
         }
       }
 
-      // Append #<paramCount> to owned callable IDs to disambiguate overloads.
-      // Top-level Function IDs stay stable; functions inside an owner may overload.
+      // Providers opt free functions into the same signature identity scheme
+      // used by owned callables. A signature stays stable when overloads are added.
+      const freeFunctionOverloads =
+        nodeLabel === 'Function' &&
+        enclosingClassId === null &&
+        provider.overloadsFreeFunctions === true;
       // When same-arity collisions exist, append ~type1,type2 for further disambiguation.
       const needsAritySuffix =
         nodeLabel === 'Method' ||
         nodeLabel === 'Constructor' ||
-        (nodeLabel === 'Function' && enclosingClassId !== null);
+        (nodeLabel === 'Function' && enclosingClassId !== null) ||
+        freeFunctionOverloads;
       let arityTag = needsAritySuffix && arityForId !== undefined ? `#${arityForId}` : '';
-      if (arityTag && defMethodMap && defMethodInfo) {
-        const groups = buildCollisionGroups(defMethodMap);
+      if (freeFunctionOverloads) {
+        const parameterTypes = methodProps.parameterTypes as string[] | undefined;
+        if (parameterTypes?.length) arityTag += `~${parameterTypes.join(',')}`;
+      } else if (arityTag && defMethodMap && defMethodInfo) {
+        const groups = getMethodCollisionGroups(defMethodMap);
         arityTag += typeTagForId(
           defMethodMap,
           nodeName,
@@ -2958,7 +2845,7 @@ const processFileGroup = (
                 filePath: file.path,
                 toolName: nodeName,
                 description: (dec.arg || description || '').slice(0, 200),
-                lineNumber: definitionNode.startPosition.row + lineOffset,
+                lineNumber: mapRow(definitionNode.startPosition.row),
                 handlerNodeId: nodeId,
               });
             }
@@ -2979,13 +2866,20 @@ const processFileGroup = (
               filePath: file.path,
               language,
             });
-            const info = fieldMap?.get(nodeName);
+            const info = selectFieldInfo(
+              fieldMap?.get(nodeName),
+              definitionNode.startPosition.row + 1,
+              definitionNode.startPosition.column,
+            );
             if (info) {
               declaredType = info.type ?? undefined;
               // Mutate methodProps BEFORE the `{...methodProps}` spread below —
               // rawDeclaredType is the verbatim generic type text (U1, PR #2200).
               if (info.rawDeclaredType !== undefined) {
                 methodProps.rawDeclaredType = info.rawDeclaredType;
+              }
+              if (info.initializerType !== undefined) {
+                methodProps.initializerType = info.initializerType;
               }
               // Field annotations ('@Name' strings, U2 PR #2200) — omit when empty.
               if (info.annotations !== undefined && info.annotations.length > 0) {
@@ -3059,11 +2953,8 @@ const processFileGroup = (
           name: nodeName,
           filePath: file.path,
           startLine,
-          ...(shouldObjectOwnerQualifyCallable(nodeLabel) &&
-          (objectLiteralBindingInfo?.ownerName || isArrayContainedObjectCallable)
-            ? { startColumn }
-            : {}),
-          endLine: definitionNode ? definitionNode.endPosition.row + lineOffset : startLine,
+          ...(shouldObjectOwnerQualifyCallable(nodeLabel) ? { startColumn } : {}),
+          endLine: definitionNode ? mapRow(definitionNode.endPosition.row) : startLine,
           language: language,
           isExported,
           ...(qualifiedTypeName !== undefined ? { qualifiedName: qualifiedTypeName } : {}),
@@ -3085,6 +2976,11 @@ const processFileGroup = (
         }),
       });
 
+      // Keep actual emitted identities; providers must not reconstruct graph IDs.
+      if (nameNode && (nodeLabel === 'Function' || nodeLabel === 'Method')) {
+        callableBindings.set(nameNode.id, nodeId);
+      }
+
       // enclosingClassId already computed above (before nodeId generation)
       const ownerId = enclosingClassId ?? objectLiteralOwnerInfo?.ownerId;
 
@@ -3093,7 +2989,11 @@ const processFileGroup = (
         name: nodeName,
         nodeId,
         type: nodeLabel,
-        ...(qualifiedTypeName !== undefined ? { qualifiedName: qualifiedTypeName } : {}),
+        ...(qualifiedTypeName !== undefined
+          ? { qualifiedName: qualifiedTypeName }
+          : enclosingClassInfo && enclosingClassId === null
+            ? { qualifiedName }
+            : {}),
         parameterCount: methodProps.parameterCount as number | undefined,
         requiredParameterCount: methodProps.requiredParameterCount as number | undefined,
         parameterTypes: methodProps.parameterTypes as string[] | undefined,
@@ -3147,6 +3047,7 @@ const processFileGroup = (
         const fileId = generateId('File', file.path);
         const relId = generateId('DEFINES', `${fileId}->${nodeId}`);
         result.relationships.push({
+          originFilePath: file.path,
           id: relId,
           sourceId: fileId,
           targetId: nodeId,
@@ -3160,6 +3061,7 @@ const processFileGroup = (
       if (ownerId !== undefined) {
         const memberEdgeType = nodeLabel === 'Property' ? 'HAS_PROPERTY' : 'HAS_METHOD';
         result.relationships.push({
+          originFilePath: file.path,
           id: generateId(memberEdgeType, `${ownerId}->${nodeId}`),
           sourceId: ownerId,
           targetId: nodeId,
@@ -3171,20 +3073,49 @@ const processFileGroup = (
         });
       }
 
-      // ── Fetch wrapper detection: record functions that call fetch() internally ──
-      if (
-        nodeLabel === 'Function' &&
-        definitionNode &&
-        nameNode &&
-        (language === SupportedLanguages.TypeScript || language === SupportedLanguages.JavaScript)
-      ) {
-        if (checkForFetchCall(definitionNode)) {
-          result.fetchWrapperDefs.push({
-            filePath: file.path,
-            functionName: nameNode.text,
-          });
+      // ── Fetch wrapper detection: functions that call fetch() or forward their URL ──
+      if (nodeLabel === 'Function' && definitionNode && provider.extractFetchWrapperFacts) {
+        wrapperFunctions.push({ name: nodeName, node: definitionNode });
+        if (parsedFile && !httpFailed) {
+          try {
+            const facts = provider.extractFetchWrapperFacts(
+              definitionNode,
+              nameNode,
+              parsedFile,
+              lineOffset,
+            );
+            if (
+              facts &&
+              (facts.seed ||
+                facts.forwardsUrl ||
+                facts.forwardsTo.length > 0 ||
+                facts.moduleScope ||
+                facts.urlReturn !== undefined ||
+                (facts.urlArguments?.length ?? 0) > 0)
+            )
+              wrapperDefs.push({ filePath: file.path, functionName: nodeName, ...facts });
+          } catch (err) {
+            httpFailure(err);
+          }
         }
       }
+    }
+
+    if (provider.extractToolDefinitions) {
+      // Distinct lexical declarations can share a graph ID (for example, sibling
+      // block-scoped functions). Such IDs cannot prove which handler owns a tool.
+      const seenCallableIds = new Set<string>();
+      const ambiguousCallableIds = new Set<string>();
+      for (const nodeId of callableBindings.values()) {
+        if (seenCallableIds.has(nodeId)) ambiguousCallableIds.add(nodeId);
+        seenCallableIds.add(nodeId);
+      }
+      for (const [bindingId, nodeId] of callableBindings) {
+        if (ambiguousCallableIds.has(nodeId)) callableBindings.delete(bindingId);
+      }
+      result.toolDefs.push(
+        ...provider.extractToolDefinitions(tree, file.path, lineOffset, callableBindings),
+      );
     }
 
     // Extract framework routes via provider detection (e.g., Laravel routes.php)
@@ -3243,6 +3174,47 @@ const processFileGroup = (
       }
     }
 
+    if (parsedFile && !httpFailed) {
+      try {
+        const calls = provider.extractFetchWrapperCalls?.(tree, parsedFile, lineOffset);
+        const reexports = provider.extractFetchWrapperReexports?.(tree, parsedFile, lineOffset);
+        const routeFacts = provider.extractRouteFacts?.(tree, parsedFile, lineOffset);
+        for (const call of calls ?? []) {
+          // The wrapper call is a request site too (#3644): record the callable
+          // that holds it, as the direct fetch sites do.
+          const callNode = tree.rootNode.descendantForPosition(call.callPosition);
+          const callEnclosingId = requestEnclosingId(callNode);
+          (result.fetchWrapperCalls ??= []).push({ ...call, enclosingId: callEnclosingId });
+        }
+        for (const reexport of reexports ?? [])
+          (result.fetchWrapperReexports ??= []).push(reexport);
+        if (routeFacts)
+          (result.routeFacts ??= []).push({
+            filePath: file.path,
+            facts: routeFacts,
+            routePosition,
+          });
+      } catch (err) {
+        httpFailure(err);
+      }
+    }
+    if (parsedFile && !httpFailed) for (const def of wrapperDefs) result.fetchWrapperDefs.push(def);
+    else
+      // These records stand for unknown facts. With `seed` false and nothing
+      // forwarded they never prove a wrapper; they only make a name-only
+      // match, a barrel or an import that may reach this file decline.
+      for (const { name, node } of wrapperFunctions)
+        result.fetchWrapperDefs.push({
+          filePath: file.path,
+          functionName: name,
+          definitionId: `${file.path}:${node.startPosition.row + lineOffset + 1}:${node.startPosition.column}`,
+          moduleScope: true,
+          exportedNames: [name],
+          seed: false,
+          forwardsUrl: false,
+          forwardsTo: [],
+        });
+
     // Language-specific decorator route extraction via provider hook.
     // The provider's extractDecoratorRoutes walks the AST for framework-specific
     // route patterns (e.g., Java Spring class-level prefix joining). Routes are
@@ -3263,26 +3235,24 @@ const processFileGroup = (
     if (provider.synthesizeStructureMembers) {
       const synthetic = provider.synthesizeStructureMembers(tree, file.path, classOwnersByNodeId);
       for (const node of synthetic.nodes) {
-        result.nodes.push(node as ParsedNode);
+        result.nodes.push({
+          ...node,
+          properties: {
+            ...node.properties,
+            ...(typeof node.properties.startLine === 'number'
+              ? { startLine: mapRow(node.properties.startLine) }
+              : {}),
+            ...(typeof node.properties.endLine === 'number'
+              ? { endLine: mapRow(node.properties.endLine) }
+              : {}),
+          },
+        } as ParsedNode);
       }
       for (const sym of synthetic.symbols) {
         result.symbols.push(sym as ParsedSymbol);
       }
       for (const rel of synthetic.relationships) {
-        result.relationships.push(rel as ParsedRelationship);
-      }
-    }
-
-    // Vue: emit CALLS edges for components used in <template>
-    if (language === SupportedLanguages.Vue) {
-      const templateComponents = extractTemplateComponents(file.content);
-      for (const componentName of templateComponents) {
-        result.calls.push({
-          filePath: file.path,
-          calledName: componentName,
-          sourceId: generateId('File', file.path),
-          callForm: 'free',
-        });
+        result.relationships.push({ ...rel, originFilePath: file.path } as ParsedRelationship);
       }
     }
   }
@@ -3354,10 +3324,11 @@ const sharedContentDecoder = new TextDecoder('utf-8');
  * continued main-thread work.
  */
 function decodeSubBatchFiles(
-  files: Array<{ path: string; content: Uint8Array | string }>,
+  files: Array<{ path: string; content: Uint8Array | string; cacheKey?: string }>,
 ): ParseWorkerInput[] {
   return files.map((f) => ({
     path: f.path,
+    ...(f.cacheKey === undefined ? {} : { cacheKey: f.cacheKey }),
     // Test scaffolding (the writeReadyWorker preamble that wraps
     // parentPort.on) may already convert content to string before
     // calling here; tolerate both shapes so the same worker code
@@ -3376,16 +3347,88 @@ parentPort!.on('message', (msg: WorkerIncomingMessage) => {
     // Sub-batch mode: { type: 'sub-batch', files: [...] }
     if (msg.type === 'sub-batch') {
       const files = decodeSubBatchFiles(
-        msg.files as Array<{ path: string; content: Uint8Array | string }>,
+        msg.files as Array<{ path: string; content: Uint8Array | string; cacheKey?: string }>,
       );
-      const result = processBatch(files, (filesProcessed) => {
-        parentPort!.postMessage({
-          type: 'progress',
-          filesProcessed: cumulativeProcessed + filesProcessed,
+      if (FILE_RESULTS_ENABLED) {
+        // Scheduling remains batched. Extraction and encoding are file-local,
+        // so neither worker assignment nor a neighbour's edit changes ownership.
+        for (const file of files) {
+          const before = warningSequence;
+          const result = processBatch([file]);
+          const key = file.cacheKey;
+          if (typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)) {
+            throw new Error(`Missing per-file parser identity for ${file.path}`);
+          }
+          let encoded: EncodedFileResult | undefined;
+          try {
+            const facts = encodeFileResultSection(key, file.path, 'facts', {
+              ...result,
+              parsedFiles: [],
+            });
+            const scopes = encodeFileResultSection(key, file.path, 'scopes', result.parsedFiles);
+            if (facts && scopes)
+              encoded = {
+                key,
+                path: file.path,
+                facts,
+                scopes,
+                cacheable:
+                  before === warningSequence &&
+                  result.fileCount === 1 &&
+                  !result.scopeExtractionFailures?.length &&
+                  !result.skippedPaths?.length &&
+                  Object.keys(result.skippedLanguages).length === 0,
+              };
+          } catch {
+            /* Optional encoding: deliver the original result uncached. */
+          }
+          if (!encoded) {
+            // Preserve the existing clone-recovery policy for this file before
+            // nesting its uncached fallback; partial scope objects are dropped.
+            const { skipped } = makeWorkerResultCloneSafe(
+              result as unknown as Record<string, unknown>,
+              {
+                dropWholeElement: new Set(['parsedFiles']),
+                skipFields: new Set(['skippedPaths']),
+              },
+            );
+            if (skipped.length) {
+              if (process.env.GITNEXUS_STRICT_CLONE === '1') {
+                throw new Error(
+                  `GITNEXUS_STRICT_CLONE: ${skipped.map((s) => `${s.path}: ${s.reason}`).join('; ')}`,
+                );
+              }
+              result.skippedPaths = [...(result.skippedPaths ?? []), ...skipped];
+              reportWarning(
+                `Sanitized uncached output for ${file.path}: ${skipped.map((s) => s.reason).join('; ')}`,
+              );
+            }
+          }
+          // Retain diagnostics on the ordinary result channel. Consumers can
+          // report skips without deserializing all encoded graph facts.
+          const telemetry = processBatch([]);
+          telemetry.fileCount = result.fileCount;
+          telemetry.skippedLanguages = result.skippedLanguages;
+          telemetry.cfgSkipped = result.cfgSkipped;
+          telemetry.skippedPaths = result.skippedPaths;
+          telemetry.scopeExtractionFailures = result.scopeExtractionFailures;
+          telemetry.fileResults = [
+            encoded ? { key, path: file.path, encoded } : { key, path: file.path, raw: result },
+          ];
+          mergeResult(accumulated, telemetry);
+          cumulativeProcessed += result.fileCount;
+          parentPort!.postMessage({ type: 'progress', filesProcessed: cumulativeProcessed });
+        }
+      } else {
+        const result = processBatch(files, (filesProcessed) => {
+          parentPort!.postMessage({
+            type: 'progress',
+            filesProcessed: cumulativeProcessed + filesProcessed,
+          });
         });
-      });
-      cumulativeProcessed += result.fileCount;
-      mergeResult(accumulated, result);
+        cumulativeProcessed += result.fileCount;
+        mergeResult(accumulated, result);
+      }
       // Signal ready for next sub-batch
       parentPort!.postMessage({ type: 'sub-batch-done' });
       return;

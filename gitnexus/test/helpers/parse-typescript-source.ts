@@ -30,10 +30,8 @@ export interface ParsedSource {
 
 const PARSE_PLUGINS: NonNullable<Parameters<typeof parse>[1]>['plugins'] = [
   'typescript',
-  'explicitResourceManagement',
-  'importAttributes',
   'decoratorAutoAccessors',
-  ['decorators', { decoratorsBeforeExport: true }],
+  'decorators',
 ];
 
 export function forEachChild(node: Node, visit: (child: AstNode) => void): void {
@@ -94,7 +92,7 @@ export function parseTypeScript(fileName: string, source: string): ParsedSource 
   const ast = parse(source, {
     sourceFilename: fileName,
     sourceType: 'unambiguous',
-    plugins: PARSE_PLUGINS,
+    plugins: /\.[jt]sx$/i.test(fileName) ? [...PARSE_PLUGINS, 'jsx'] : PARSE_PLUGINS,
     errorRecovery: true,
     attachComment: true,
     ranges: true,

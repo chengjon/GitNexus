@@ -12,8 +12,12 @@
  *    separator (with an equality arm for a path that IS the indexed value).
  *  - The per-file `[lo, hi]` bound is evaluated by the engine, in the graph's
  *    0-based line space (#2377, #2915).
+ *  - A node whose id is empty is a row the engine really returns (#3931). The
+ *    unit suite hands such a row to the JS check directly; only here does the
+ *    query text decide whether the check ever sees it.
  */
 import { it, expect, beforeAll, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
@@ -58,8 +62,11 @@ function makeWorkingCopy(): string {
 /** The fields these tests read off one `detect_changes` run. */
 type DetectChangesResult = {
   error?: unknown;
-  summary: { changed_count: number };
+  summary: { changed_count: number; risk_level: string };
   changed_symbols: { name: string; filePath: string }[];
+  affected_processes?: unknown[];
+  partial?: boolean;
+  unmapped_files?: string[];
 };
 
 withTestLbugDB(
@@ -115,6 +122,148 @@ withTestLbugDB(
       const backend = new LocalBackend();
       await backend.init();
       (handle as typeof handle & { _backend?: LocalBackend })._backend = backend;
+    },
+  },
+);
+
+withTestLbugDB(
+  'detect-changes-unindexed-sibling',
+  (handle) => {
+    it('does not certify a new root index.ts from an indexed pkg/index.ts suffix match', async () => {
+      const backend = (handle as typeof handle & { _backend: LocalBackend })._backend;
+      const result = (await backend.callTool('detect_changes', {
+        scope: 'staged',
+      })) as DetectChangesResult;
+      expect(result.error).toBeUndefined();
+      // The fallback remains visible, but cannot certify the identity of the new file.
+      expect(result.changed_symbols).toEqual([
+        expect.objectContaining({ name: 'helper', filePath: 'pkg/index.ts' }),
+      ]);
+      expect(result.summary.risk_level).toBe('unknown');
+      expect(result.partial).toBe(true);
+      expect(result.unmapped_files).toEqual(['index.ts']);
+    });
+  },
+  {
+    seed: [
+      "CREATE (fn:Function {id: 'Function:pkg/index.ts:helper', name: 'helper', filePath: 'pkg/index.ts', startLine: 0, endLine: 1, isExported: true})",
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      const repoDir = tempDirs.dir();
+      mkdirSync(path.join(repoDir, 'pkg'), { recursive: true });
+      writeFileSync(path.join(repoDir, 'pkg/index.ts'), 'export function helper() {\n}\n');
+      initGitRepo(repoDir);
+      commitAll(repoDir, 'indexed sibling');
+      writeFileSync(path.join(repoDir, 'index.ts'), 'export function added() {\n}\n');
+      execFileSync('git', ['add', 'index.ts'], { cwd: repoDir });
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'sibling-repo',
+          path: repoDir,
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc1234',
+          stats: { files: 1, nodes: 1, edges: 0, communities: 0, processes: 0 },
+        },
+      ]);
+      const backend = new LocalBackend();
+      await backend.init();
+      (handle as typeof handle & { _backend: LocalBackend })._backend = backend;
+    },
+  },
+);
+
+/** Registers `repoDir` as the one indexed repo and hands back a ready backend. */
+async function backendFor(
+  repoDir: string,
+  storagePath: string,
+  nodes: number,
+): Promise<LocalBackend> {
+  vi.mocked(listRegisteredRepos).mockResolvedValue([
+    {
+      name: 'identity-repo',
+      path: repoDir,
+      storagePath,
+      indexedAt: new Date().toISOString(),
+      lastCommit: 'abc1234',
+      stats: { files: 2, nodes, edges: 0, communities: 0, processes: 0 },
+    },
+  ]);
+  const backend = new LocalBackend();
+  await backend.init();
+  return backend;
+}
+
+withTestLbugDB(
+  'detect-changes-corrupt-identity',
+  (handle) => {
+    it('omits an empty-id node beside a valid symbol and withholds the verdict (#3931)', async () => {
+      const backend = (handle as typeof handle & { _backend: LocalBackend })._backend;
+      const result = (await backend.callTool('detect_changes', {
+        scope: 'unstaged',
+      })) as DetectChangesResult;
+      expect(result.error).toBeUndefined();
+      // `ghost` (id '') overlaps the same hunk as `a`. It is not listed, it
+      // does not pull in the process an unrelated empty-id node belongs to,
+      // and the file being mapped by `a` does not make the result complete.
+      expect(result.changed_symbols.map((s) => s.name)).toEqual(['a']);
+      expect(result.affected_processes).toEqual([]);
+      expect(result.unmapped_files).toBeUndefined();
+      expect(result.partial).toBe(true);
+      expect(result.summary.risk_level).toBe('unknown');
+    });
+  },
+  {
+    seed: [
+      `CREATE (fn:Function {id: 'Function:lib/a.py:a', name: 'a', filePath: 'lib/a.py', startLine: 0, endLine: 1, isExported: true})`,
+      `CREATE (m:Method {id: '', name: 'ghost', filePath: 'lib/a.py', startLine: 0, endLine: 1, isExported: true})`,
+      // One empty id per table is all a primary key allows; a second table
+      // supplies the unrelated endpoint the bare '' used to join to.
+      `CREATE (c:Class {id: '', name: 'Elsewhere', filePath: 'other/b.py', startLine: 0, endLine: 9, isExported: true})`,
+      `CREATE (p:Process {id: 'proc-unrelated', label: 'Unrelated', heuristicLabel: 'Unrelated', processType: 'cross_community', stepCount: 3, communities: []})`,
+      `MATCH (c:Class {id: ''}), (p:Process {id: 'proc-unrelated'}) CREATE (c)-[:CodeRelation {type: 'STEP_IN_PROCESS', confidence: 1.0, reason: 'trace-detection', step: 2}]->(p)`,
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      (handle as typeof handle & { _backend: LocalBackend })._backend = await backendFor(
+        makeWorkingCopy(),
+        handle.tmpHandle.dbPath,
+        4,
+      );
+    },
+  },
+);
+
+withTestLbugDB(
+  'detect-changes-corrupt-exact-row',
+  (handle) => {
+    it('keeps the suffix fallback closed when the only exact-path row has an empty id', async () => {
+      const backend = (handle as typeof handle & { _backend: LocalBackend })._backend;
+      const result = (await backend.callTool('detect_changes', {
+        scope: 'unstaged',
+      })) as DetectChangesResult;
+      expect(result.error).toBeUndefined();
+      // The corrupt row proves the index knows `lib/a.py`, so `pkg/lib/a.py`
+      // must not answer for it; nothing usable is left to report.
+      expect(result.changed_symbols).toEqual([]);
+      expect(result.unmapped_files).toEqual(['lib/a.py']);
+      expect(result.partial).toBe(true);
+      expect(result.summary.risk_level).toBe('unknown');
+    });
+  },
+  {
+    seed: [
+      `CREATE (m:Method {id: '', name: 'ghost', filePath: 'lib/a.py', startLine: 0, endLine: 1, isExported: true})`,
+      `CREATE (fn:Function {id: 'Function:pkg/lib/a.py:sibling', name: 'sibling', filePath: 'pkg/lib/a.py', startLine: 0, endLine: 1, isExported: true})`,
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      (handle as typeof handle & { _backend: LocalBackend })._backend = await backendFor(
+        makeWorkingCopy(),
+        handle.tmpHandle.dbPath,
+        2,
+      );
     },
   },
 );

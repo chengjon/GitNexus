@@ -1,0 +1,1281 @@
+import { summarizeUnresolvedOverloads } from '../../src/core/ingestion/scope-resolution/unresolved-overloads.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import * as integrityModule from '../../src/core/graph/relationship-integrity.js';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { runFullAnalysis } from '../../src/core/run-analyze.js';
+import { runPipelineFromRepo } from '../../src/core/ingestion/pipeline.js';
+import { resolveAnalysisResourceBudget } from '../../src/core/analysis-resource-budget.js';
+import { loadMeta } from '../../src/storage/repo-manager.js';
+import lbug from '@ladybugdb/core';
+import * as adapter from '../../src/core/lbug/lbug-adapter.js';
+import { executeParameterized } from '../../src/core/lbug/pool-adapter.js';
+import { closeQueryResults } from '../../src/core/lbug/query-result-utils.js';
+import { LocalBackend, VALID_NODE_LABELS } from '../../src/mcp/local/local-backend.js';
+import { retryRename } from '../../src/storage/fs-atomic.js';
+import { getStoragePaths, registerRepo, saveMeta } from '../../src/storage/repo-manager.js';
+import { createTempDir } from '../helpers/test-db.js';
+import { distWorkerExists } from '../helpers/worker-parse.js';
+
+const REPO = 'query-integrity';
+const itIfWorkerBuilt = distWorkerExists() ? it : it.skip;
+const describeIfWorkerBuilt = distWorkerExists() ? describe : describe.skip;
+
+itIfWorkerBuilt(
+  'retains nested calls sharing a start position when their full source spans differ',
+  async () => {
+    const temp = await createTempDir();
+    try {
+      await fs.writeFile(
+        path.join(temp.dbPath, 'sample.ts'),
+        'export class Service { ping(): Service { return this; } }\n' +
+          'export function caller(service: Service) {\n  service.ping().ping();\n}\n',
+      );
+      const result = await runPipelineFromRepo(temp.dbPath, () => {}, {
+        skipGraphPhases: true,
+        workerPoolSize: 1,
+      });
+      const calls = result.graph.relationships.filter((r) => r.type === 'CALLS');
+      expect(calls).toHaveLength(2);
+      expect(new Set(calls.map((r) => `${r.sourceId}->${r.targetId}`)).size).toBe(1);
+      expect(
+        calls.map((r) => r.id.slice(r.id.lastIndexOf(r.targetId) + r.targetId.length)).sort(),
+      ).toEqual([':3:2:3:16', ':3:2:3:23']);
+      expect(result.relationshipIntegrity).toMatchObject({ unverifiedEdges: 0 });
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+
+describeIfWorkerBuilt.each([false, true])(
+  'source-site integrity across indexing (streaming=%s)',
+  (streamGraphEmit) => {
+    it('preserves source sites, replaces receipts, and never accumulates edges on warm/repeated runs', async () => {
+      const temp = await createTempDir();
+      vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+      vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, '.gitnexus'));
+      vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+      let backend: LocalBackend | undefined;
+      const git = (...args: string[]) =>
+        execFileSync('git', args, { cwd: temp.dbPath, stdio: 'pipe' });
+      const writeSource = async (count: number) => {
+        await fs.writeFile(
+          path.join(temp.dbPath, 'sample.ts'),
+          [
+            'export class Service { ping() { return 1; } }',
+            'export function caller(service: Service) {',
+            `  ${Array.from({ length: count }, () => 'service.ping();').join(' ')}`,
+            '}',
+            '',
+          ].join('\n'),
+        );
+        git('add', 'sample.ts');
+        git(
+          '-c',
+          'user.name=test',
+          '-c',
+          'user.email=t@t',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '-qm',
+          `calls ${count}`,
+        );
+      };
+      const options = {
+        skipAgentsMd: true,
+        skipSkills: true,
+        skipFts: true,
+        streamGraphEmit,
+        resources: resolveAnalysisResourceBudget({
+          effectiveMemoryBytes: 4 * 1024 ** 3,
+          availableCpus: 2,
+          totalMb: 2048,
+          workers: 1,
+          graphPoolBytes: 128 * 1024 ** 2,
+          modelMemoryMb: 0,
+        }),
+      };
+      const inspect = async (count: number) => {
+        const meta = await loadMeta(getStoragePaths(temp.dbPath).storagePath);
+        expect(meta?.relationshipIntegrity?.checkedSites).toBeGreaterThanOrEqual(count);
+        await registerRepo(temp.dbPath, meta!, { name: REPO });
+        backend = new LocalBackend();
+        await backend.init();
+        const refs = await backend.callTool('cypher', {
+          repo: temp.dbPath,
+          statement:
+            "MATCH (a:Function {name: 'caller'})-[r:CodeRelation {type: 'CALLS'}]->(b:Method {name: 'ping'}) RETURN r",
+        });
+        expect(refs.row_count).toBe(count);
+        expect(refs.graph_integrity).toMatchObject({
+          checkedSites: meta!.relationshipIntegrity!.checkedSites,
+        });
+        const context = await backend.callTool('context', {
+          repo: temp.dbPath,
+          name: 'ping',
+          file_path: 'sample.ts',
+        });
+        expect(context.incoming.calls).toHaveLength(1);
+        expect(context.graph_integrity).toMatchObject({
+          scope: 'source-reference-ingestion',
+          checkedSites: meta!.relationshipIntegrity!.checkedSites,
+        });
+        const query = await backend.callTool('query', {
+          repo: temp.dbPath,
+          search_query: 'ping',
+        });
+        expect(query.error).toBeUndefined();
+        expect(query.graph_integrity).toEqual(context.graph_integrity);
+        const impact = await backend.callTool('impact', {
+          repo: temp.dbPath,
+          target: 'ping',
+          direction: 'upstream',
+        });
+        expect(impact.error).toBeUndefined();
+        expect(impact.target.name).toBe('ping');
+        expect(impact.graph_integrity).toEqual(context.graph_integrity);
+        await backend.dispose();
+        backend = undefined;
+        return meta!.relationshipIntegrity;
+      };
+      try {
+        git('init', '-q');
+        await fs.appendFile(
+          path.join(temp.dbPath, '.git', 'info', 'exclude'),
+          '\nhome/\n.gitnexus/\n',
+        );
+        await writeSource(2);
+        const cold = await runFullAnalysis(
+          temp.dbPath,
+          { ...options, force: streamGraphEmit },
+          { onProgress() {} },
+        );
+        expect(cold.pipelineResult?.reparsedFileCount).toBeGreaterThan(0);
+        expect(Boolean(cold.pipelineResult?.graphEmitManifest)).toBe(streamGraphEmit);
+        const firstReceipt = await inspect(2);
+        // Inject an impossible emitted identity, independent of working-tree edits.
+        const createCollector = integrityModule.createRelationshipIntegrityCollector;
+        const brokenSource = vi
+          .spyOn(integrityModule, 'createRelationshipIntegrityCollector')
+          .mockImplementation((...args) => {
+            const collector = createCollector(...args);
+            return {
+              ...collector,
+              inspect: (rel, duplicate, conflict) =>
+                collector.inspect(
+                  rel.type === 'CALLS' ? { ...rel, id: 'rel:CALLS:wrong->endpoints:1:0:1:1' } : rel,
+                  duplicate,
+                  conflict,
+                ),
+            };
+          });
+        try {
+          await expect(
+            runFullAnalysis(temp.dbPath, { ...options, force: true }, { onProgress() {} }),
+          ).rejects.toThrow(/Invalid graph reference/);
+        } finally {
+          brokenSource.mockRestore();
+        }
+        expect(await inspect(2)).toEqual(firstReceipt);
+        const warm = await runFullAnalysis(
+          temp.dbPath,
+          { ...options, force: true },
+          { onProgress() {} },
+        );
+        expect(warm.pipelineResult?.parseCacheHitFileCount).toBeGreaterThan(0);
+        expect(warm.pipelineResult?.reparsedFileCount).toBe(0);
+        expect(await inspect(2)).toEqual(firstReceipt);
+        await writeSource(3);
+        const changed = await runFullAnalysis(
+          temp.dbPath,
+          { ...options, force: streamGraphEmit },
+          { onProgress() {} },
+        );
+        expect(Boolean(changed.pipelineResult?.graphEmitManifest)).toBe(streamGraphEmit);
+        const changedReceipt = await inspect(3);
+        expect(changedReceipt!.checkedSites).toBeGreaterThan(firstReceipt!.checkedSites);
+        const unchanged = await runFullAnalysis(temp.dbPath, options, { onProgress() {} });
+        expect(unchanged.alreadyUpToDate).toBe(true);
+        expect(await inspect(3)).toEqual(changedReceipt);
+      } finally {
+        await backend?.dispose();
+        await adapter.closeLbug();
+        vi.unstubAllEnvs();
+        await temp.cleanup();
+      }
+    }, 300_000);
+  },
+);
+
+describe('context distinct reference windows (#3500)', () => {
+  let temp: Awaited<ReturnType<typeof createTempDir>>;
+  let backend: LocalBackend;
+  const focus = 'Function:src/focus.ts:focus';
+  const first = 'Function:src/a.ts:first';
+  const last = 'Function:src/z.ts:last';
+  const bounded = 'Function:src/bounded.ts:bounded';
+  const neighbors = Array.from({ length: 35 }, (_, i) => `neighbor${String(i).padStart(2, '0')}`);
+  const classes = [
+    ['ConstructorTarget', 'Constructor', 'CALLS'],
+    ['FileTarget', 'File', 'IMPORTS'],
+    ['PropertyTarget', 'Property', 'ACCESSES'],
+  ] as const;
+
+  beforeAll(async () => {
+    temp = await createTempDir();
+    vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+    vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, 'index'));
+    vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+    const paths = getStoragePaths(temp.dbPath);
+    await adapter.initLbug(paths.lbugPath);
+    try {
+      for (const [id, name] of [
+        [focus, 'focus'],
+        [first, 'first'],
+        [last, 'last'],
+      ]) {
+        await adapter.executeQuery(
+          `CREATE (:Function {id: '${id}', name: '${name}', filePath: '${id.split(':')[1]}', startLine: 1, endLine: 3})`,
+        );
+      }
+      // More than one page of call sites to the same neighbor must consume
+      // only one reference slot. Both directions and advice have their own windows.
+      for (const type of ['CALLS', 'ADVISED_BY']) {
+        for (const [source, target, count] of [
+          [first, focus, 35],
+          [last, focus, 1],
+          [focus, first, 35],
+          [focus, last, 1],
+        ]) {
+          await adapter.executeQuery(
+            `MATCH (a:Function {id: '${source}'}), (b:Function {id: '${target}'})
+             UNWIND range(1, ${count}) AS site
+             CREATE (a)-[:CodeRelation {type: '${type}', confidence: 1.0, step: site}]->(b)`,
+          );
+        }
+      }
+      for (const [source, target] of [
+        [first, focus],
+        [focus, first],
+      ]) {
+        await adapter.executeQuery(
+          `MATCH (a:Function {id: '${source}'}), (b:Function {id: '${target}'})
+           CREATE (a)-[:CodeRelation {type: 'ACCESSES', confidence: 1.0}]->(b)`,
+        );
+      }
+      for (const name of ['bounded', ...neighbors]) {
+        await adapter.executeQuery(
+          `CREATE (:Function {id: 'Function:src/bounded.ts:${name}', name: '${name}', filePath: 'src/bounded.ts', startLine: 1, endLine: 3})`,
+        );
+      }
+      for (const type of ['CALLS', 'ADVISED_BY']) {
+        await adapter.executeQuery(
+          `MATCH (a:Function {id: '${bounded}'}), (b:Function)
+           WHERE b.id STARTS WITH 'Function:src/bounded.ts:neighbor'
+           UNWIND range(1, 2) AS site
+           CREATE (a)-[:CodeRelation {type: '${type}', confidence: 1.0, step: site}]->(b),
+                  (b)-[:CodeRelation {type: '${type}', confidence: 1.0, step: site}]->(a)`,
+        );
+      }
+      for (const [name, label, type] of classes) {
+        await adapter.executeQuery(
+          `CREATE (:Class {id: 'Class:src/types.ts:${name}', name: '${name}', filePath: 'src/types.ts', startLine: 1, endLine: 3})`,
+        );
+        await adapter.executeQuery(
+          `CREATE (:\`${label}\` {id: '${label}:src/types.ts${label === 'File' ? '' : `:${name}`}', name: '${name}', filePath: 'src/types.ts'${label === 'Property' ? `, declaredType: '${name}'` : ''}})`,
+        );
+        if (label !== 'Property') {
+          await adapter.executeQuery(
+            `MATCH (c:Class {name: '${name}'}), (n:\`${label}\` {name: '${name}'})
+             CREATE ${label === 'File' ? "(n)-[:CodeRelation {type: 'DEFINES'}]->(c)" : "(c)-[:CodeRelation {type: 'HAS_METHOD'}]->(n)"}`,
+          );
+        }
+        for (const [caller, count] of [
+          [first, 35],
+          [last, 1],
+        ]) {
+          await adapter.executeQuery(
+            `MATCH (a:Function {id: '${caller}'}), (b:\`${label}\` {name: '${name}'})
+             UNWIND range(1, ${count}) AS site
+             CREATE (a)-[:CodeRelation {type: '${type}', confidence: 1.0, step: site}]->(b)`,
+          );
+        }
+      }
+      await adapter.flushWAL();
+    } finally {
+      await adapter.closeLbug();
+    }
+    const meta = {
+      repoPath: temp.dbPath,
+      storagePath: paths.storagePath,
+      lastCommit: 'distinct-reference-fixture',
+      indexedAt: new Date().toISOString(),
+      scopeExtractionReceipt: 1 as const,
+      stats: { files: 5, nodes: 45, processes: 0, communities: 0 },
+    };
+    await saveMeta(paths.storagePath, meta);
+    await registerRepo(temp.dbPath, meta, { name: REPO });
+    backend = new LocalBackend();
+    expect(await backend.init()).toBe(true);
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.dispose();
+    } finally {
+      await adapter.closeLbug();
+      vi.unstubAllEnvs();
+      await temp?.cleanup();
+    }
+  });
+
+  it.each(['incoming', 'outgoing'] as const)(
+    'keeps distinct %s references before the row limit without merging relation types',
+    async (direction) => {
+      const result = await backend.callTool('context', { repo: REPO, uid: focus });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe('found');
+      expect(result.graph_integrity).toMatchObject({ status: 'unverified' });
+      const refs = result[direction];
+      expect(refs.calls.map((ref: ContextRef) => ref.uid)).toEqual([first, last]);
+      expect(refs.accesses.map((ref: ContextRef) => ref.uid)).toEqual([first]);
+    },
+  );
+
+  it.each(['incoming', 'outgoing'] as const)(
+    'keeps distinct %s advice references',
+    async (direction) => {
+      const result = await backend.callTool('context', { repo: REPO, uid: focus });
+      expect(result.error).toBeUndefined();
+      expect(result[direction].advised_by.map((ref: ContextRef) => ref.uid)).toEqual([first, last]);
+    },
+  );
+
+  it.each(classes)('keeps distinct callers through the %s bridge', async (name, _label, type) => {
+    const result = await backend.callTool('context', {
+      repo: REPO,
+      uid: `Class:src/types.ts:${name}`,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe('found');
+    expect(result.incoming[type.toLowerCase()].map((ref: ContextRef) => ref.uid)).toEqual([
+      first,
+      last,
+    ]);
+  });
+
+  it.each(['incoming', 'outgoing'] as const)(
+    'still caps each %s reference window at 30 distinct entries in UID order',
+    async (direction) => {
+      const result = await backend.callTool('context', { repo: REPO, uid: bounded });
+      expect(result.error).toBeUndefined();
+      const expected = neighbors.slice(0, 30).map((name) => `Function:src/bounded.ts:${name}`);
+      expect(result[direction].calls.map((ref: ContextRef) => ref.uid)).toEqual(expected);
+      expect(result[direction].advised_by.map((ref: ContextRef) => ref.uid)).toEqual(expected);
+    },
+  );
+});
+
+it('keeps native context references when the resolved label is unavailable', async () => {
+  const temp = await createTempDir();
+  vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+  vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, 'index'));
+  vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+  const paths = getStoragePaths(temp.dbPath);
+  const target = 'Property:src/unknown.ts:target';
+  const caller = 'Function:src/a.ts:caller';
+  let backend: LocalBackend | undefined;
+  try {
+    await adapter.initLbug(paths.lbugPath);
+    await adapter.executeQuery(
+      `CREATE (:Property {id: '${target}', name: 'target', filePath: 'src/unknown.ts'})`,
+    );
+    await adapter.executeQuery(
+      `CREATE (:Function {id: '${caller}', name: 'caller', filePath: 'src/a.ts'})`,
+    );
+    await adapter.executeQuery(
+      `MATCH (a:Function {id: '${caller}'}), (b:Property {id: '${target}'})
+       UNWIND range(1, 35) AS site
+       CREATE (a)-[:CodeRelation {type: 'CALLS', step: site}]->(b),
+              (b)-[:CodeRelation {type: 'CALLS', step: site}]->(a)`,
+    );
+    await adapter.flushWAL();
+    await adapter.closeLbug();
+    const meta = {
+      repoPath: temp.dbPath,
+      storagePath: paths.storagePath,
+      lastCommit: 'unknown-label-fixture',
+      indexedAt: new Date().toISOString(),
+      scopeExtractionReceipt: 1 as const,
+      stats: { files: 2, nodes: 2, processes: 0, communities: 0 },
+    };
+    await saveMeta(paths.storagePath, meta);
+    await registerRepo(temp.dbPath, meta, { name: REPO });
+    backend = new LocalBackend();
+    expect(await backend.init()).toBe(true);
+    const result = await backend.callTool('context', { repo: REPO, uid: target });
+    expect(result.error).toBeUndefined();
+    expect(VALID_NODE_LABELS.has(result.symbol.kind)).toBe(false);
+    expect(result.incoming.calls.map((ref: ContextRef) => ref.uid)).toEqual([caller]);
+    expect(result.outgoing.calls.map((ref: ContextRef) => ref.uid)).toEqual([caller]);
+  } finally {
+    await backend?.dispose();
+    await adapter.closeLbug();
+    vi.unstubAllEnvs();
+    await temp.cleanup();
+  }
+});
+
+describe.each(['current', 'without staticGated'] as const)('native impact schema: %s', (schema) => {
+  let temp: Awaited<ReturnType<typeof createTempDir>>;
+  let backend: LocalBackend;
+  let lbugPath: string;
+
+  beforeAll(async () => {
+    temp = await createTempDir();
+    vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+    vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, 'index'));
+    vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+    const paths = getStoragePaths(temp.dbPath);
+    lbugPath = paths.lbugPath;
+    await adapter.initLbug(lbugPath);
+    try {
+      for (const name of ['target', 'caller', 'root']) {
+        await adapter.executeQuery(
+          `CREATE (:Function {id: 'Function:src/${name}.ts:${name}', name: '${name}', filePath: 'src/${name}.ts', startLine: 1, endLine: 3})`,
+        );
+      }
+      for (const [caller, callee, gated] of [
+        ['caller', 'target', true],
+        ['root', 'caller', false],
+      ]) {
+        await adapter.executeQuery(
+          `MATCH (a:Function {name: '${caller}'}), (b:Function {name: '${callee}'}) CREATE (a)-[:CodeRelation {type: 'CALLS', confidence: 1.0, staticGated: ${gated}}]->(b)`,
+        );
+      }
+      if (schema === 'without staticGated') {
+        await adapter.executeQuery('ALTER TABLE CodeRelation DROP staticGated');
+      }
+      await adapter.flushWAL();
+    } finally {
+      await adapter.closeLbug();
+    }
+    const meta = {
+      repoPath: temp.dbPath,
+      storagePath: paths.storagePath,
+      lastCommit: 'legacy-fixture',
+      indexedAt: new Date().toISOString(),
+      scopeExtractionReceipt: 1 as const,
+      stats: { files: 3, nodes: 3, processes: 0, communities: 0 },
+    };
+    await saveMeta(paths.storagePath, meta);
+    await registerRepo(temp.dbPath, meta, { name: REPO });
+    backend = new LocalBackend();
+    expect(await backend.init()).toBe(true);
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.dispose();
+    } finally {
+      await adapter.closeLbug();
+      vi.unstubAllEnvs();
+      await temp?.cleanup();
+    }
+  });
+
+  it.each(['upstream', 'downstream'] as const)(
+    'walks two levels %s after a schema miss',
+    async (direction) => {
+      const result = await backend.callTool('impact', {
+        repo: REPO,
+        target: direction === 'upstream' ? 'target' : 'root',
+        direction,
+        maxDepth: 3,
+      });
+      if (schema === 'without staticGated') {
+        // The backend opens its pool lazily. Verify that a successful walk
+        // did not depend on adding the missing property to the database.
+        await expect(
+          executeParameterized(
+            lbugPath,
+            'MATCH ()-[r:CodeRelation]->() RETURN r.staticGated AS staticGated',
+            {},
+          ),
+        ).rejects.toThrow(/Cannot find property staticGated for r/);
+      }
+      expect(result).not.toHaveProperty('error');
+      expect(result).not.toHaveProperty('partial');
+      expect(result.impactedCount).toBe(2);
+      expect(result.byDepthCounts).toEqual({ 1: 1, 2: 1 });
+      expect(result.byDepth[1].map((item: any) => item.name)).toEqual(['caller']);
+      expect(result.byDepth[2].map((item: any) => item.name)).toEqual([
+        direction === 'upstream' ? 'root' : 'target',
+      ]);
+      const gatedDepth = direction === 'upstream' ? 1 : 2;
+      if (schema === 'current') expect(result.byDepth[gatedDepth][0].staticGated).toBe(true);
+      else {
+        for (const depth of [1, 2])
+          expect(result.byDepth[depth][0]).not.toHaveProperty('staticGated');
+      }
+    },
+  );
+});
+
+const nodes = {
+  alpha: { id: 'Function:src/alpha.ts:runSweep', name: 'runSweep', filePath: 'src/alpha.ts' },
+  alphaCaller: {
+    id: 'Function:src/α/caller.ts:appelÉ',
+    name: 'appelÉ',
+    filePath: 'src/α/caller.ts',
+  },
+  alphaOtherCaller: {
+    id: 'Function:src/other.ts:runOther',
+    name: 'runOther',
+    filePath: 'src/other.ts',
+  },
+  alphaRoot: { id: 'Function:src/root.ts:startSweep', name: 'startSweep', filePath: 'src/root.ts' },
+  alphaReader: {
+    id: 'Function:src/reader.ts:readSweep',
+    name: 'readSweep',
+    filePath: 'src/reader.ts',
+  },
+  beta: {
+    id: 'Function:src/beta.ts:extractLeadingNumber',
+    name: 'extractLeadingNumber',
+    filePath: 'src/beta.ts',
+  },
+  betaCaller: {
+    id: 'Function:src/number.ts:parseNumber',
+    name: 'parseNumber',
+    filePath: 'src/number.ts',
+  },
+  betaReader: {
+    id: 'Function:src/number-view.ts:readNumber',
+    name: 'readNumber',
+    filePath: 'src/number-view.ts',
+  },
+} as const;
+
+const processes = {
+  alpha: {
+    id: 'process:alpha',
+    label: 'Sweep flow',
+    entry: nodes.alphaRoot,
+    terminal: nodes.alpha,
+    stepCount: 3,
+  },
+  alphaOther: {
+    id: 'process:alpha-other',
+    label: 'Other sweep flow',
+    entry: nodes.alphaOtherCaller,
+    terminal: nodes.alpha,
+    stepCount: 2,
+  },
+  beta: {
+    id: 'process:beta',
+    label: 'Number flow',
+    entry: nodes.betaCaller,
+    terminal: nodes.beta,
+    stepCount: 2,
+  },
+} as const;
+
+type NodeIdentity = { id: string; name: string; filePath: string };
+type Membership = { id: string; label: string; processType: string; step: number };
+type ImpactRow = NodeIdentity & {
+  relationType: string;
+  confidence: number;
+  processes: Membership[];
+};
+type ContextRef = { uid: string; name: string; filePath: string };
+type Target = 'alpha' | 'beta';
+
+const membership = (
+  process: (typeof processes)[keyof typeof processes],
+  step: number,
+): Membership => ({
+  id: process.id,
+  label: process.label,
+  processType: 'intra_community',
+  step,
+});
+
+const affectedProcess = (process: (typeof processes)[keyof typeof processes], hits: number) => ({
+  name: process.entry.name,
+  type: 'Function',
+  filePath: process.entry.filePath,
+  affected_process_count: 1,
+  total_hits: hits,
+  earliest_broken_step: 0,
+});
+
+const oracle = {
+  alpha: {
+    count: 3,
+    direct: 2,
+    byDepth: {
+      1: [
+        {
+          ...nodes.alphaOtherCaller,
+          relationType: 'CALLS',
+          confidence: 1,
+          processes: [membership(processes.alphaOther, 0)],
+        },
+        {
+          ...nodes.alphaCaller,
+          relationType: 'CALLS',
+          confidence: 1,
+          processes: [membership(processes.alpha, 1)],
+        },
+      ],
+      2: [
+        {
+          ...nodes.alphaRoot,
+          relationType: 'CALLS',
+          confidence: 1,
+          processes: [membership(processes.alpha, 0)],
+        },
+      ],
+    },
+    callers: [nodes.alphaOtherCaller, nodes.alphaCaller],
+    accesses: [nodes.alphaReader],
+    processes: [
+      { id: processes.alpha.id, name: processes.alpha.label, step_index: 2, step_count: 3 },
+      {
+        id: processes.alphaOther.id,
+        name: processes.alphaOther.label,
+        step_index: 1,
+        step_count: 2,
+      },
+    ],
+    affectedProcesses: [
+      affectedProcess(processes.alpha, 2),
+      affectedProcess(processes.alphaOther, 1),
+    ],
+  },
+  beta: {
+    count: 1,
+    direct: 1,
+    byDepth: {
+      1: [
+        {
+          ...nodes.betaCaller,
+          relationType: 'CALLS',
+          confidence: 1,
+          processes: [membership(processes.beta, 0)],
+        },
+      ],
+    },
+    callers: [nodes.betaCaller],
+    accesses: [nodes.betaReader],
+    processes: [
+      { id: processes.beta.id, name: processes.beta.label, step_index: 1, step_count: 2 },
+    ],
+    affectedProcesses: [affectedProcess(processes.beta, 1)],
+  },
+} as const;
+
+// Compare the values returned by the native engine with a hand-written graph
+// oracle, rather than accepting a repeated (and potentially wrong) first result.
+function expectImpact(
+  result: Awaited<ReturnType<LocalBackend['callTool']>>,
+  target: Target,
+  summaryOnly: boolean,
+): void {
+  const expected = oracle[target];
+  expect(result).not.toHaveProperty('error');
+  expect(result).not.toHaveProperty('partial');
+  expect(result.target).toMatchObject(nodes[target]);
+  expect(result.direction).toBe('upstream');
+  expect(result.impactedCount).toBe(expected.count);
+  expect(result.risk).toBe('LOW');
+  expect(result.epistemic).toBe('exact');
+  expect(result.summary).toEqual({
+    direct: expected.direct,
+    processes_affected: expected.affectedProcesses.length,
+    modules_affected: 0,
+  });
+  expect(result.byDepthCounts).toEqual(target === 'alpha' ? { 1: 2, 2: 1 } : { 1: 1 });
+  expect(result.affected_processes).toEqual(expected.affectedProcesses);
+  expect(result.affected_modules).toEqual([]);
+  expect(result.affected_routes).toEqual([]);
+  if (summaryOnly) {
+    expect(result).not.toHaveProperty('byDepth');
+  } else {
+    const byDepth = Object.fromEntries(
+      Object.entries(result.byDepth).map(([depth, rows]) => [
+        depth,
+        (rows as ImpactRow[]).map(
+          ({ id, name, filePath, relationType, confidence, processes: memberships }) => ({
+            id,
+            name,
+            filePath,
+            relationType,
+            confidence,
+            processes: memberships,
+          }),
+        ),
+      ]),
+    );
+    expect(byDepth).toEqual(expected.byDepth);
+  }
+}
+
+function expectContext(
+  result: Awaited<ReturnType<LocalBackend['callTool']>>,
+  target: Target,
+): void {
+  const expected = oracle[target];
+  expect(result).not.toHaveProperty('error');
+  expect(result.status).toBe('found');
+  expect(result.symbol).toMatchObject({
+    uid: nodes[target].id,
+    name: nodes[target].name,
+    filePath: nodes[target].filePath,
+  });
+  expect(result.epistemic).toBe('exact');
+  const incoming = Object.fromEntries(
+    Object.entries(result.incoming).map(([type, refs]) => [
+      type,
+      (refs as ContextRef[]).map(({ uid, name, filePath }) => ({ id: uid, name, filePath })),
+    ]),
+  );
+  expect(incoming).toEqual({ calls: expected.callers, accesses: expected.accesses });
+  expect(result.outgoing).toEqual({});
+  expect(result.processes).toEqual(expected.processes);
+}
+
+function edge(source: NodeIdentity, target: NodeIdentity, type: 'CALLS' | 'ACCESSES'): string {
+  return `MATCH (a:Function {id: '${source.id}'}), (b:Function {id: '${target.id}'}) CREATE (a)-[:CodeRelation {type: '${type}', confidence: 1.0, reason: 'direct', step: 0}]->(b)`;
+}
+
+function processStep(
+  node: NodeIdentity,
+  process: (typeof processes)[keyof typeof processes],
+  step: number,
+): string {
+  return `MATCH (n:Function {id: '${node.id}'}), (p:Process {id: '${process.id}'}) CREATE (n)-[:CodeRelation {type: 'STEP_IN_PROCESS', confidence: 1.0, reason: 'trace-detection', step: ${step}}]->(p)`;
+}
+
+describe('native impact/context result integrity (#3354)', () => {
+  let temp: Awaited<ReturnType<typeof createTempDir>>;
+  let backend: LocalBackend;
+  let lbugPath: string;
+
+  beforeAll(async () => {
+    temp = await createTempDir();
+    vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+    vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, 'index'));
+    vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+    const paths = getStoragePaths(temp.dbPath);
+    lbugPath = paths.lbugPath;
+
+    // Close the writer before LocalBackend opens its ordinary read pool. No
+    // mocked registry or injected writable Database bypasses the read path.
+    await adapter.initLbug(lbugPath);
+    try {
+      const seed = [
+        ...Object.values(nodes).map(
+          (node) =>
+            `CREATE (:Function {id: '${node.id}', name: '${node.name}', filePath: '${node.filePath}', startLine: 1, endLine: 3})`,
+        ),
+        ...Object.values(processes).map(
+          (process) =>
+            `CREATE (:Process {id: '${process.id}', label: '${process.label}', heuristicLabel: '${process.label}', processType: 'intra_community', stepCount: ${process.stepCount}, communities: [], entryPointId: '${process.entry.id}', terminalId: '${process.terminal.id}'})`,
+        ),
+        edge(nodes.alphaCaller, nodes.alpha, 'CALLS'),
+        edge(nodes.alphaOtherCaller, nodes.alpha, 'CALLS'),
+        edge(nodes.alphaRoot, nodes.alphaCaller, 'CALLS'),
+        edge(nodes.alphaReader, nodes.alpha, 'ACCESSES'),
+        edge(nodes.betaCaller, nodes.beta, 'CALLS'),
+        edge(nodes.betaReader, nodes.beta, 'ACCESSES'),
+        processStep(nodes.alphaRoot, processes.alpha, 0),
+        processStep(nodes.alphaCaller, processes.alpha, 1),
+        processStep(nodes.alpha, processes.alpha, 2),
+        processStep(nodes.alphaOtherCaller, processes.alphaOther, 0),
+        processStep(nodes.alpha, processes.alphaOther, 1),
+        processStep(nodes.betaCaller, processes.beta, 0),
+        processStep(nodes.beta, processes.beta, 1),
+      ];
+      for (const query of seed) await adapter.executeQuery(query);
+      await adapter.flushWAL();
+    } finally {
+      await adapter.closeLbug();
+    }
+    const meta = {
+      repoPath: temp.dbPath,
+      storagePath: paths.storagePath,
+      lastCommit: 'integrity-fixture',
+      indexedAt: new Date().toISOString(),
+      scopeExtractionReceipt: 1 as const,
+      unresolvedOverloads: summarizeUnresolvedOverloads([]),
+      stats: { files: 8, nodes: 11, processes: 3, communities: 0 },
+    };
+    await saveMeta(paths.storagePath, meta);
+    await registerRepo(temp.dbPath, meta, { name: REPO });
+    backend = new LocalBackend();
+    expect(await backend.init()).toBe(true);
+  });
+
+  afterAll(async () => {
+    try {
+      await backend?.dispose();
+    } finally {
+      await adapter.closeLbug();
+      vi.unstubAllEnvs();
+      await temp?.cleanup();
+    }
+  });
+
+  const impact = (target: Target, summaryOnly = false) =>
+    backend.callTool('impact', {
+      repo: REPO,
+      target: nodes[target].name,
+      direction: 'upstream',
+      summaryOnly,
+    });
+  const context = (target: Target) =>
+    backend.callTool('context', { repo: REPO, uid: nodes[target].id });
+
+  it('returns exact values across identical sequential requests', async () => {
+    for (let repeat = 0; repeat < 6; repeat++) {
+      expectImpact(await impact('alpha', true), 'alpha', true);
+      expectContext(await context('alpha'), 'alpha');
+      expectImpact(await impact('alpha'), 'alpha', false);
+    }
+  });
+
+  it('keeps unrelated targets isolated across mixed requests', async () => {
+    for (const target of ['alpha', 'beta', 'beta', 'alpha'] as const) {
+      expectImpact(await impact(target, true), target, true);
+      expectContext(await context(target), target);
+      expectImpact(await impact(target), target, false);
+    }
+  });
+
+  it('keeps mixed concurrent prepared reads symbol-specific', async () => {
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const results = await Promise.all([
+        impact('alpha', true),
+        context('beta'),
+        impact('beta'),
+        impact('beta', true),
+        context('alpha'),
+        impact('alpha'),
+      ]);
+      expectImpact(results[0], 'alpha', true);
+      expectContext(results[1], 'beta');
+      expectImpact(results[2], 'beta', false);
+      expectImpact(results[3], 'beta', true);
+      expectContext(results[4], 'alpha');
+      expectImpact(results[5], 'alpha', false);
+    }
+  });
+
+  it('returns exact relation rows directly from the pooled prepared adapter', async () => {
+    // Warm the pool through the same backend, then check the native row
+    // boundary independently of the tool's normalization and aggregation.
+    expectContext(await context('alpha'), 'alpha');
+    const read = (target: Target) =>
+      executeParameterized(
+        lbugPath,
+        `
+      MATCH (caller:Function)-[r:CodeRelation]->(target:Function {id: $id})
+      WHERE r.type IN ['CALLS', 'ACCESSES']
+      RETURN caller.id AS id, caller.name AS name, caller.filePath AS filePath, r.type AS relationType
+      ORDER BY id
+    `,
+        { id: nodes[target].id },
+      );
+    const expectedRows = (target: Target) =>
+      [
+        ...oracle[target].callers.map((caller) => ({ ...caller, relationType: 'CALLS' })),
+        ...oracle[target].accesses.map((reader) => ({ ...reader, relationType: 'ACCESSES' })),
+      ].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (let repeat = 0; repeat < 4; repeat++) {
+      expect(await read('alpha')).toEqual(expectedRows('alpha'));
+      const [beta, alpha] = await Promise.all([read('beta'), read('alpha')]);
+      expect(beta).toEqual(expectedRows('beta'));
+      expect(alpha).toEqual(expectedRows('alpha'));
+    }
+  });
+});
+
+describe('native string projections after checkpointed deletion (#3354)', () => {
+  it('keeps long symbol identities associated with their source rows across segments', async () => {
+    const temp = await createTempDir();
+    const db = new lbug.Database(path.join(temp.dbPath, 'scan.lbug'), 128 * 1024 * 1024);
+    const conn = new lbug.Connection(db, 4);
+    const source = Array.from({ length: 10_000 }, (_, startLine) => ({
+      id: `Function:src/generated/rené-${String(startLine).padStart(5, '0')}.ts:fn${startLine}`,
+      name: `generated_function_${startLine}_é`,
+      filePath: `src/generated/rené-${String(startLine).padStart(5, '0')}.ts`,
+      startLine,
+    }));
+    const projection =
+      'RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine';
+    const read = async (query: string) => {
+      const result = await conn.query(query);
+      try {
+        const cursor = Array.isArray(result) ? result[0] : result;
+        return await cursor.getAll();
+      } finally {
+        await closeQueryResults(result);
+      }
+    };
+
+    try {
+      await read(
+        'CREATE NODE TABLE Function(id STRING, name STRING, filePath STRING, startLine INT64, PRIMARY KEY(id))',
+      );
+      // Separate checkpoints create segment boundaries inside scan vectors.
+      // LadybugDB 0.18.3's filtered STRING scan could retain another row's
+      // printable identities here (LadybugDB/ladybug#678, fixed by #737).
+      for (let batch = 0; batch < 4; batch++) {
+        const csvPath = path.join(temp.dbPath, `rows-${batch}.csv`);
+        const csv = source
+          .slice(batch * 2500, (batch + 1) * 2500)
+          .map((row) =>
+            Object.values(row)
+              .map((value) => JSON.stringify(value))
+              .join(','),
+          )
+          .join('\n');
+        await fs.writeFile(csvPath, `${csv}\n`);
+        await read(
+          `COPY Function FROM ${JSON.stringify(csvPath.replaceAll('\\', '/'))} (HEADER=false)`,
+        );
+        await read('CHECKPOINT');
+      }
+      expect(await read(`MATCH (n:Function) ${projection} ORDER BY n.startLine`)).toEqual(source);
+
+      await read(
+        'MATCH (n:Function) WHERE n.startLine >= 3000 AND n.startLine < 3400 DETACH DELETE n',
+      );
+      await read('CHECKPOINT');
+      const surviving = source.filter((row) => row.startLine < 3000 || row.startLine >= 3400);
+      for (let repeat = 0; repeat < 3; repeat++) {
+        for (const order of ['', ' ORDER BY n.startLine']) {
+          const rows = await read(`MATCH (n:Function) ${projection}${order}`);
+          expect(new Set(rows.map((row) => row.id)).size).toBe(surviving.length);
+          expect(
+            rows.sort((a, b) => {
+              if (typeof a.startLine !== 'number' || typeof b.startLine !== 'number') {
+                throw new Error('Expected numeric startLine values from the database');
+              }
+              return a.startLine - b.startLine;
+            }),
+          ).toEqual(surviving);
+        }
+      }
+      // Point lookups independently verify values in the affected segments;
+      // a repeatably wrong scan must never become the test's reference answer.
+      for (const startLine of [1600, 7486]) {
+        expect(
+          await read(`MATCH (n:Function {id: '${source[startLine].id}'}) ${projection}`),
+        ).toEqual([source[startLine]]);
+      }
+      expect(await read(`MATCH (n:Function {id: '${source[3000].id}'}) ${projection}`)).toEqual([]);
+    } finally {
+      try {
+        await conn.close();
+      } finally {
+        try {
+          await db.close();
+        } finally {
+          await temp.cleanup();
+        }
+      }
+    }
+  });
+});
+
+// Windows graph replacement is opt-in in production. The repeated-read
+// characterization above remains enabled there; only this POSIX swap is skipped.
+describe.skipIf(process.platform === 'win32')('warm backend index replacement (#3354)', () => {
+  it('reads changed callers, processes and a new symbol through the real freshness window', async () => {
+    const temp = await createTempDir();
+    let backend: LocalBackend | undefined;
+    vi.stubEnv('GITNEXUS_HOME', path.join(temp.dbPath, 'home'));
+    vi.stubEnv('GITNEXUS_STORAGE_PATH', path.join(temp.dbPath, 'index'));
+    vi.stubEnv('GITNEXUS_SHARED_STORE', 'off');
+    const paths = getStoragePaths(temp.dbPath);
+    const stagedPath = `${paths.lbugPath}.replacement`;
+    const replacement = {
+      entry: {
+        id: 'Function:src/replacement-entry.ts:startReplacement',
+        name: 'startReplacement',
+        filePath: 'src/replacement-entry.ts',
+      },
+      caller: {
+        id: 'Function:src/replacement-caller.ts:callReplacement',
+        name: 'callReplacement',
+        filePath: 'src/replacement-caller.ts',
+      },
+      reader: {
+        id: 'Function:src/replacement-reader.ts:readReplacement',
+        name: 'readReplacement',
+        filePath: 'src/replacement-reader.ts',
+      },
+    };
+    const nextProcess = { id: 'process:replacement', label: 'Replacement flow' };
+    const oldProcess = processes.alphaOther;
+
+    const seed = async (dbPath: string, next: boolean) => {
+      await adapter.initLbug(dbPath);
+      try {
+        const caller = next ? replacement.caller : nodes.alphaOtherCaller;
+        const reader = next ? replacement.reader : nodes.alphaReader;
+        const process = next ? nextProcess : oldProcess;
+        const entry = next ? replacement.entry : caller;
+        for (const node of [nodes.alpha, caller, reader, ...(next ? [entry] : [])]) {
+          await adapter.executeQuery(
+            `CREATE (:Function {id: '${node.id}', name: '${node.name}', filePath: '${node.filePath}', startLine: 1, endLine: 3})`,
+          );
+        }
+        await adapter.executeQuery(
+          `CREATE (:Process {id: '${process.id}', label: '${process.label}', heuristicLabel: '${process.label}', processType: 'intra_community', stepCount: ${next ? 3 : 2}, communities: [], entryPointId: '${entry.id}', terminalId: '${nodes.alpha.id}'})`,
+        );
+        await adapter.executeQuery(edge(caller, nodes.alpha, 'CALLS'));
+        await adapter.executeQuery(edge(reader, nodes.alpha, 'ACCESSES'));
+        if (next) await adapter.executeQuery(edge(entry, caller, 'CALLS'));
+        const steps = next ? [entry, caller, nodes.alpha] : [caller, nodes.alpha];
+        for (const [step, node] of steps.entries()) {
+          await adapter.executeQuery(
+            `MATCH (n:Function {id: '${node.id}'}), (p:Process {id: '${process.id}'}) CREATE (n)-[:CodeRelation {type: 'STEP_IN_PROCESS', confidence: 1.0, reason: 'trace-detection', step: ${step}}]->(p)`,
+          );
+        }
+        await adapter.flushWAL();
+      } finally {
+        await adapter.closeLbug();
+      }
+    };
+    const processMembership = (next: boolean, step: number) => ({
+      ...(next ? nextProcess : { id: oldProcess.id, label: oldProcess.label }),
+      processType: 'intra_community',
+      step,
+    });
+    const expectedCaller = (node: NodeIdentity, next: boolean, step: number) => ({
+      ...node,
+      relationType: 'CALLS',
+      confidence: 1,
+      processes: [processMembership(next, step)],
+    });
+    const expectGeneration = (
+      impact: Awaited<ReturnType<LocalBackend['callTool']>>,
+      context: Awaited<ReturnType<LocalBackend['callTool']>>,
+      next: boolean,
+    ) => {
+      const caller = next ? replacement.caller : nodes.alphaOtherCaller;
+      const reader = next ? replacement.reader : nodes.alphaReader;
+      const entry = next ? replacement.entry : caller;
+      const process = next ? nextProcess : oldProcess;
+      expect(impact).not.toHaveProperty('error');
+      expect(impact).not.toHaveProperty('partial');
+      expect(impact.target).toMatchObject(nodes.alpha);
+      expect(impact.risk).toBe('LOW');
+      expect(impact.epistemic).toBe('exact');
+      expect(impact.impactedCount).toBe(next ? 2 : 1);
+      expect(impact.summary).toEqual({ direct: 1, processes_affected: 1, modules_affected: 0 });
+      expect(impact.byDepthCounts).toEqual(next ? { 1: 1, 2: 1 } : { 1: 1 });
+      const byDepth = Object.fromEntries(
+        Object.entries(impact.byDepth).map(([depth, rows]) => [
+          depth,
+          (rows as ImpactRow[]).map(
+            ({ id, name, filePath, relationType, confidence, processes: memberships }) => ({
+              id,
+              name,
+              filePath,
+              relationType,
+              confidence,
+              processes: memberships,
+            }),
+          ),
+        ]),
+      );
+      expect(byDepth).toEqual({
+        1: [expectedCaller(caller, next, next ? 1 : 0)],
+        ...(next ? { 2: [expectedCaller(entry, true, 0)] } : {}),
+      });
+      expect(impact.affected_processes).toEqual([
+        {
+          name: entry.name,
+          type: 'Function',
+          filePath: entry.filePath,
+          affected_process_count: 1,
+          total_hits: next ? 2 : 1,
+          earliest_broken_step: 0,
+        },
+      ]);
+      expect(impact.affected_modules).toEqual([]);
+      expect(impact.affected_routes).toEqual([]);
+      expect(context).not.toHaveProperty('error');
+      expect(context.status).toBe('found');
+      expect(context.epistemic).toBe('exact');
+      expect(context.symbol).toMatchObject({
+        uid: nodes.alpha.id,
+        name: nodes.alpha.name,
+        filePath: nodes.alpha.filePath,
+      });
+      expect(
+        Object.fromEntries(
+          Object.entries(context.incoming).map(([type, refs]) => [
+            type,
+            (refs as ContextRef[]).map(({ uid, name, filePath }) => ({ id: uid, name, filePath })),
+          ]),
+        ),
+      ).toEqual({ calls: [caller], accesses: [reader] });
+      expect(context.outgoing).toEqual({});
+      expect(context.processes).toEqual([
+        {
+          id: process.id,
+          name: process.label,
+          step_index: next ? 2 : 1,
+          step_count: next ? 3 : 2,
+        },
+      ]);
+    };
+
+    try {
+      await seed(paths.lbugPath, false);
+      const meta = {
+        repoPath: temp.dbPath,
+        storagePath: paths.storagePath,
+        lastCommit: 'graph-a',
+        indexedAt: new Date().toISOString(),
+        scopeExtractionReceipt: 1 as const,
+        unresolvedOverloads: summarizeUnresolvedOverloads([]),
+        stats: { files: 3, nodes: 4, processes: 1, communities: 0 },
+      };
+      await saveMeta(paths.storagePath, meta);
+      await registerRepo(temp.dbPath, meta, { name: REPO });
+      const heldBackend = new LocalBackend();
+      backend = heldBackend;
+      expect(await heldBackend.init()).toBe(true);
+      const impact = () =>
+        heldBackend.callTool('impact', {
+          repo: REPO,
+          target: nodes.alpha.name,
+          direction: 'upstream',
+        });
+      const context = () => heldBackend.callTool('context', { repo: REPO, uid: nodes.alpha.id });
+      expectGeneration(await impact(), await context(), false);
+      expect(
+        await heldBackend.callTool('context', { repo: REPO, uid: replacement.entry.id }),
+      ).toHaveProperty('error');
+
+      // Keep this backend and its read pool alive. Publish only after the
+      // separate staged writer has closed, exactly as run-analyze does.
+      await seed(stagedPath, true);
+      for (const suffix of ['.wal', '.shadow', '.wal.checkpoint']) {
+        await expect(fs.stat(`${stagedPath}${suffix}`)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+      await retryRename(stagedPath, paths.lbugPath);
+      const nextMeta = {
+        ...meta,
+        lastCommit: 'graph-b',
+        indexedAt: new Date(Date.now() + 1).toISOString(),
+        stats: { files: 4, nodes: 5, processes: 1, communities: 0 },
+      };
+      await saveMeta(paths.storagePath, nextMeta);
+      await registerRepo(temp.dbPath, nextMeta, { name: REPO });
+
+      // An independent native read-only Database opens the published path.
+      // It does not share LocalBackend's pool or trigger its reinitialization.
+      const freshDb = new lbug.Database(paths.lbugPath, 128 * 1024 * 1024, true, true);
+      const freshConn = new lbug.Connection(freshDb);
+      try {
+        const read = async (query: string) => {
+          const result = await freshConn.query(query);
+          try {
+            const cursor = Array.isArray(result) ? result[0] : result;
+            return await cursor.getAll();
+          } finally {
+            await closeQueryResults(result);
+          }
+        };
+        expect(
+          await read(`
+          MATCH (n:Function)
+          RETURN n.id AS id, n.name AS name, n.filePath AS filePath
+          ORDER BY id
+        `),
+        ).toEqual(
+          [nodes.alpha, ...Object.values(replacement)].sort((a, b) =>
+            a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+          ),
+        );
+        expect(
+          await read(`
+          MATCH (n:Function)-[r:CodeRelation]->(target:Function {id: '${nodes.alpha.id}'})
+          WHERE r.type IN ['CALLS', 'ACCESSES']
+          RETURN n.id AS id, n.name AS name, n.filePath AS filePath, r.type AS relationType
+          ORDER BY id
+        `),
+        ).toEqual([
+          { ...replacement.caller, relationType: 'CALLS' },
+          { ...replacement.reader, relationType: 'ACCESSES' },
+        ]);
+        expect(
+          await read(`
+          MATCH (n:Function)-[r:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)
+          RETURN n.id AS id, p.id AS processId, p.heuristicLabel AS label,
+                 r.step AS step, p.stepCount AS stepCount, p.entryPointId AS entryPointId
+          ORDER BY step
+        `),
+        ).toEqual(
+          [replacement.entry, replacement.caller, nodes.alpha].map((node, step) => ({
+            id: node.id,
+            processId: nextProcess.id,
+            label: nextProcess.label,
+            step,
+            stepCount: 3,
+            entryPointId: replacement.entry.id,
+          })),
+        );
+      } finally {
+        await freshConn.close();
+        await freshDb.close();
+      }
+
+      // Poll the SAME backend through its unchanged five-second throttle.
+      // No private watermark override, poolInit, reset or restart is used.
+      const deadline = Date.now() + 15_000;
+      let refreshed = await context();
+      while (refreshed.processes?.[0]?.id !== nextProcess.id && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        refreshed = await context();
+      }
+      expectGeneration(await impact(), refreshed, true);
+      for (let repeat = 0; repeat < 3; repeat++) {
+        expectGeneration(await impact(), await context(), true);
+        const introduced = await heldBackend.callTool('context', {
+          repo: REPO,
+          name: replacement.entry.name,
+        });
+        expect(introduced).not.toHaveProperty('error');
+        expect(introduced.status).toBe('found');
+        expect(introduced.symbol).toMatchObject({
+          uid: replacement.entry.id,
+          name: replacement.entry.name,
+          filePath: replacement.entry.filePath,
+        });
+        expect(introduced.processes).toEqual([
+          { id: nextProcess.id, name: nextProcess.label, step_index: 0, step_count: 3 },
+        ]);
+      }
+    } finally {
+      try {
+        await backend?.dispose();
+      } finally {
+        await adapter.closeLbug();
+        vi.unstubAllEnvs();
+        await temp.cleanup();
+      }
+    }
+  });
+});

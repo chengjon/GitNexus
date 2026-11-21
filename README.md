@@ -108,6 +108,8 @@ The CLI indexes your repository and runs an MCP server that gives AI agents deep
 
 ## Quick Start
 
+> **Requirements:** Node.js 22.18+ or 24.11+ (see [gitnexus/README.md#requirements](gitnexus/README.md#requirements)).
+
 ```bash
 # 1. Index your repo (run from repo root)
 npx gitnexus analyze

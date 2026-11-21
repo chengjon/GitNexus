@@ -1,11 +1,15 @@
+import { spawnSync } from 'node:child_process';
+import * as crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { describe, it, expect, vi } from 'vitest';
+import { tsxLoaderUrl } from '../helpers/cli-entry.js';
 import { createKnowledgeGraph } from '../../src/core/graph/graph.js';
-import type { GraphNode, GraphRelationship } from '../../src/core/graph/types.js';
+import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
 import {
   getCommunityColor,
   COMMUNITY_COLORS,
@@ -13,6 +17,7 @@ import {
   buildCommunityProjection,
   buildIcebugWorkerSource,
   processCommunities,
+  stableCommunityIds,
   resolveCommunityDetectionEngine,
 } from '../../src/core/ingestion/community-processor.js';
 
@@ -37,6 +42,89 @@ function makeRel(
 ): GraphRelationship {
   return { id, sourceId, targetId, type, confidence: 1.0, reason: '' };
 }
+
+describe('stable community identity', () => {
+  it('uses the smallest member regardless of partition numbering or member order', () => {
+    const before = stableCommunityIds({ 'fn:b': 0, 'fn:a': 0, 'fn:c': 1, 'fn:d': 1 });
+    const after = stableCommunityIds({ 'fn:d': 7, 'fn:c': 7, 'fn:a': 9, 'fn:b': 9 });
+    expect(before.get(0)).toBe(after.get(9));
+    expect(before.get(1)).toBe(after.get(7));
+    expect(before.get(0)).toBe('comm_7efbeac6286b');
+    expect(before.get(0)).not.toBe(before.get(1));
+    expect(stableCommunityIds({}).size).toBe(0);
+  });
+
+  it('keeps identity when a non-minimal member is added but changes it when the anchor leaves', () => {
+    const before = stableCommunityIds({ 'fn:a': 0, 'fn:b': 0 }).get(0);
+    expect(stableCommunityIds({ 'fn:z': 5, 'fn:b': 5, 'fn:a': 5 }).get(5)).toBe(before);
+    expect(stableCommunityIds({ 'fn:b': 5, 'fn:z': 5 }).get(5)).not.toBe(before);
+  });
+
+  it('assigns collision suffixes in anchor order instead of partition order', () => {
+    const spy = vi.spyOn(crypto.Hash.prototype, 'digest').mockReturnValue('0'.repeat(40));
+    try {
+      const before = stableCommunityIds({ 'fn:z': 0, 'fn:a': 1, 'fn:m': 2 });
+      const after = stableCommunityIds({ 'fn:m': 7, 'fn:z': 8, 'fn:a': 9 });
+      expect([...before.values()]).toEqual([
+        'comm_000000000000',
+        'comm_000000000000_2',
+        'comm_000000000000_3',
+      ]);
+      expect(before.get(0)).toBe(after.get(8));
+      expect(before.get(1)).toBe(after.get(9));
+      expect(before.get(2)).toBe(after.get(7));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  const disconnectedFlows = (groups: string[], genericLabels = false) => {
+    const graph = createKnowledgeGraph();
+    for (const group of groups) {
+      for (let i = 0; i < 3; i++) {
+        graph.addNode(
+          makeNode(
+            `fn:${group}${i}`,
+            `${group}${i}`,
+            'Function',
+            genericLabels ? 'src/flow.ts' : `src/${group}/flow.ts`,
+          ),
+        );
+      }
+      for (let i = 0; i < 2; i++) {
+        graph.addRelationship(makeRel(`${group}${i}`, `fn:${group}${i}`, `fn:${group}${i + 1}`));
+      }
+    }
+    return graph;
+  };
+
+  it('preserves existing communities and memberships when an unrelated flow is added or removed', async () => {
+    const before = await processCommunities(disconnectedFlows(['b', 'c']));
+    const after = await processCommunities(disconnectedFlows(['a', 'b', 'c']));
+    expect(before.communities).toHaveLength(2);
+    expect(after.communities).toHaveLength(3);
+    const existingMembers = new Set(before.memberships.map(({ nodeId }) => nodeId));
+    expect(after.memberships.filter(({ nodeId }) => existingMembers.has(nodeId))).toEqual(
+      before.memberships,
+    );
+    expect(after.rawMemberships?.filter(({ nodeId }) => existingMembers.has(nodeId))).toEqual(
+      before.rawMemberships,
+    );
+    expect(after.communities.filter(({ label }) => label !== 'A')).toEqual(before.communities);
+  });
+
+  it('preserves generic labels when an unrelated partition is added', async () => {
+    const before = await processCommunities(disconnectedFlows(['b', 'c'], true));
+    const after = await processCommunities(disconnectedFlows(['a', 'b', 'c'], true));
+    const communityFor = (result: typeof before, nodeId: string) => {
+      const id = result.memberships.find((member) => member.nodeId === nodeId)?.communityId;
+      return result.communities.find((community) => community.id === id);
+    };
+    expect(communityFor(before, 'fn:b0')?.label).toMatch(/^Cluster_/);
+    expect(communityFor(after, 'fn:b0')).toEqual(communityFor(before, 'fn:b0'));
+    expect(communityFor(after, 'fn:c0')).toEqual(communityFor(before, 'fn:c0'));
+  });
+});
 
 describe('community-processor', () => {
   describe('COMMUNITY_COLORS', () => {
@@ -197,9 +285,19 @@ describe('community-processor', () => {
       vi.resetModules();
       vi.doMock('node:worker_threads', () => {
         class MockWorker extends EventEmitter {
-          constructor() {
+          constructor(_source?: string, options?: { workerData?: { graphologyPath?: string } }) {
             super();
             queueMicrotask(() => {
+              if (options?.workerData?.graphologyPath) {
+                // The Graphology Leiden worker: answer as the real one would.
+                this.emit('message', {
+                  ok: true,
+                  communities: { 'fn:a': 0, 'fn:b': 0 },
+                  count: 1,
+                  modularity: 0,
+                });
+                return;
+              }
               this.emit('message', { ok: true, partition: [0, 0], modularity: Number.NaN });
             });
           }
@@ -232,7 +330,7 @@ describe('community-processor', () => {
 
         expect(result.stats.engineRequested).toBe('icebug');
         expect(result.stats.engine).toBe('graphology');
-        expect(result.stats.fallbackReason).toContain('modularity');
+        expect(result.stats.fallbackReason).toBe('optional icebug modularity was not finite');
         expect(progress.some((message) => message.includes('falling back to Graphology'))).toBe(
           true,
         );
@@ -245,6 +343,64 @@ describe('community-processor', () => {
         vi.resetModules();
       }
     });
+
+    it.each(['icebug', 'auto'] as const)(
+      'preserves both fallback reasons when %s fails and Graphology times out',
+      async (engine) => {
+        vi.resetModules();
+        vi.useFakeTimers();
+        const icebugError = 'optional icebug could not load';
+        vi.doMock('node:worker_threads', () => {
+          class MockWorker extends EventEmitter {
+            constructor(_source?: string, options?: { workerData?: { graphologyPath?: string } }) {
+              super();
+              if (!options?.workerData?.graphologyPath) {
+                queueMicrotask(() => this.emit('message', { ok: false, error: icebugError }));
+              }
+              // The Graphology worker stays silent until its real deadline fires.
+            }
+
+            terminate(): Promise<number> {
+              return Promise.resolve(0);
+            }
+
+            unref(): void {}
+          }
+
+          return { Worker: MockWorker };
+        });
+
+        try {
+          const { processCommunities: processCommunitiesWithMockWorker } =
+            await import('../../src/core/ingestion/community-processor.js');
+          const graph = createKnowledgeGraph();
+          graph.addNode(makeNode('fn:a', 'a'));
+          graph.addNode(makeNode('fn:b', 'b'));
+          graph.addRelationship(makeRel('rel:ab', 'fn:a', 'fn:b'));
+
+          const pending = processCommunitiesWithMockWorker(graph, undefined, { engine });
+          await vi.advanceTimersByTimeAsync(60_000);
+          const result = await pending;
+
+          expect(result.stats).toMatchObject({
+            engineRequested: engine,
+            engine: 'graphology',
+            fallbackReason: `${icebugError}; Graphology Leiden timeout`,
+            totalCommunities: 1,
+            modularity: 0,
+            nodesProcessed: 2,
+          });
+          expect(result.memberships).toEqual([
+            { nodeId: 'fn:a', communityId: 'comm_7efbeac6286b' },
+            { nodeId: 'fn:b', communityId: 'comm_7efbeac6286b' },
+          ]);
+        } finally {
+          vi.useRealTimers();
+          vi.doUnmock('node:worker_threads');
+          vi.resetModules();
+        }
+      },
+    );
 
     it('falls back before icebug worker launch for nondeterministic options', async () => {
       const graph = createKnowledgeGraph();
@@ -372,6 +528,31 @@ module.exports = {
     });
   });
 
+  describe('graphology Leiden timeout', () => {
+    it('returns the fallback and exits naturally after terminating the hanging worker', () => {
+      const childPath = fileURLToPath(
+        new URL('../helpers/leiden-timeout-child.ts', import.meta.url),
+      );
+      // A fallback alone is not enough: the child must exit without process.exit().
+      // SIGKILL bounds cleanup if a regression leaves its worker running forever.
+      const child = spawnSync(process.execPath, ['--import', tsxLoaderUrl(), childPath], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        killSignal: 'SIGKILL',
+      });
+
+      expect(child.error).toBeUndefined();
+      expect(child.signal).toBeNull();
+      expect(child.status, child.stderr).toBe(0);
+      const result = JSON.parse(child.stdout);
+
+      expect(result.fallbackReason).toBe('Graphology Leiden timeout');
+      expect(result.count).toBe(1);
+      expect(new Set(Object.values(result.communities))).toEqual(new Set([0]));
+      expect(Object.keys(result.communities)).toHaveLength(105);
+    }, 15_000);
+  });
+
   describe('vendored Leiden partitioning', () => {
     // Golden values for the seeded graph below, captured from the vendored
     // implementation. They pin the partition, not just its shape.
@@ -448,7 +629,76 @@ module.exports = {
       const second = await processCommunities(graph);
 
       expect(second.memberships).toEqual(first.memberships);
+      expect(second.rawMemberships).toEqual(first.rawMemberships);
       expect(second.stats.modularity).toBe(first.stats.modularity);
     });
+  });
+});
+
+describe('community membership integrity', () => {
+  it('returns empty raw and retained memberships for an empty graph', async () => {
+    const result = await processCommunities(createKnowledgeGraph());
+
+    expect(result.communities).toEqual([]);
+    expect(result.memberships).toEqual([]);
+    expect(result.rawMemberships).toEqual([]);
+    expect(result.stats).toMatchObject({ totalCommunities: 0, modularity: 0, nodesProcessed: 0 });
+  });
+
+  it('retains connected members without emitting memberships for a filtered singleton', async () => {
+    const graph = createKnowledgeGraph();
+    for (const id of ['fn:a', 'fn:b', 'fn:c', 'fn:singleton']) {
+      graph.addNode(makeNode(id, id.slice(3)));
+    }
+    graph.addNode(makeNode('file:target', 'target', 'File'));
+    graph.addRelationship(makeRel('rel:ab', 'fn:a', 'fn:b'));
+    graph.addRelationship(makeRel('rel:bc', 'fn:b', 'fn:c'));
+    graph.addRelationship(makeRel('rel:ca', 'fn:c', 'fn:a'));
+    // The symbol enters the projection, but its non-symbol target does not.
+    // Leiden therefore partitions it into a singleton, which is not emitted.
+    graph.addRelationship(makeRel('rel:singleton', 'fn:singleton', 'file:target'));
+
+    const result = await processCommunities(graph, undefined, { engine: 'graphology' });
+    const communityIds = new Set(result.communities.map((community) => community.id));
+
+    expect(result.communities).toHaveLength(1);
+    expect(result.communities[0].symbolCount).toBe(3);
+    expect(result.stats).toMatchObject({ totalCommunities: 2, nodesProcessed: 4 });
+    expect(result.memberships.map((membership) => membership.nodeId).sort()).toEqual([
+      'fn:a',
+      'fn:b',
+      'fn:c',
+    ]);
+    expect(result.memberships.every((membership) => communityIds.has(membership.communityId))).toBe(
+      true,
+    );
+    expect(result.rawMemberships?.map((membership) => membership.nodeId)).toEqual([
+      'fn:a',
+      'fn:b',
+      'fn:c',
+      'fn:singleton',
+    ]);
+    expect(
+      result.rawMemberships?.filter((membership) => communityIds.has(membership.communityId)),
+    ).toEqual(result.memberships);
+  });
+
+  it('returns no memberships when every detected community is a filtered singleton', async () => {
+    const graph = createKnowledgeGraph();
+    graph.addNode(makeNode('file:target', 'target', 'File'));
+    for (const id of ['fn:a', 'fn:b']) {
+      graph.addNode(makeNode(id, id.slice(3)));
+      graph.addRelationship(makeRel(`rel:${id}`, id, 'file:target'));
+    }
+
+    const result = await processCommunities(graph, undefined, { engine: 'graphology' });
+
+    expect(result.communities).toEqual([]);
+    expect(result.memberships).toEqual([]);
+    expect(result.rawMemberships).toEqual([
+      { nodeId: 'fn:a', communityId: 'comm_7efbeac6286b' },
+      { nodeId: 'fn:b', communityId: 'comm_6f8deabedc1a' },
+    ]);
+    expect(result.stats).toMatchObject({ totalCommunities: 2, nodesProcessed: 2 });
   });
 });

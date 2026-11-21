@@ -51,6 +51,7 @@ import {
 import { SCHEMA_FINGERPRINT } from '../../src/core/lbug/schema.js';
 import { runFullAnalysis } from '../../src/core/run-analyze.js';
 import { resolveAnalyzerRunnerIdentity } from '../../src/core/analyzer-identity.js';
+import { resolveParseCacheIdentity } from '../../src/core/parse-cache-identity.js';
 import { createTempDir } from '../helpers/test-db.js';
 import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
 
@@ -102,9 +103,20 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       cwd: tmpRepo.dbPath,
       encoding: 'utf-8',
     }).trim();
-    const runnerIdentity = resolveAnalyzerRunnerIdentity(
-      pathToFileURL(path.resolve(__dirname, '../../src/core/run-analyze.ts')).href,
-    );
+    const runAnalyzeUrl = pathToFileURL(
+      path.resolve(__dirname, '../../src/core/run-analyze.ts'),
+    ).href;
+    const runnerIdentity = resolveAnalyzerRunnerIdentity(runAnalyzeUrl);
+    const parseIdentity = resolveParseCacheIdentity(runAnalyzeUrl);
+    if (parseIdentity.ok === false) {
+      throw new Error(`Cannot verify test parser artifacts: ${parseIdentity.reason}`);
+    }
+    const flat = getStoragePaths(tmpRepo.dbPath);
+    await fs.mkdir(flat.storagePath, { recursive: true });
+    const { initLbug, closeLbug } = await import('../../src/core/lbug/lbug-adapter.js');
+    await initLbug(flat.lbugPath, { skipFts: true });
+    await closeLbug();
+    const compactBytes = (await fs.stat(flat.lbugPath)).size;
     const metaFor = (branch: string): RepoMeta => ({
       repoPath: tmpRepo.dbPath,
       lastCommit: commit,
@@ -115,8 +127,9 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
         [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
       },
       runnerIdentity,
+      parseCacheIdentity: { base: parseIdentity.identity.base },
+      graphCompaction: { version: 1, compactBytes, incrementalWrites: 0 },
     });
-    const flat = getStoragePaths(tmpRepo.dbPath);
     await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
     await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
 
@@ -136,7 +149,7 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
     const first = await runFullAnalysis(
       tmpRepo.dbPath,
       {},
-      { onLog: (m) => logs.push(m), onProgress: () => {} },
+      { onProgress: () => {}, onLog: (m) => logs.push(m) },
     );
 
     expect(first.alreadyUpToDate).toBe(true);
@@ -181,7 +194,7 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       const result = await runFullAnalysis(
         tmpRepo.dbPath,
         {},
-        { onLog: (m) => logs.push(m), onProgress: () => {} },
+        { onProgress: () => {}, onLog: (m) => logs.push(m) },
       );
 
       expect(result.alreadyUpToDate).toBe(true);
@@ -198,7 +211,7 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       Object.assign(new Error('mock read-only storage'), { code: 'EROFS' }),
     );
 
-    const result = await runFullAnalysis(tmpRepo.dbPath, {}, {});
+    const result = await runFullAnalysis(tmpRepo.dbPath, {}, { onProgress: () => {} });
 
     expect(result.alreadyUpToDate).toBe(true);
     expect(rmCtx.writableMock).not.toHaveBeenCalled();
@@ -210,7 +223,9 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
     const readOnly = Object.assign(new Error('mock read-only storage'), { code: 'EROFS' });
     rmCtx.writableMock.mockRejectedValueOnce(readOnly);
 
-    await expect(runFullAnalysis(tmpRepo.dbPath, {}, {})).rejects.toBe(readOnly);
+    await expect(runFullAnalysis(tmpRepo.dbPath, {}, { onProgress: () => {} })).rejects.toBe(
+      readOnly,
+    );
     expect(rmCtx.writableMock).toHaveBeenCalledWith(flatStorage);
   });
 });

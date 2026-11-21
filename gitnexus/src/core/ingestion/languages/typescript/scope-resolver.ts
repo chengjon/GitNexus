@@ -18,14 +18,18 @@ import { generateId } from '../../../../lib/utils.js';
 import { buildMro, defaultLinearize } from '../../scope-resolution/passes/mro.js';
 import { populateClassOwnedMembers } from '../../scope-resolution/scope/walkers.js';
 import type { ScopeResolver } from '../../scope-resolution/contract/scope-resolver.js';
+import { canonicalizeWorkspaceBindings } from '../../scope-resolution/scope/canonicalize-bindings.js';
+import { canonicalTypeScriptName } from './identifiers.js';
 import { simpleKey } from '../../scope-resolution/graph-bridge/node-lookup.js';
 import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexes.js';
 import { typescriptProvider } from '../typescript.js';
-import { loadTsconfigIndex, type TsconfigIndex } from './tsconfig.js';
 import {
-  loadNodeWorkspacePackages,
-  type NodeWorkspacePackages,
-} from '../../import-resolvers/node-workspace-packages.js';
+  ECMASCRIPT_WILDCARD_REEXPORT_EXCLUDED_NAMES,
+  typescriptModuleExports,
+} from './module-exports.js';
+import { isCommonJsExportAssignment } from './cjs-export-receiver.js';
+import { loadTsconfigIndex, type TsconfigIndex } from './tsconfig.js';
+import { loadNodeWorkspacePackages, type NodeWorkspacePackages } from './workspace-packages.js';
 import { indexOnlyElementType } from '../../type-extractors/shared.js';
 import { typescriptArityCompatibility, typescriptMergeBindings, resolveTsTarget } from './index.js';
 import {
@@ -75,7 +79,17 @@ function makeTsResolveImportTarget(): ScopeResolver['resolveImportTarget'] {
   };
 }
 
+async function loadResolutionConfig(repoPath: string, fresh = false) {
+  return {
+    tsconfigs: await loadTsconfigIndex(repoPath),
+    nodeWorkspacePackages: await loadNodeWorkspacePackages(repoPath, { fresh }),
+    nuxtAutoImports: await loadNuxtAutoImports(repoPath),
+  };
+}
+
 const typescriptScopeResolver: ScopeResolver = {
+  populateWorkspaceReferences: (parsedFiles) =>
+    canonicalizeWorkspaceBindings(parsedFiles, canonicalTypeScriptName),
   // One hook, both routes. TypeScript exposes collection views as METHOD calls
   // (`.values()`), which the call-expression branch already handles, so the
   // accessor route yields nothing here — but it is now the same hook rather
@@ -87,8 +101,11 @@ const typescriptScopeResolver: ScopeResolver = {
   language: SupportedLanguages.TypeScript,
   languageProvider: typescriptProvider,
   importEdgeReason: 'typescript-scope: import',
+  importsBindAtLexicalScope: true,
+  ownedMembersBindAtModuleScope: false,
 
   resolveImportTarget: makeTsResolveImportTarget(),
+  moduleExports: typescriptModuleExports,
 
   // Threaded into `resolveImportTarget` so tsconfig path aliases
   // (`@/services/user`, `~/x`, ...) resolve through the same standard
@@ -96,11 +113,8 @@ const typescriptScopeResolver: ScopeResolver = {
   // workspace pass; the orchestrator awaits this once.
   // `nuxtAutoImports` is null for non-Nuxt projects (no .nuxt/imports.d.ts),
   // so this adds zero overhead to ordinary TypeScript repos.
-  loadResolutionConfig: async (repoPath: string) => ({
-    tsconfigs: await loadTsconfigIndex(repoPath),
-    nodeWorkspacePackages: await loadNodeWorkspacePackages(repoPath),
-    nuxtAutoImports: await loadNuxtAutoImports(repoPath),
-  }),
+  loadResolutionConfig,
+  refreshResolutionConfig: (repoPath) => loadResolutionConfig(repoPath, true),
 
   // TypeScript declaration merging + LEGB: local > import > wildcard,
   // separated by declaration space (value / type / namespace). The
@@ -124,6 +138,8 @@ const typescriptScopeResolver: ScopeResolver = {
   // contain the substring `super` (e.g. `superman`).
   isSuperReceiver: (text) => /^super(\s*\(|\s*\.|\s*\[|\s*$)/.test(text.trim()),
 
+  isModuleExportAssignment: isCommonJsExportAssignment,
+
   // TypeScript is statically typed — field-fallback heuristic off
   // (the type-binding layer produces precise owner types). Return-
   // type propagation across imports on (matches the legacy DAG's
@@ -140,6 +156,8 @@ const typescriptScopeResolver: ScopeResolver = {
   // re-exports bind to module-level declarations only (a class method sharing
   // a name with a top-level value must not win the callable preference).
   namedImportsBindTopLevelOnly: true,
+  // `moduleExports` publishes the default export as `default`; `export *` must not forward it.
+  wildcardReexportExcludedNames: ECMASCRIPT_WILDCARD_REEXPORT_EXCLUDED_NAMES,
 
   // TypeScript uses `.values()` / `.keys()` method-call syntax for collection
   // views -- no property-style accessors like C#'s `Dictionary<K,V>.Values` --
@@ -191,7 +209,8 @@ const typescriptScopeResolver: ScopeResolver = {
     // Pre-build a file -> explicit imported local names index so importing one
     // symbol from a source does not suppress other auto-imported symbols from it.
     const explicitImportNamesByFile = new Map<string, Set<string>>();
-    for (const [scopeId, edges] of indexes.imports) {
+    for (const scopeId of indexes.imports.scopes()) {
+      const edges = indexes.imports.edgesAt(scopeId) ?? [];
       const scope = indexes.scopeTree.getScope(scopeId);
       if (!scope?.filePath) continue;
       let names = explicitImportNamesByFile.get(scope.filePath);
@@ -297,6 +316,8 @@ function hasLocalBindingInScopeChain(
     visited.add(cursor);
     const scope = indexes.scopeTree.getScope(cursor);
     if (!scope) return false;
+    if (scope.nameClaims?.some((claim) => claim.name === name && claim.purpose !== 'type'))
+      return true;
 
     const localBindings = scope.bindings.get(name);
     if (
@@ -317,15 +338,6 @@ function hasLocalBindingInScopeChain(
     // belongs to callable space, so a same-file presence check here cannot
     // over-suppress a legitimate auto-import.
     //
-    // Residual (known limitation): this catches parameters whose annotation the
-    // TS scope query records as a type-binding (`p: Named`, generics, unions,
-    // predefined, arrays). Function-typed params (`p: () => void`), untyped
-    // params, destructured locals (`const { x } = …`), and catch-clause vars
-    // are captured by NEITHER map — the scope query emits no `@declaration` /
-    // `@type-binding` for them — so those shadow forms still leak an edge.
-    // Closing that needs shared TS scope-query/extractor changes that alter call
-    // resolution beyond Nuxt, so it is deferred to a follow-up rather than fixed
-    // here.
     if (scope.filePath === filePath && scope.typeBindings.has(name)) {
       return true;
     }

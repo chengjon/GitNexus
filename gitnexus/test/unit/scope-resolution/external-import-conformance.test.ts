@@ -11,8 +11,8 @@
  * reports a blast radius into code that cannot be affected. The reporter
  * measured 44 of 74 cross-package edges landing on two such files.
  *
- * The mechanism is shared, which is why this file is: `import-resolvers/
- * utils.ts:suffixResolve` asks "does any file in this repo have a path ending
+ * The shared `utils/suffix-index.ts:suffixResolve` helper asks
+ * "does any file in this repo have a path ending
  * in this specifier?", retrying with each leading segment dropped, and most
  * languages still end their resolution chain there.
  *
@@ -48,11 +48,16 @@ import {
   clearKotlinPackageFacts,
   setKotlinPackageFact,
 } from '../../../src/core/ingestion/languages/kotlin/package-facts.js';
+import type { GoWorkspaceConfig } from '../../../src/core/ingestion/languages/go/workspace-config.js';
 
 /** The `composer.json` PSR-4 map `loadPhpComposerConfig` would have produced. */
 const PHP_COMPOSER: ComposerConfig = { psr4: new Map([['App', 'app']]) };
-/** The value `loadGoModulePath` produces for a repo with a `go.mod`. */
-const GO_MODULE = { modulePath: 'example.com/mod' };
+/** The value `captureGoWorkspaceConfig` produces for a repo whose only
+ *  `go.mod` is at its root. */
+const GO_MODULE: GoWorkspaceConfig = {
+  modules: [{ modulePath: 'example.com/mod', dir: '' }],
+  workFiles: [],
+};
 /** The root dependency scope `loadRubyResolutionConfig` would have produced. */
 const RUBY_GEMS = {
   scopesByDirectory: new Map([
@@ -318,7 +323,7 @@ const CASES: ReadonlyMap<SupportedLanguages, ConformanceCase> = new Map([
     {
       files: ['lib/http.dart', 'lib/models.dart', 'lib/main.dart'],
       fromFile: 'lib/main.dart',
-      resolutionConfig: undefined,
+      resolutionConfig: { packages: new Map([['app', 'lib']]) },
       external: 'package:http/http.dart',
       decoy: 'lib/http.dart',
       reachesDecoy: 'package:app/http.dart',
@@ -342,25 +347,43 @@ const CASES: ReadonlyMap<SupportedLanguages, ConformanceCase> = new Map([
   [
     SupportedLanguages.C,
     {
+      // Workspace has a local `src/stdio.h` that shadows the system header.
+      // `#include <stdio.h>` (angle-bracket, isSystem:true) must NOT resolve to
+      // it. `#include "./stdio.h"` (quoted relative form, isSystem:false) from
+      // `src/main.c` DOES reach it via sibling lookup — the decoy-reachability
+      // proof. Using './stdio.h' for reachesDecoy vs 'stdio.h' for external lets
+      // the parsedImport factory distinguish the two arms.
       files: ['src/stdio.h', 'include/util.h', 'src/main.c'],
       fromFile: 'src/main.c',
       resolutionConfig: undefined,
       external: 'stdio.h',
       decoy: 'src/stdio.h',
-      reachesDecoy: 'util.h',
+      reachesDecoy: './stdio.h',
+      parsedImport: (targetRaw) => ({
+        kind: 'wildcard',
+        targetRaw,
+        // Bare name → angle-bracket system include; relative path → quoted local.
+        isSystem: !targetRaw.startsWith('.'),
+      }),
     },
   ],
   [
     SupportedLanguages.CPlusPlus,
     {
+      // Same shape as C: a local `src/cstdio.h` that shadows the C++ system
+      // header. `#include <cstdio.h>` (isSystem:true) must NOT resolve to it;
+      // `#include "./cstdio.h"` (isSystem:false) from `src/main.cpp` DOES.
       files: ['src/cstdio.h', 'include/util.hpp', 'src/main.cpp'],
       fromFile: 'src/main.cpp',
       resolutionConfig: undefined,
-      // `cstdio` with no extension would miss the decoy on spelling alone and
-      // post a pass that measures nothing; the header spelling is the real test.
       external: 'cstdio.h',
       decoy: 'src/cstdio.h',
-      reachesDecoy: 'util.hpp',
+      reachesDecoy: './cstdio.h',
+      parsedImport: (targetRaw) => ({
+        kind: 'wildcard',
+        targetRaw,
+        isSystem: !targetRaw.startsWith('.'),
+      }),
     },
   ],
   [
@@ -395,6 +418,21 @@ const CASES: ReadonlyMap<SupportedLanguages, ConformanceCase> = new Map([
     },
   ],
   [
+    SupportedLanguages.R,
+    {
+      files: ['scripts/main.R', 'vendor/ggplot2.R', 'vendor/ggplot2.py', 'pkgA/R/utils.R'],
+      fromFile: 'scripts/main.R',
+      resolutionConfig: undefined,
+      external: 'ggplot2',
+      decoy: 'vendor/ggplot2.R',
+      reachesDecoy: '"ggplot2.R"',
+      parsedImport: (targetRaw) =>
+        targetRaw === 'ggplot2'
+          ? { kind: 'wildcard', targetRaw }
+          : { kind: 'side-effect', targetRaw },
+    },
+  ],
+  [
     SupportedLanguages.ObjectiveC,
     {
       files: ['Headers/Foundation.h', 'Headers/Widget.h', 'Sources/main.m'],
@@ -415,11 +453,7 @@ const CASES: ReadonlyMap<SupportedLanguages, ConformanceCase> = new Map([
  * Fixing one means giving that language its real algorithm the way #2953 gave
  * TypeScript one, then deleting its line here.
  */
-const KNOWN_GAPS: ReadonlyMap<SupportedLanguages, string> = new Map<SupportedLanguages, string>([
-  [SupportedLanguages.Dart, '`package:http/http.dart` -> `lib/http.dart`'],
-  [SupportedLanguages.C, '`stdio.h` -> `src/stdio.h`'],
-  [SupportedLanguages.CPlusPlus, '`cstdio.h` -> `src/cstdio.h`'],
-]);
+const KNOWN_GAPS: ReadonlyMap<SupportedLanguages, string> = new Map<SupportedLanguages, string>([]);
 
 /**
  * The six that hold it, and what earns each one.
@@ -527,4 +561,35 @@ describe('external imports never resolve into the repository (#2953)', () => {
       `${language}: '${testCase.external}' names nothing in this repo, but resolved to ${JSON.stringify(resolved)}`,
     ).toEqual([]);
   });
+  // R's NAMESPACE `importFrom(ggplot2, geom)` is a `named` import (the wildcard/side-effect arms
+  // above cover `library()`/`source()`). The bare package name must not suffix-match the
+  // same-named `vendor/ggplot2.py`, whether or not a local package config exists.
+  it.each([
+    ['no package config', undefined],
+    [
+      'a package config that lists only other packages',
+      { packages: new Map([['pkgA', 'pkgA']]), namespaceInfoByPackageDir: new Map() },
+    ],
+  ])(
+    'R: a named importFrom() of an external package resolves to nothing (%s)',
+    (_label, config) => {
+      const testCase = CASES.get(SupportedLanguages.R)!;
+      const answer = SCOPE_RESOLVERS.get(SupportedLanguages.R)!.resolveImportTarget(
+        testCase.external,
+        testCase.fromFile,
+        new Set(testCase.files),
+        config,
+        {
+          parsedFiles: [],
+          parsedImport: {
+            kind: 'named',
+            localName: 'geom',
+            importedName: 'geom',
+            targetRaw: testCase.external,
+          },
+        },
+      );
+      expect(filesOf(answer)).toEqual([]);
+    },
+  );
 });

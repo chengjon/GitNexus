@@ -213,6 +213,36 @@ describe('Pass 1: scope tree', () => {
 // ─── §Pass 2: declarations + local bindings ────────────────────────────────
 
 describe('Pass 2: declarations + local bindings', () => {
+  it.each([undefined, 'visible', ''])(
+    'retains graph identity with binding-name override %j',
+    (bindingName) => {
+      const extras =
+        bindingName === undefined
+          ? {}
+          : {
+              '@declaration.binding-name': cap(
+                '@declaration.binding-name',
+                5,
+                0,
+                10,
+                0,
+                bindingName,
+              ),
+            };
+      const result = extract(
+        [scopeMatch('module', 1, 0, 100, 0), declMatch('function', 'display', 5, 0, 10, 0, extras)],
+        'a.ts',
+        mockProvider(),
+      );
+      const module = result.scopes[0]!;
+      expect(result.localDefs).toHaveLength(1);
+      expect(module.ownedDefs).toEqual(result.localDefs);
+      expect(result.localDefs[0]!.nodeId).toBe('def:a.ts#5:0:Function:display');
+      expect([...module.bindings.keys()]).toEqual(
+        bindingName === '' ? [] : [bindingName ?? 'display'],
+      );
+    },
+  );
   it('routes one multi-topic match through both scope and declaration passes', () => {
     const result = extract(
       [
@@ -345,7 +375,13 @@ describe('Pass 3: raw imports', () => {
         interpretImport: () => named,
       }),
     );
-    expect(result.parsedImports).toEqual([{ ...named, declaredAtScope: result.moduleScope }]);
+    expect(result.parsedImports).toEqual([
+      {
+        ...named,
+        declaredAtScope: result.moduleScope,
+        atRange: { startLine: 3, startCol: 0, endLine: 3, endCol: 30 },
+      },
+    ]);
   });
 
   it('drops imports when `interpretImport` returns null', () => {
@@ -459,7 +495,13 @@ describe('Pass 3: runsOnlyWhenCalled', () => {
       'a.ts',
       mockProvider({ interpretImport: () => named }),
     );
-    expect(result.parsedImports).toEqual([{ ...named, declaredAtScope: result.moduleScope }]);
+    expect(result.parsedImports).toEqual([
+      {
+        ...named,
+        declaredAtScope: result.moduleScope,
+        atRange: { startLine: 3, startCol: 0, endLine: 3, endCol: 30 },
+      },
+    ]);
   });
 
   // ─── The provider capability that opts out of the position rule ──────────
@@ -492,7 +534,11 @@ describe('Pass 3: runsOnlyWhenCalled', () => {
     );
     // Scope provenance survives, without adding the execution-deferral flag.
     expect(result.parsedImports).toEqual([
-      { ...named, declaredAtScope: 'scope:a.c#2:0-99:0:Function' },
+      {
+        ...named,
+        declaredAtScope: 'scope:a.c#2:0-99:0:Function',
+        atRange: { startLine: 12, startCol: 0, endLine: 12, endCol: 30 },
+      },
     ]);
   });
 
@@ -507,7 +553,12 @@ describe('Pass 3: runsOnlyWhenCalled', () => {
     expect(
       extract(captures, 'a.ts', mockProvider({ interpretImport: () => named })).parsedImports,
     ).toEqual([
-      { ...named, declaredAtScope: 'scope:a.ts#2:0-99:0:Function', runsOnlyWhenCalled: true },
+      {
+        ...named,
+        declaredAtScope: 'scope:a.ts#2:0-99:0:Function',
+        runsOnlyWhenCalled: true,
+        atRange: { startLine: 12, startCol: 0, endLine: 12, endCol: 30 },
+      },
     ]);
     // Absent must mean `true`, not merely "not false" — the default is the
     // safe direction (position defers), and only an explicit `false` withholds
@@ -519,7 +570,12 @@ describe('Pass 3: runsOnlyWhenCalled', () => {
         mockProvider({ interpretImport: () => named, importsExecuteWhereWritten: true }),
       ).parsedImports,
     ).toEqual([
-      { ...named, declaredAtScope: 'scope:a.ts#2:0-99:0:Function', runsOnlyWhenCalled: true },
+      {
+        ...named,
+        declaredAtScope: 'scope:a.ts#2:0-99:0:Function',
+        runsOnlyWhenCalled: true,
+        atRange: { startLine: 12, startCol: 0, endLine: 12, endCol: 30 },
+      },
     ]);
   });
 });
@@ -572,6 +628,27 @@ describe('Pass 4: type bindings', () => {
 // ─── §Pass 5: reference sites ─────────────────────────────────────────────
 
 describe('Pass 5: reference sites', () => {
+  it.each([
+    '@reference.caller-scope',
+    '@reference.lookup-scope',
+    '@reference.lookup-purpose',
+    '@reference.receiver-chain',
+  ])('does not mistake leading %s metadata for a call anchor', (tag) => {
+    const result = extract(
+      [
+        scopeMatch('module', 1, 0, 10, 0),
+        { [tag]: cap(tag, 2, 0, 2, 20, 'metadata'), ...refMatch('call.free', 'run', 2, 2, 2, 7) },
+      ],
+      'a.ts',
+      mockProvider(),
+    );
+    expect(result.referenceSites).toHaveLength(1);
+    expect(result.referenceSites[0]).toMatchObject({
+      name: 'run',
+      kind: 'call',
+      atRange: { startLine: 2, startCol: 2, endLine: 2, endCol: 7 },
+    });
+  });
   it('emits a call reference with the innermost scope anchor', () => {
     const result = extract(
       [
@@ -997,7 +1074,11 @@ describe('end-to-end fixture (all 5 passes together)', () => {
 
     // Import collected.
     expect(result.parsedImports).toEqual([
-      { ...parsedImport, declaredAtScope: result.moduleScope },
+      {
+        ...parsedImport,
+        declaredAtScope: result.moduleScope,
+        atRange: { startLine: 3, startCol: 0, endLine: 3, endCol: 30 },
+      },
     ]);
 
     // Type binding attached to function scope.

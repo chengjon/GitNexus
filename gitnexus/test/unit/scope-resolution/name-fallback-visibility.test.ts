@@ -19,6 +19,9 @@ import { dartIsGlobalNameFallbackPlausible } from '../../../src/core/ingestion/l
 import { rustIsGlobalNameFallbackPlausible } from '../../../src/core/ingestion/languages/rust/name-fallback-visibility.js';
 import { swiftIsGlobalNameFallbackPlausible } from '../../../src/core/ingestion/languages/swift/name-fallback-visibility.js';
 import { rubyIsGlobalNameFallbackPlausible } from '../../../src/core/ingestion/languages/ruby/name-fallback-visibility.js';
+import { isJsSelfBoundCallableFallbackPlausible } from '../../../src/core/ingestion/languages/javascript/callable-visibility.js';
+import { javascriptProvider } from '../../../src/core/ingestion/languages/typescript.js';
+import { extractParsedFile } from '../../../src/core/ingestion/scope-extractor-bridge.js';
 import {
   directoryOf,
   modulePathReaches,
@@ -33,6 +36,53 @@ const namedImport = (targetRaw: string, localName = 'x'): ParsedImport => ({
   targetRaw,
 });
 
+describe('JavaScript: named function-expression visibility (#3489)', () => {
+  it('allows recursive/descendant calls and refuses callers outside the expression scope', () => {
+    const parsed = extractParsedFile(
+      javascriptProvider,
+      `function make() {
+      return function handler(req) {
+        handler(req);
+        (() => handler(req))();
+      };
+    }
+    function outside(req) { handler(req); }`,
+      'handlers.js',
+    )!;
+    const candidate = parsed.localDefs.find((def) => def.qualifiedName === 'handler')!;
+    const sites = parsed.referenceSites.filter((site) => site.name === 'handler');
+    expect(sites).toHaveLength(3);
+    expect(
+      sites.map((site) =>
+        isJsSelfBoundCallableFallbackPlausible({
+          callerParsed: parsed,
+          candidate,
+          parsedFileOf: () => parsed,
+          site,
+        }),
+      ),
+    ).toEqual([true, true, false]);
+    const outside = sites.at(-1)!;
+    const topLevel = parsed.localDefs.find((def) => def.qualifiedName === 'make')!;
+    expect(
+      isJsSelfBoundCallableFallbackPlausible({
+        callerParsed: parsed,
+        candidate: topLevel,
+        parsedFileOf: () => parsed,
+        site: outside,
+      }),
+    ).toBe(true);
+    expect(
+      isJsSelfBoundCallableFallbackPlausible({
+        callerParsed: parsed,
+        candidate,
+        parsedFileOf: () => undefined,
+        site: outside,
+      }),
+    ).toBe(true);
+  });
+});
+
 const mkCaller = (
   filePath: string,
   imports: readonly ParsedImport[] = [],
@@ -41,6 +91,7 @@ const mkCaller = (
 ): ParsedFile =>
   ({
     filePath,
+    scopes: [],
     parsedImports: imports,
     referenceSites,
     localDefs,
@@ -389,7 +440,7 @@ describe('Rust: isGlobalNameFallbackPlausible', () => {
     ['src/a/b.rs', 'super::unique_helper_xyz', 'src/a.rs'],
     ['src/a/b/c.rs', 'super::super::unique_helper_xyz', 'src/a/mod.rs'],
     ['src/a/b.rs', 'self::child::unique_helper_xyz', 'src/a/b/child.rs'],
-  ])('resolves relative imports from %s', (caller, target, candidate) => {
+  ])('resolves relative imports from %s via %s', (caller, target, candidate) => {
     expect(
       rustIsGlobalNameFallbackPlausible({
         site: BARE_SITE,
@@ -583,6 +634,65 @@ describe('Rust: isGlobalNameFallbackPlausible', () => {
         candidate: mkCandidate('src/user.rs', 'User.new'),
       }),
     ).toBe(true);
+  });
+});
+
+describe('Swift: isGlobalNameFallbackPlausible with workspace modules (#3355)', () => {
+  const resolutionConfig = {
+    targets: new Map(),
+    modules: [
+      { key: 'Pkg/Lib', name: 'Lib', dir: 'Pkg/Lib', importable: true },
+      { key: 'Pkg/Plugins/Gen', name: 'Gen', dir: 'Pkg/Plugins/Gen', importable: false },
+      { key: 'Pkg/Tests/LibTests', name: 'LibTests', dir: 'Pkg/Tests/LibTests', importable: true },
+      {
+        key: 'xcode:App.xcodeproj:App',
+        name: 'App',
+        files: ['App/Main.swift', 'App/Shared.swift'],
+        importable: true,
+      },
+      {
+        key: 'xcode:App.xcodeproj:Widget',
+        name: 'Widget',
+        files: ['App/Widget.swift', 'App/Shared.swift'],
+        importable: true,
+      },
+    ],
+  };
+  const check = (caller: ParsedFile, candidatePath: string): boolean =>
+    swiftIsGlobalNameFallbackPlausible({
+      callerParsed: caller,
+      candidate: mkCandidate(candidatePath, 'helper'),
+      resolutionConfig,
+    });
+
+  it('gives a custom-path target a module identity', () => {
+    expect(check(mkCaller('App/Main.swift'), 'Pkg/Lib/Helper.swift')).toBe(false);
+    expect(check(mkCaller('App/Main.swift', [namedImport('Lib')]), 'Pkg/Lib/Helper.swift')).toBe(
+      true,
+    );
+  });
+
+  it('requires a test target to import the module it tests (@testable import)', () => {
+    expect(check(mkCaller('Pkg/Tests/LibTests/T.swift'), 'Pkg/Lib/Helper.swift')).toBe(false);
+    expect(
+      check(mkCaller('Pkg/Tests/LibTests/T.swift', [namedImport('Lib')]), 'Pkg/Lib/Helper.swift'),
+    ).toBe(true);
+  });
+
+  it('separates Xcode targets and shares a file compiled into both', () => {
+    expect(check(mkCaller('App/Widget.swift'), 'App/Main.swift')).toBe(false);
+    expect(check(mkCaller('App/Widget.swift'), 'App/Shared.swift')).toBe(true);
+    expect(check(mkCaller('App/Main.swift'), 'App/Shared.swift')).toBe(true);
+  });
+
+  it('does not treat an import of a plugin name as reaching the plugin', () => {
+    expect(
+      check(mkCaller('App/Main.swift', [namedImport('Gen')]), 'Pkg/Plugins/Gen/main.swift'),
+    ).toBe(false);
+  });
+
+  it('allows when either side is outside every known module', () => {
+    expect(check(mkCaller('Loose/Script.swift'), 'Pkg/Lib/Helper.swift')).toBe(true);
   });
 });
 

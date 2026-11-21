@@ -22,12 +22,15 @@ import { ANALYSIS_FEATURES } from '../../src/core/analysis-feature-registry.js';
 import { resolveAnalysisFeatureVersions } from '../../src/core/analysis-features.js';
 import { createKnowledgeGraph } from '../../src/core/graph/graph.js';
 import { resolveAnalyzerRunnerIdentity } from '../../src/core/analyzer-identity.js';
+import { resolveParseCacheIdentity } from '../../src/core/parse-cache-identity.js';
 import { EMBEDDING_DIMS, SCHEMA_FINGERPRINT } from '../../src/core/lbug/schema.js';
 import {
   PROCESS_DETECTION_BUDGET_DEFAULTS,
   PROCESS_DETECTION_ENV,
 } from '../../src/core/ingestion/process-detection-budget.js';
 import { getSearchFTSCjkSegmentation } from '../../src/core/search/cjk-segmentation.js';
+import { RebuildReasonCollector } from '../../src/core/rebuild-reasons.js';
+import { MAX_INCREMENTAL_WRITES } from '../../src/core/incremental/compaction-policy.js';
 import {
   FTS_DIRTY_PHASE,
   allowsFtsCrashWalPark,
@@ -66,18 +69,25 @@ const seedGitFile = async (repoPath: string): Promise<void> => {
   });
 };
 
-const incrementalMeta = (repoPath: string): RepoMeta => ({
-  repoPath,
-  lastCommit: 'stale-not-head',
-  indexedAt: new Date().toISOString(),
-  stats: {},
-  fileHashes: { [REL_FILE]: 'stale-hash' },
-  schemaFingerprint: SCHEMA_FINGERPRINT,
-  analysisFeatures: resolveAnalysisFeatureVersions(ANALYSIS_FEATURES, [REL_FILE]),
-  cjkSegmentation: getSearchFTSCjkSegmentation(),
-  embeddingDims: EMBEDDING_DIMS,
-  runnerIdentity: resolveAnalyzerRunnerIdentity(RUN_ANALYZE_URL.href),
-});
+const incrementalMeta = (repoPath: string): RepoMeta => {
+  const parser = resolveParseCacheIdentity(RUN_ANALYZE_URL.href);
+  if (parser.ok === false)
+    throw new Error(`Cannot verify fixture parser artifacts: ${parser.reason}`);
+  return {
+    repoPath,
+    lastCommit: 'stale-not-head',
+    indexedAt: new Date().toISOString(),
+    stats: {},
+    graphCompaction: { version: 1, compactBytes: 7, incrementalWrites: 0 },
+    fileHashes: { [REL_FILE]: 'stale-hash' },
+    schemaFingerprint: SCHEMA_FINGERPRINT,
+    analysisFeatures: resolveAnalysisFeatureVersions(ANALYSIS_FEATURES, [REL_FILE]),
+    cjkSegmentation: getSearchFTSCjkSegmentation(),
+    embeddingDims: EMBEDDING_DIMS,
+    runnerIdentity: resolveAnalyzerRunnerIdentity(RUN_ANALYZE_URL.href),
+    parseCacheIdentity: { base: parser.identity.base },
+  };
+};
 
 const headCommit = (repoPath: string): string =>
   execSync('git rev-parse HEAD', { cwd: repoPath, encoding: 'utf8' }).trim();
@@ -98,7 +108,7 @@ const fileGraph = () => {
   graph.addNode({
     id: 'file:src/a.ts',
     label: 'File',
-    properties: { filePath: REL_FILE },
+    properties: { name: REL_FILE, filePath: REL_FILE },
   });
   return graph;
 };
@@ -113,6 +123,23 @@ const mockLbugAdapter = async () => {
     loadGraphToLbug: vi.fn(async () => undefined),
     getLbugStats: vi.fn(async () => ({ nodes: 1, edges: 0, communities: 0, processes: 0 })),
     executeQuery: vi.fn(async () => []),
+    // The stored fixture contains one File node and no incident edges.
+    executePrepared: vi.fn<typeof actual.executePrepared>(async (query) => {
+      if (query.endsWith('WITH n LIMIT $limit RETURN count(*) AS rowCount')) {
+        return [{ rowCount: 1 }];
+      }
+      if (query.endsWith('WITH r LIMIT $limit RETURN count(*) AS rowCount')) {
+        return [{ rowCount: 0 }];
+      }
+      throw new Error(`Unexpected prepared query in FTS fixture: ${query}`);
+    }),
+    // The policy fixture has one stored File row. Publication now reconciles
+    // that identity instead of trusting the synthetic node count alone.
+    forEachQueryRow: vi.fn<typeof actual.forEachQueryRow>(async (query, onRow) => {
+      if (query.startsWith('MATCH (n:`File`) RETURN n.id AS id')) {
+        onRow({ id: 'file:src/a.ts', name: REL_FILE, filePath: REL_FILE });
+      }
+    }),
     executeWithReusedStatement: vi.fn(async () => []),
     closeLbug: vi.fn(async () => undefined),
     wipeLbugDbFiles: vi.fn(async () => undefined),
@@ -126,8 +153,7 @@ const mockLbugAdapter = async () => {
     deleteAllCommunitiesAndProcesses: vi.fn(async () => undefined),
     deleteAllInterprocTaintPaths: vi.fn(async () => undefined),
     deleteAllCallSummaries: vi.fn(async () => undefined),
-    deleteAllInjects: vi.fn(async () => undefined),
-    deleteAllAdvisedBy: vi.fn(async () => undefined),
+    deleteGlobalResolutionEdges: vi.fn(async () => undefined),
     deleteAllDestinations: vi.fn(async () => undefined),
     deleteSpringAopEvidenceNodes: vi.fn(async () => undefined),
     deleteSpringAutoConfigurationDeclarations: vi.fn(async () => undefined),
@@ -296,6 +322,27 @@ describe('FTS crash-marker policy (characterization)', () => {
     });
   });
 
+  it('carries the prior marker rebuild reasons through the FTS stamp', () => {
+    const reasons = [{ key: 'schema-fingerprint', text: 'schema moved' }];
+    const stamp = buildFtsDirtyStamp({
+      prior: { startedAt: 7, toWriteCount: 0, phase: 'full-rebuild', reasons },
+      writePlan: 'in-place',
+      checkpointSucceeded: false,
+      now: 42,
+    });
+    expect(stamp).toMatchObject({ startedAt: 7, phase: FTS_DIRTY_PHASE, reasons });
+  });
+
+  it('omits reasons from the FTS stamp when the prior marker has none', () => {
+    const stamp = buildFtsDirtyStamp({
+      prior: { startedAt: 7, toWriteCount: 0, phase: 'pre-write' },
+      writePlan: 'in-place',
+      checkpointSucceeded: true,
+      now: 42,
+    });
+    expect(Object.keys(stamp)).not.toContain('reasons');
+  });
+
   it('stamps after the escalation valve in source order', () => {
     const src = readFileSync(RUN_ANALYZE_SRC, 'utf8');
     const valve = src.indexOf("saveIncrementalDirtyState('escalated-full-write'");
@@ -372,6 +419,7 @@ describe('runFullAnalysis FTS crash marker', () => {
       const { storagePath } = getStoragePaths(tmpRepo.dbPath);
       await fs.mkdir(storagePath, { recursive: true });
       await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(
@@ -442,6 +490,7 @@ describe('runFullAnalysis FTS crash marker', () => {
       const { storagePath } = getStoragePaths(tmpRepo.dbPath);
       await fs.mkdir(storagePath, { recursive: true });
       await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       await runFullAnalysis(
@@ -618,6 +667,7 @@ describe('runFullAnalysis FTS crash marker', () => {
       const { storagePath } = getStoragePaths(tmpRepo.dbPath);
       await fs.mkdir(storagePath, { recursive: true });
       await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       await expect(
@@ -661,6 +711,7 @@ describe('runFullAnalysis FTS crash marker', () => {
       const { storagePath } = getStoragePaths(tmpRepo.dbPath);
       await fs.mkdir(storagePath, { recursive: true });
       await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(
@@ -989,9 +1040,12 @@ describe('runFullAnalysis FTS crash marker', () => {
   );
 
   it('treats a boundary checkpoint failure as best-effort on an in-place plan', async () => {
-    const checkpointOnce = vi.fn(async () => {
-      throw new Error('checkpoint rename failed');
-    });
+    // Only the earlier boundary is best-effort. Publication still requires
+    // its own successful checkpoint through the same policy helper.
+    const checkpointOnce = vi
+      .fn<() => Promise<boolean>>()
+      .mockRejectedValueOnce(new Error('checkpoint rename failed'))
+      .mockResolvedValue(true);
     let stamped: RepoMeta['incrementalInProgress'];
     vi.doMock('../../src/core/lbug/wal-checkpoint-driver.js', async (importActual) => ({
       ...(await importActual<typeof import('../../src/core/lbug/wal-checkpoint-driver.js')>()),
@@ -1030,6 +1084,7 @@ describe('runFullAnalysis FTS crash marker', () => {
       const { storagePath } = getStoragePaths(tmpRepo.dbPath);
       await fs.mkdir(storagePath, { recursive: true });
       await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
 
       const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
       const result = await runFullAnalysis(
@@ -1038,6 +1093,7 @@ describe('runFullAnalysis FTS crash marker', () => {
         { onProgress: () => {}, onLog: () => {} },
       );
       expect(result.ftsSkipped).not.toBe(true);
+      expect(checkpointOnce).toHaveBeenCalledTimes(2);
       expect(stamped).toMatchObject({
         phase: FTS_DIRTY_PHASE,
         writePlan: 'in-place',
@@ -1152,8 +1208,79 @@ describe('runFullAnalysis FTS crash marker', () => {
       expect(result.alreadyUpToDate).not.toBe(true);
       expect(runPipelineFromRepo).toHaveBeenCalled();
       expect(runDeferredDerivedPhases).toHaveBeenCalled();
+      expect(await runPipelineFromRepo.mock.results[0].value).toHaveProperty(
+        'runDeferredDerivedPhases',
+        undefined,
+      );
       const finalMeta = await loadMeta(storagePath);
       expect(finalMeta?.processDetection?.uncertified).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('releases deferred phases before compacting an unchanged snapshot', async () => {
+    const runDeferredDerivedPhases = vi.fn(async () => undefined);
+    const runPipelineFromRepo = vi.fn(async (repoPath: string) => ({
+      repoPath,
+      graph: fileGraph(),
+      runDeferredDerivedPhases,
+    }));
+    const wipeLbugDbFiles = vi.fn(async () => {
+      expect(runDeferredDerivedPhases).toHaveBeenCalledTimes(1);
+      expect(await runPipelineFromRepo.mock.results[0].value).toHaveProperty(
+        'runDeferredDerivedPhases',
+        undefined,
+      );
+    });
+    vi.doMock('../../src/core/lbug/lbug-adapter.js', async () => ({
+      ...(await mockLbugAdapter()),
+      wipeLbugDbFiles,
+    }));
+    vi.doMock('../../src/core/search/fts-indexes.js', async (importActual) => ({
+      ...(await importActual<typeof import('../../src/core/search/fts-indexes.js')>()),
+      initialiseSearchFTSStemmer: vi.fn(() => 'porter'),
+      missingSearchFTSIndexTables: vi.fn(async () => []),
+      dropSearchFTSIndexes: vi.fn(async () => undefined),
+      buildSearchIndexesOrDegrade: vi.fn(async () => ({ ok: true })),
+    }));
+    vi.doMock('../../src/core/ingestion/pipeline.js', () => ({ runPipelineFromRepo }));
+
+    const tmpRepo = await createTempDir('gitnexus-deferred-compaction-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      const fileHash = await computeFileHash(path.join(tmpRepo.dbPath, REL_FILE));
+      await saveMeta(storagePath, {
+        ...incrementalMeta(tmpRepo.dbPath),
+        lastCommit: headCommit(tmpRepo.dbPath),
+        fileHashes: { [REL_FILE]: fileHash! },
+        graphCompaction: { version: 1, compactBytes: 7, incrementalWrites: MAX_INCREMENTAL_WRITES },
+        processDetection: {
+          maxProcesses: null,
+          maxProcessBranching: PROCESS_DETECTION_BUDGET_DEFAULTS.maxProcessBranching,
+          maxProcessTraceDepth: PROCESS_DETECTION_BUDGET_DEFAULTS.maxProcessTraceDepth,
+          maxEntryPointCandidates: PROCESS_DETECTION_BUDGET_DEFAULTS.maxEntryPointCandidates,
+        },
+      });
+      await createPlaceholderGraphStore(lbugPath);
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: () => {} },
+      );
+
+      expect(result.alreadyUpToDate).not.toBe(true);
+      expect(runPipelineFromRepo).toHaveBeenCalledWith(
+        tmpRepo.dbPath,
+        expect.any(Function),
+        expect.objectContaining({ skipDerivedGraphPhases: true }),
+      );
+      expect(wipeLbugDbFiles).toHaveBeenCalledTimes(1);
+      expect(runDeferredDerivedPhases).toHaveBeenCalledTimes(1);
     } finally {
       await tmpRepo.cleanup();
     }
@@ -1445,6 +1572,409 @@ describe('runFullAnalysis FTS crash marker', () => {
       expect(Buffer.compare(await fs.readFile(`${lbugPath}.wal`), WAL_PATTERN)).toBe(0);
     } finally {
       vi.restoreAllMocks();
+      await tmpRepo.cleanup();
+    }
+  });
+});
+
+/**
+ * #3137: the collected rebuild reasons ride on every
+ * `incrementalInProgress` writer, so an interrupted rebuild can name its
+ * causes, and every clearing path drops them with the marker.
+ */
+describe('runFullAnalysis rebuild reasons on the crash marker', () => {
+  type MarkerWrite = { dir: string; marker: RepoMeta['incrementalInProgress'] };
+  const FOREIGN_SCHEMA = 'b1c2d3e4f5a6';
+  const BUMPED_SCHEMA = 'c2d3e4f5a6b7';
+
+  beforeEach(() => {
+    for (const key of Object.values(PROCESS_DETECTION_ENV)) {
+      vi.stubEnv(key, undefined);
+    }
+    // FTS is mocked here, so the FTS phase (and its stamp) must run.
+    vi.stubEnv('GITNEXUS_SKIP_FTS', undefined);
+  });
+  afterEach(() => {
+    vi.doUnmock('../../src/core/lbug/lbug-adapter.js');
+    vi.doUnmock('../../src/core/search/fts-indexes.js');
+    vi.doUnmock('../../src/core/ingestion/pipeline.js');
+    vi.doUnmock('../../src/storage/repo-manager.js');
+    vi.doUnmock('../../src/core/incremental/escalation-gate.js');
+    vi.restoreAllMocks();
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  /** Mocks the storage and pipeline edges; records every marker write with its target dir. */
+  const mockRun = ({
+    buildSearchIndexes = vi.fn(async () => ({ ok: true })),
+    inPlaceEscalation = false,
+  } = {}) => {
+    const writes: MarkerWrite[] = [];
+    const wipeLbugDbFiles = vi.fn(async () => undefined);
+    vi.doMock('../../src/core/lbug/wal-checkpoint-driver.js', async (importActual) => ({
+      ...(await importActual<typeof import('../../src/core/lbug/wal-checkpoint-driver.js')>()),
+      checkpointOnce: vi.fn(async () => true),
+    }));
+    vi.doMock('../../src/core/lbug/lbug-adapter.js', async () => {
+      const adapter = await mockLbugAdapter();
+      // An unreadable catalog keeps a size escalation in place (no staging
+      // swap), which is the only POSIX route to an in-place FTS stamp that
+      // carries a reason.
+      const catalog = [[], adapter.INDEX_CATALOG_UNREADABLE][Number(inPlaceEscalation)];
+      return {
+        ...adapter,
+        wipeLbugDbFiles,
+        readIndexCatalogSnapshot: vi.fn(async () => catalog),
+      };
+    });
+    vi.doMock('../../src/core/incremental/escalation-gate.js', async (importActual) => ({
+      ...(await importActual<typeof import('../../src/core/incremental/escalation-gate.js')>()),
+      shouldEscalateIncrementalWrite: () => inPlaceEscalation,
+    }));
+    vi.doMock('../../src/core/search/fts-indexes.js', async (importActual) => ({
+      ...(await importActual<typeof import('../../src/core/search/fts-indexes.js')>()),
+      initialiseSearchFTSStemmer: vi.fn(() => 'porter'),
+      missingSearchFTSIndexTables: vi.fn(async () => []),
+      dropSearchFTSIndexes: vi.fn(async () => undefined),
+      buildSearchIndexesOrDegrade: buildSearchIndexes,
+    }));
+    vi.doMock('../../src/core/ingestion/pipeline.js', () => ({
+      runPipelineFromRepo: vi.fn(async (repoPath: string) => ({ repoPath, graph: fileGraph() })),
+    }));
+    vi.doMock('../../src/storage/repo-manager.js', async (importActual) => {
+      const actual = await importActual<typeof import('../../src/storage/repo-manager.js')>();
+      return {
+        ...actual,
+        saveMeta: async (...args: Parameters<typeof actual.saveMeta>) => {
+          writes.push({ dir: args[0], marker: args[1].incrementalInProgress });
+          return actual.saveMeta(...args);
+        },
+      };
+    });
+    return { writes, wipeLbugDbFiles };
+  };
+
+  const markersInPhase = (writes: MarkerWrite[], phase: string) =>
+    writes.filter((write) => write.marker?.phase === phase);
+
+  /** A fully indexed meta at HEAD whose schema stamp is not this build's. */
+  const schemaForeignMeta = (repoPath: string, schemaFingerprint: string): RepoMeta => ({
+    ...incrementalMeta(repoPath),
+    lastCommit: headCommit(repoPath),
+    schemaFingerprint,
+  });
+
+  const summaryPrefix = (): string => {
+    const shape = new RebuildReasonCollector();
+    shape.add({ key: 'user-force', text: '' });
+    return shape.formatSummary() ?? '';
+  };
+
+  const occurrences = (haystack: string, needle: string): number =>
+    haystack.split(needle).length - 1;
+
+  it('stores the schema reason on the full-rebuild stamp and clears it on success', async () => {
+    const { writes } = mockRun();
+    const tmpRepo = await createTempDir('gitnexus-reasons-full-stamp-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, schemaForeignMeta(tmpRepo.dbPath, FOREIGN_SCHEMA));
+      await createPlaceholderGraphStore(lbugPath);
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: () => {} },
+      );
+
+      expect(result.rebuildReasons).toEqual(['schema-fingerprint']);
+      const stamps = markersInPhase(writes, 'full-rebuild');
+      expect(stamps).toHaveLength(1);
+      expect(stamps[0].marker?.reasons?.map((reason) => reason.key)).toEqual([
+        'schema-fingerprint',
+      ]);
+      const finalMeta = await loadMeta(storagePath);
+      expect(finalMeta?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('a schema rebuild killed at the wipe names the interrupted rebuild and the schema change once', async () => {
+    const { wipeLbugDbFiles } = mockRun();
+    wipeLbugDbFiles.mockRejectedValueOnce(new Error('simulated kill at the wipe'));
+    const tmpRepo = await createTempDir('gitnexus-reasons-ae5-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, schemaForeignMeta(tmpRepo.dbPath, FOREIGN_SCHEMA));
+      await createPlaceholderGraphStore(lbugPath);
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await expect(
+        runFullAnalysis(
+          tmpRepo.dbPath,
+          { skipAgentsMd: true, skipSkills: true },
+          { onProgress: () => {}, onLog: () => {} },
+        ),
+      ).rejects.toThrow('simulated kill at the wipe');
+      const crashed = await loadMeta(storagePath);
+      expect(crashed?.incrementalInProgress?.phase).toBe('full-rebuild');
+      const stored = crashed?.incrementalInProgress?.reasons ?? [];
+      expect(stored.map((reason) => reason.key)).toEqual(['schema-fingerprint']);
+
+      const logs: string[] = [];
+      const recovered = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(recovered.rebuildReasons).toEqual(['interrupted-rebuild']);
+      const summaries = logs.filter((message) => message.startsWith(summaryPrefix()));
+      expect(summaries).toHaveLength(1);
+      expect(occurrences(summaries[0], stored[0].text)).toBe(1);
+      expect(occurrences(logs.join('\n'), stored[0].text)).toBe(1);
+      const finalMeta = await loadMeta(storagePath);
+      expect(finalMeta?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('two consecutive crashes across a schema bump store flat reasons with no nested entry', async () => {
+    const { wipeLbugDbFiles } = mockRun();
+    wipeLbugDbFiles
+      .mockRejectedValueOnce(new Error('first kill'))
+      .mockRejectedValueOnce(new Error('second kill'));
+    const tmpRepo = await createTempDir('gitnexus-reasons-double-crash-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, schemaForeignMeta(tmpRepo.dbPath, FOREIGN_SCHEMA));
+      await createPlaceholderGraphStore(lbugPath);
+      const options = { skipAgentsMd: true, skipSkills: true };
+      const callbacks = { onProgress: () => {}, onLog: () => {} };
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await expect(runFullAnalysis(tmpRepo.dbPath, options, callbacks)).rejects.toThrow(
+        'first kill',
+      );
+      const first = await loadMeta(storagePath);
+      expect(first).toBeTruthy();
+      await saveMeta(storagePath, { ...(first as RepoMeta), schemaFingerprint: BUMPED_SCHEMA });
+      await expect(runFullAnalysis(tmpRepo.dbPath, options, callbacks)).rejects.toThrow(
+        'second kill',
+      );
+
+      const second = await loadMeta(storagePath);
+      const firstReasons = first?.incrementalInProgress?.reasons ?? [];
+      const secondReasons = second?.incrementalInProgress?.reasons ?? [];
+      expect(secondReasons.map((reason) => reason.key)).toEqual(['schema-fingerprint']);
+      expect(secondReasons[0].text).toContain(BUMPED_SCHEMA);
+      expect(secondReasons[0].text).not.toBe(firstReasons[0].text);
+
+      const recovered = await runFullAnalysis(tmpRepo.dbPath, options, callbacks);
+      expect(recovered.rebuildReasons).toEqual(['interrupted-rebuild']);
+      expect((await loadMeta(storagePath))?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('keeps the escalation reason on the escalated-full-write stamp and through the FTS stamp', async () => {
+    const { writes, wipeLbugDbFiles } = mockRun({ inPlaceEscalation: true });
+    wipeLbugDbFiles.mockRejectedValueOnce(new Error('simulated kill in the escalated wipe'));
+    const tmpRepo = await createTempDir('gitnexus-reasons-escalated-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
+      const options = { skipAgentsMd: true, skipSkills: true };
+      const callbacks = { onProgress: () => {}, onLog: () => {} };
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await expect(runFullAnalysis(tmpRepo.dbPath, options, callbacks)).rejects.toThrow(
+        'simulated kill in the escalated wipe',
+      );
+      const crashed = await loadMeta(storagePath);
+      expect(crashed?.incrementalInProgress?.phase).toBe('escalated-full-write');
+      expect(crashed?.incrementalInProgress?.reasons?.map((reason) => reason.key)).toEqual([
+        'escalated-full-write',
+      ]);
+      expect(markersInPhase(writes, 'pre-write')[0].marker?.reasons).toBeUndefined();
+
+      // A clean rerun with a live escalation hands the reason to the FTS stamp.
+      await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
+      writes.length = 0;
+      await runFullAnalysis(tmpRepo.dbPath, options, callbacks);
+      const escalated = markersInPhase(writes, 'escalated-full-write');
+      const ftsStamps = markersInPhase(writes, FTS_DIRTY_PHASE);
+      expect(ftsStamps).toHaveLength(1);
+      expect(ftsStamps[0].marker?.reasons).toEqual(escalated[0].marker?.reasons);
+      expect((await loadMeta(storagePath))?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('an FTS-phase crash keeps the reasons the escalated write stored', async () => {
+    const buildSearchIndexes = vi.fn(async () => {
+      throw new Error('simulated kill in CREATE_FTS_INDEX');
+    });
+    mockRun({ buildSearchIndexes, inPlaceEscalation: true });
+    const tmpRepo = await createTempDir('gitnexus-reasons-fts-crash-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, incrementalMeta(tmpRepo.dbPath));
+      await createPlaceholderGraphStore(getStoragePaths(tmpRepo.dbPath).lbugPath);
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await expect(
+        runFullAnalysis(
+          tmpRepo.dbPath,
+          { skipAgentsMd: true, skipSkills: true },
+          { onProgress: () => {}, onLog: () => {} },
+        ),
+      ).rejects.toThrow('simulated kill in CREATE_FTS_INDEX');
+
+      const crashed = await loadMeta(storagePath);
+      expect(crashed?.incrementalInProgress?.phase).toBe(FTS_DIRTY_PHASE);
+      expect(crashed?.incrementalInProgress?.reasons?.map((reason) => reason.key)).toEqual([
+        'escalated-full-write',
+      ]);
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('under --branch the reasons land only in the branch slot, and success clears them', async () => {
+    const { writes } = mockRun();
+    const tmpRepo = await createTempDir('gitnexus-reasons-branch-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const flat = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(flat.storagePath, { recursive: true });
+      await saveMeta(flat.storagePath, {
+        ...incrementalMeta(tmpRepo.dbPath),
+        lastCommit: headCommit(tmpRepo.dbPath),
+        branch: 'main-owner',
+      });
+      execSync('git checkout -q -b feature-x', { cwd: tmpRepo.dbPath, stdio: 'pipe' });
+      const branchSlot = getStoragePaths(tmpRepo.dbPath, 'feature-x');
+      const branchDir = path.dirname(branchSlot.metaPath);
+      await fs.mkdir(branchDir, { recursive: true });
+      await saveMeta(branchDir, {
+        ...schemaForeignMeta(tmpRepo.dbPath, FOREIGN_SCHEMA),
+        branch: 'feature-x',
+      });
+      writes.length = 0;
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { branch: 'feature-x', skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: () => {} },
+      );
+
+      expect(result.rebuildReasons).toEqual(['schema-fingerprint']);
+      const withReasons = writes.filter((write) => (write.marker?.reasons ?? []).length > 0);
+      expect(withReasons.length).toBeGreaterThan(0);
+      expect(new Set(withReasons.map((write) => write.dir))).toEqual(new Set([branchDir]));
+      expect((await loadMeta(branchDir))?.incrementalInProgress).toBeUndefined();
+      expect((await loadMeta(flat.storagePath))?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('an FTS-park recovery clears the marker and its reasons without forcing', async () => {
+    const { wipeLbugDbFiles } = mockRun();
+    const tmpRepo = await createTempDir('gitnexus-reasons-fts-park-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, {
+        ...incrementalMeta(tmpRepo.dbPath),
+        lastCommit: headCommit(tmpRepo.dbPath),
+        incrementalInProgress: {
+          ...ftsInPlaceDirty,
+          reasons: [{ key: 'escalated-full-write', text: 'stored escalation' }],
+        },
+      });
+      await fs.writeFile(lbugPath, GRAPH_BYTES);
+      await fs.writeFile(`${lbugPath}.wal`, WAL_PATTERN);
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: () => {} },
+      );
+
+      expect(result.alreadyUpToDate).toBe(true);
+      expect(result.rebuildReasons).toEqual([]);
+      expect(wipeLbugDbFiles).not.toHaveBeenCalled();
+      expect((await loadMeta(storagePath))?.incrementalInProgress).toBeUndefined();
+    } finally {
+      await tmpRepo.cleanup();
+    }
+  });
+
+  it('a legacy boolean marker recovers with no reasons recorded', async () => {
+    mockRun();
+    const tmpRepo = await createTempDir('gitnexus-reasons-legacy-marker-');
+    try {
+      await seedGitFile(tmpRepo.dbPath);
+      const { storagePath, lbugPath, metaPath } = getStoragePaths(tmpRepo.dbPath);
+      await fs.mkdir(storagePath, { recursive: true });
+      await saveMeta(storagePath, {
+        ...incrementalMeta(tmpRepo.dbPath),
+        lastCommit: headCommit(tmpRepo.dbPath),
+      });
+      const raw = JSON.parse(await fs.readFile(metaPath, 'utf8')) as Record<string, unknown>;
+      await fs.writeFile(metaPath, JSON.stringify({ ...raw, incrementalInProgress: true }));
+      await createPlaceholderGraphStore(lbugPath);
+
+      // The "no reasons recorded" tail, taken from the real collector: the part
+      // of an empty recovery entry that differs from one carrying a reason.
+      const entryText = (stored: { key: string; text: string }[]): string => {
+        const shape = new RebuildReasonCollector();
+        shape.recordInterruptedRebuild(stored);
+        return shape.reasons()[0].text;
+      };
+      const empty = entryText([]);
+      const withReason = entryText([{ key: 'k', text: 'K' }]);
+      const shared = [...empty].findIndex((char, i) => char !== withReason[i]);
+      const noReasonsTail = empty.slice(shared);
+
+      const logs: string[] = [];
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const result = await runFullAnalysis(
+        tmpRepo.dbPath,
+        { skipAgentsMd: true, skipSkills: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(result.rebuildReasons).toEqual(['interrupted-rebuild']);
+      const summaries = logs.filter((message) => message.startsWith(summaryPrefix()));
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].endsWith(noReasonsTail)).toBe(true);
+      expect((await loadMeta(storagePath))?.incrementalInProgress).toBeUndefined();
+    } finally {
       await tmpRepo.cleanup();
     }
   });

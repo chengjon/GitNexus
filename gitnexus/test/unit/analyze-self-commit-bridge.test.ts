@@ -1,3 +1,4 @@
+import '../helpers/mock-analysis-host.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -56,7 +57,12 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
 }));
 
 vi.mock('../../src/storage/repo-manager.js', () => ({
-  getStoragePaths: vi.fn(() => ({ storagePath: '.gitnexus', lbugPath: '.gitnexus/lbug' })),
+  loadMeta: vi.fn(async () => null),
+  getStoragePaths: vi.fn(() => ({
+    storagePath: '.gitnexus',
+    lbugPath: '.gitnexus/lbug',
+    metaPath: '.gitnexus/gitnexus.json',
+  })),
   getGlobalRegistryPath: vi.fn(() => 'registry.json'),
   RegistryNameCollisionError: class RegistryNameCollisionError extends Error {},
   AnalysisNotFinalizedError: class AnalysisNotFinalizedError extends Error {},
@@ -124,6 +130,17 @@ describe('analyzeCommand --self-commit bridge (#2639)', () => {
     expect(selfCommitContextFilesMock).toHaveBeenCalledWith(
       '/repo',
       ['AGENTS.md', 'CLAUDE.md'],
+      expect.any(Map),
+    );
+  });
+
+  it('limits a self-commit to the selected instruction file', async () => {
+    const { analyzeCommand } = await import('../../src/cli/analyze.js');
+    await analyzeCommand(undefined, { selfCommit: true, instructionFile: 'CLAUDE.md' });
+    expect(selfCommitContextFilesMock).toHaveBeenCalledTimes(1);
+    expect(selfCommitContextFilesMock).toHaveBeenCalledWith(
+      '/repo',
+      ['CLAUDE.md'],
       expect.any(Map),
     );
   });

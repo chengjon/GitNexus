@@ -22,11 +22,13 @@ export {
   getLanguageFromFilename,
   getSyntaxLanguageFromFilename,
   isBladeTemplateFilename,
+  isNotebookFilename,
 } from './language-detection.js';
 export type { MroStrategy } from './mro-strategy.js';
 
 // Impact risk scoring
 export { scoreImpactRisk, unusedAxesForImpactWalk } from './impact-risk.js';
+export { GLOBAL_NAME_FALLBACK_REASON, impactEdgePredicate } from './graph/edge-reasons.js';
 export type {
   ImpactRisk,
   ImpactRiskAxis,
@@ -130,7 +132,20 @@ export type {
 } from './scope-resolution/method-dispatch-index.js';
 
 // SCC-aware cross-file finalize (RFC §3.2 Phase 2; Ring 2 SHARED #915)
-export { finalize } from './scope-resolution/finalize-algorithm.js';
+export {
+  finalize,
+  importNameFiltersAllow,
+  indexExportsByName,
+  indexTopLevelExportsByName,
+} from './scope-resolution/finalize-algorithm.js';
+export type { ImportMembership, ImportVisibility } from './scope-resolution/import-visibility.js';
+export type { ImportEntry, ImportGroup } from './scope-resolution/import-groups.js';
+export { createGroupedImportVisibility } from './scope-resolution/import-groups.js';
+export {
+  createEagerImportVisibility,
+  importTargetDirectory,
+  isSelectableImport,
+} from './scope-resolution/import-visibility.js';
 export type {
   FinalizeInput,
   FinalizeFile,
@@ -222,3 +237,29 @@ export {
   stripGitSuffix,
 } from './integrations/understand-quickly.js';
 export type { UqDispatchPayload } from './integrations/understand-quickly.js';
+
+export type {
+  SourcePosition,
+  LookupPurpose,
+  NameClaim,
+  ScopeLookupPolicy,
+  NameLookupOptions,
+} from './scope-resolution/types.js';
+export {
+  importsFor as scopeImportsForName,
+  lookupLexicalName,
+  nameClaimsFor,
+  selectClaimsAtScope,
+  rangesOverlap,
+} from './scope-resolution/name-claims.js';
+export type {
+  NameClaimResult,
+  NameClaimSources,
+  ScopeClaimSelection,
+} from './scope-resolution/name-claims.js';
+
+export * from './rename/types.js';
+export * from './rename/results.js';
+export * from './rename/edits.js';
+export * from './rename/positions.js';
+export * from './rename/family.js';

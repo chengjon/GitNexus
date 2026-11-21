@@ -51,14 +51,22 @@
 
 import type { SinkKind } from './source-sink-config.js';
 import type { FunctionSummary } from './summary-model.js';
+import {
+  applyValueEffect,
+  joinRefinedValues,
+  provesInertCommand,
+  UNKNOWN_VALUE,
+  type RefinedValue,
+} from './value-refinement.js';
 
 /**
  * One resolved call edge from the `CALLS` graph. The join to a summary's
  * call-arg edge is by CALLEE NAME (the callee node's declared name), NOT by
  * call-site line — line-base parity between the CFG harvest (1-based) and the
- * reference site is fragile, while the callee identity is exact and the
- * context-insensitive model tatints the callee's parameter the same way at
- * every call site to it.
+ * reference site is fragile, and the context-insensitive model taints the
+ * callee's parameter the same way at every call site to it. If one caller
+ * has edges to two distinct callees with the same name, the solver considers
+ * both when propagating taint.
  */
 export interface InterprocCallEdge {
   readonly callerId: string;
@@ -86,6 +94,8 @@ export interface InterprocFinding {
 }
 
 export interface InterprocLimits {
+  /** Internal proof-payload budget; exhaustion restores baseline taint. */
+  readonly maxRefinementBytes?: number;
   /** Max functions in a single flow's hop chain. `undefined`/0 ⇒ default 32. */
   readonly maxHops?: number;
   /** Max findings overall (post-dedup). `undefined`/0 ⇒ unlimited. */
@@ -93,10 +103,12 @@ export interface InterprocLimits {
 }
 
 export interface InterprocResult {
+  readonly refinementFallback?: boolean;
   readonly findings: readonly InterprocFinding[];
   /** Findings dropped by `maxFindings` (post-dedup). */
   readonly droppedFindings: number;
-  /** Call edges whose call-site line matched no summary edge (diagnostics). */
+  /** Number of summary call-arg lookups that found no matching outgoing `CALLS`
+   *  edge for the caller. Repeated failed lookups of the same edge count separately. */
   readonly unmatchedCallSites: number;
 }
 
@@ -113,6 +125,7 @@ export const DEFAULT_PDG_MAX_INTERPROC_FINDINGS = 2000;
 
 /** A tainted parameter, with the flow that first tainted it (for path reconstruction). */
 interface TaintedParam {
+  readonly value?: RefinedValue;
   readonly fnId: string;
   readonly paramIndex: number;
   readonly sourceFnId: string;
@@ -205,6 +218,19 @@ export function solveInterprocTaint(
   const findingsByKey = new Map<string, InterprocFinding>();
   const tainted = new Map<string, TaintedParam>();
   const queue: TaintedParam[] = [];
+  let refinementEnabled = true;
+  // Queue entries retain earlier values after map replacement, so charge cumulatively.
+  let refinementBytes = 0;
+  const refinementBudget = limits?.maxRefinementBytes ?? 64 * 1024 * 1024;
+  const valueBytes = (value: RefinedValue | undefined): number =>
+    value?.kind === 'string'
+      ? 32 +
+        value.parts.reduce(
+          (total, part) =>
+            total + (typeof part === 'string' ? part.length * 2 : part.chars.length * 2 + 32),
+          0,
+        )
+      : 0;
 
   const recordFinding = (
     sourceFnId: string,
@@ -225,6 +251,16 @@ export function solveInterprocTaint(
     for (const ps of summary.paramToSink) {
       if (ps.param !== tp.paramIndex) continue;
       if (tp.neutralized.has(ps.sinkKind)) continue; // sanitised across the boundary (P1-2)
+      if (
+        refinementEnabled &&
+        ps.sinkKind === 'command-injection' &&
+        ps.inertCommandPrefixes &&
+        provesInertCommand(
+          applyValueEffect(ps.valueEffect, tp.value ?? UNKNOWN_VALUE),
+          ps.inertCommandPrefixes,
+        )
+      )
+        continue;
       // `tp.hops` already terminates at this (tainted) function — it IS the
       // source→sink chain, no extra hop to append.
       recordFinding(tp.sourceFnId, tp.fnId, ps.sinkKind, tp.hops, tp.truncated);
@@ -241,20 +277,44 @@ export function solveInterprocTaint(
    */
   const taint = (tp: TaintedParam): void => {
     const key = pkey(tp.fnId, tp.paramIndex, tp.sourceFnId);
-    const existing = tainted.get(key);
+    let existing = tainted.get(key);
+    let value = refinementEnabled
+      ? existing
+        ? joinRefinedValues(existing.value ?? UNKNOWN_VALUE, tp.value ?? UNKNOWN_VALUE)
+        : (tp.value ?? UNKNOWN_VALUE)
+      : UNKNOWN_VALUE;
+    if (refinementEnabled && refinementBytes + valueBytes(value) > refinementBudget) {
+      refinementEnabled = false;
+      refinementBytes = 0;
+      for (const [priorKey, prior] of tainted) {
+        const widened = { ...prior, value: UNKNOWN_VALUE };
+        tainted.set(priorKey, widened);
+        queue.push(widened);
+        fireSinks(widened);
+      }
+      existing = tainted.get(key);
+      value = UNKNOWN_VALUE;
+    }
     if (existing) {
       const inter = new Set<SinkKind>();
       for (const k of existing.neutralized) if (tp.neutralized.has(k)) inter.add(k);
-      if (inter.size >= existing.neutralized.size) return; // no shrink — cycle-safe
-      const merged: TaintedParam = { ...existing, neutralized: inter };
+      if (
+        inter.size >= existing.neutralized.size &&
+        JSON.stringify(value) === JSON.stringify(existing.value ?? UNKNOWN_VALUE)
+      )
+        return;
+      refinementBytes += valueBytes(value);
+      const merged: TaintedParam = { ...existing, neutralized: inter, value };
       tainted.set(key, merged);
       queue.push(merged);
       fireSinks(merged);
       return;
     }
-    tainted.set(key, tp);
-    queue.push(tp);
-    fireSinks(tp);
+    const added = { ...tp, value };
+    refinementBytes += valueBytes(value);
+    tainted.set(key, added);
+    queue.push(added);
+    fireSinks(added);
   };
 
   // ── seeds: every source→callee-arg, resolved against CALLS ────────────────
@@ -278,6 +338,9 @@ export function solveInterprocTaint(
           hops: seed.hops,
           truncated: seed.truncated,
           neutralized: new Set(sc.neutralized ?? []),
+          value: refinementEnabled
+            ? applyValueEffect(sc.valueEffect, UNKNOWN_VALUE)
+            : UNKNOWN_VALUE,
         });
       }
     }
@@ -379,6 +442,9 @@ export function solveInterprocTaint(
           hops: next.hops,
           truncated: tp.truncated || next.truncated,
           neutralized,
+          value: refinementEnabled
+            ? applyValueEffect(pc.valueEffect, tp.value ?? UNKNOWN_VALUE)
+            : UNKNOWN_VALUE,
         });
       }
     }
@@ -395,6 +461,7 @@ export function solveInterprocTaint(
   const findings = all.length > maxFindings ? all.slice(0, maxFindings) : all;
 
   return {
+    ...(!refinementEnabled ? { refinementFallback: true } : {}),
     findings,
     droppedFindings: all.length - findings.length,
     unmatchedCallSites,

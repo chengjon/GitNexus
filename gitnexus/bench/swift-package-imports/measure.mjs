@@ -23,19 +23,21 @@
  *   and an in-repo `CoreUI` folder that is NOT in Package.swift stay
  *   external. An empty `declaredTargets` map fails every name closed. Import
  *   of a module that `@_exported import`s another unions that module's files.
- *   A `#2931` nested `Sources/Mod0` path still belongs to Mod0. Grouping
- *   assigns a two-prefix file to the FIRST target only.
+ *   A `#2931` nested `Sources/Mod0` path still belongs to Mod0 for import
+ *   resolve. Grouping anchors target paths at the repo root (#3355), so a
+ *   two-prefix file joins the target it sits under, not a later match.
  *
  * - `parse_targets` / `parse_binary_skipped` / `url_comment_targets` /
- *   `parse_complete` — EXACT. Source factories are kept; binary/plugin
- *   factories are not modules; `https://` on the same line does not hide a
- *   later `.target`.
+ *   `parse_complete` — EXACT. Source factories are kept; binary and
+ *   system-library factories are not modules; a plugin is a non-importable
+ *   module under `Plugins/` (#3355); `https://` on the same line does not hide
+ *   a later `.target`.
  *
  * - `layout_fingerprint` — EXACT. sha256 over sorted `from|target->files`
  *   rows on the unique query set. Catches a target-set change that leaves
  *   the counts intact.
  *
- * - `resolve_scaling_ratio` / `strategy_scaling_ratio` / `parse_scaling_ratio`
+ * - `resolve_scaling_ratio` / `parse_scaling_ratio`
  *   — the only timing arms, RATIOS not millisecond ceilings.
  *   `(t_4n / t_n) / 4` divides the machine out; ~1.0 is linear.
  *   Files-per-target is FIXED while target count (and therefore files and
@@ -52,9 +54,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { parseSwiftPackageManifest } from '../../src/core/ingestion/language-config.ts';
-import { swiftPackageStrategy } from '../../src/core/ingestion/import-resolvers/configs/swift.ts';
 import { resolveSwiftImportTarget } from '../../src/core/ingestion/languages/swift/import-target.ts';
-import { groupSwiftFilesBySpmTarget } from '../../src/core/ingestion/languages/swift/target-grouping.ts';
+import { groupSwiftFilesByModule } from '../../src/core/ingestion/languages/swift/target-grouping.ts';
 
 const baselines = JSON.parse(readFileSync(new URL('./baselines.json', import.meta.url), 'utf8'));
 
@@ -171,37 +172,11 @@ function resolveOne(query, allFilePaths, config, parsedFiles) {
   });
 }
 
-function strategyCtx(files, config) {
-  return {
-    allFilePaths: new Set(files),
-    allFileList: files,
-    normalizedFileList: files.map((p) => p.replace(/\\/g, '/')),
-    index: {},
-    resolveCache: new Map(),
-    configs: {
-      tsconfigPaths: null,
-      goModule: null,
-      composerConfig: null,
-      swiftPackageConfig: config,
-      csharpConfigs: [],
-    },
-  };
-}
-
 function resolvePass(corpus) {
   const allFilePaths = new Set(corpus.files);
   let resolved = 0;
   for (const query of corpus.queries) {
     if (resolveOne(query, allFilePaths, corpus.config, corpus.parsedFiles) != null) resolved++;
-  }
-  return resolved;
-}
-
-function strategyPass(corpus) {
-  const ctx = strategyCtx(corpus.files, corpus.config);
-  let resolved = 0;
-  for (const query of corpus.queries) {
-    if (swiftPackageStrategy(query.raw, query.from, ctx) != null) resolved++;
   }
   return resolved;
 }
@@ -266,7 +241,9 @@ function correctness(corpus) {
   );
   const emptyDeclaredExternal = empty == null ? 1 : 0;
 
-  const groups = groupSwiftFilesBySpmTarget(corpus.files, (p) => p, corpus.targets);
+  // Anchored at the repo root: Clash.swift is under Sources/Mod0; the
+  // Sources/Mod1 further down its path is a vendored copy, not Mod1 (#3355).
+  const groups = groupSwiftFilesByModule(corpus.files, (p) => p, { targets: corpus.targets });
   const firstWins =
     groups.get('Mod0')?.includes(corpus.extras.clash) === true &&
     groups.get('Mod1')?.includes(corpus.extras.clash) !== true
@@ -299,13 +276,16 @@ let package = Package(
     reexportExtra,
     nestedRepeatResolved,
     firstWins,
-    parseTargets: parseFixed.targets.size,
+    // Importable source targets. Plugins are modules (grouped) but never
+    // `import`-able (#3355), so they are counted by the arm below instead.
+    parseTargets: parseFixed.targets.size - parseFixed.plugins.size,
     parseBinarySkipped:
-      parseFixed.targets.has('Lib') ||
-      parseFixed.targets.has('Gen') ||
-      parseFixed.targets.has('CFoo')
-        ? 0
-        : 1,
+      !parseFixed.targets.has('Lib') &&
+      !parseFixed.targets.has('CFoo') &&
+      parseFixed.targets.get('Gen') === 'Plugins/Gen' &&
+      parseFixed.plugins.has('Gen')
+        ? 1
+        : 0,
     urlCommentTargets: urlComment.targets.get('T') === 'Sources/T' ? 1 : 0,
     parseComplete: parseFixed.complete && urlComment.complete ? 1 : 0,
     fingerprint: createHash('sha256').update(records.sort().join('\n')).digest('hex'),
@@ -319,10 +299,6 @@ const shape = correctness(small);
 const smallResolveMs = fastest(() => resolvePass(small), REPS);
 const largeResolveMs = fastest(() => resolvePass(large), REPS);
 const resolveScaling = largeResolveMs / smallResolveMs / SCALE;
-
-const smallStrategyMs = fastest(() => strategyPass(small), REPS);
-const largeStrategyMs = fastest(() => strategyPass(large), REPS);
-const strategyScaling = largeStrategyMs / smallStrategyMs / SCALE;
 
 const parseSmallSrc = manifestFor(PARSE_TARGETS);
 const parseLargeSrc = manifestFor(PARSE_TARGETS * SCALE);
@@ -370,13 +346,10 @@ console.log(
   `resolve_scaling_ratio  : ${resolveScaling.toFixed(3)}  (budget <= ${baselines.resolve_scaling_budget}; ~1.0 is linear)`,
 );
 console.log(
-  `strategy_scaling_ratio : ${strategyScaling.toFixed(3)}  (budget <= ${baselines.strategy_scaling_budget}; ~1.0 is linear)`,
-);
-console.log(
   `parse_scaling_ratio    : ${parseScaling.toFixed(3)}  (budget <= ${baselines.parse_scaling_budget}; ~1.0 is linear)`,
 );
 console.log(
-  `reps                   : ${REPS}   resolve ${smallResolveMs.toFixed(2)}ms / 4x ${largeResolveMs.toFixed(2)}ms   strategy ${smallStrategyMs.toFixed(2)}ms / 4x ${largeStrategyMs.toFixed(2)}ms   parse ${smallParseMs.toFixed(2)}ms / 4x ${largeParseMs.toFixed(2)}ms`,
+  `reps                   : ${REPS}   resolve ${smallResolveMs.toFixed(2)}ms / 4x ${largeResolveMs.toFixed(2)}ms   parse ${smallParseMs.toFixed(2)}ms / 4x ${largeParseMs.toFixed(2)}ms`,
 );
 console.log(
   `parse_scale_shape      : ${parseSmall.targets.size} -> ${parseLarge.targets.size} targets (expect ${PARSE_TARGETS} -> ${PARSE_TARGETS * SCALE})`,
@@ -447,16 +420,6 @@ if (process.argv.includes('--check')) {
         `  resolveSwiftImportTarget grew superlinearly in file+import count — a\n` +
         `  per-import scan of allFilePaths scores ~4 here. Re-run on an idle\n` +
         `  machine before investigating, and check \`reps\` first.`,
-    );
-  }
-
-  if (strategyScaling > baselines.strategy_scaling_budget) {
-    failed = true;
-    console.error(
-      `\nFAIL strategy_scaling_ratio: ${strategyScaling.toFixed(3)} exceeds ` +
-        `${baselines.strategy_scaling_budget} (~1.0 is linear).\n` +
-        `  swiftPackageStrategy grew superlinearly — usually the WeakMap target\n` +
-        `  index falling back to O(imports × files). Re-run idle; check \`reps\`.`,
     );
   }
 

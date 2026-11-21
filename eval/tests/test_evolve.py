@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -661,8 +662,6 @@ def test_run_proposer_hides_the_hidden_harness_and_keeps_the_full_tool_surface(m
     # and before the sandbox is prepared around it.
     assert events[:2] == ["sanitize", "prepare"]
     assert [clone.name for clone in sanitized] == ["clone"]
-    # Not --bare: bare ignores --tools and would cost the proposer Grep/Glob.
-    assert captured.get("bare", False) is False
     assert captured["allowed_tools"] == evolve.PROPOSER_ALLOWED_TOOLS
     assert captured["settings_json"] == FakeSandbox.settings_json
 
@@ -1428,21 +1427,32 @@ def test_outer_runner_pid_namespace_kills_setsid_descendant(tmp_path):
         pytest.skip(str(exc))
         raise AssertionError("pytest.skip() returned unexpectedly")
     sentinel = tmp_path / "escaped"
+    ready = tmp_path / "descendant-ready"
+    cancel = threading.Event()
+    descendant = (
+        "import time,pathlib; "
+        f"pathlib.Path({str(ready)!r}).touch(); print('ready', flush=True); "
+        f"time.sleep(1); pathlib.Path({str(sentinel)!r}).touch()"
+    )
     child = (
         "import os,subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-c',\"import time,pathlib;time.sleep(1);pathlib.Path({str(sentinel)!r}).touch()\"],preexec_fn=os.setsid); "
+        f"subprocess.Popen([sys.executable,'-c',{descendant!r}],preexec_fn=os.setsid); "
         "time.sleep(10)"
     )
     result = run_managed(
         pid_namespace_command([sys.executable, "-c", child], bwrap_bin=bwrap),
-        timeout=0.15,
+        # Cancel only after the escaped-session descendant has actually started.
+        # A timeout during bwrap/Python startup must not count as containment.
+        timeout=10,
         terminate_grace=0.1,
         require_pid_namespace=True,
+        cancel_event=cancel,
+        stdout_observer=lambda _chunk: cancel.set(),
     )
-    time.sleep(1.1)
-
+    assert ready.exists(), "the setsid descendant must start before it can be contained"
     assert not result.ok
-    assert result.state in {"timeout", "forced-kill"}
+    assert result.state == "cancelled"
+    time.sleep(1.1)
     assert not sentinel.exists()
 
 

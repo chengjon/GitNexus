@@ -46,7 +46,7 @@ Default location is `<repo>/.gitnexus/`. Override with environment variables (al
 
 `list_repos`, `gitnexus://repo/{name}/context`, and HTTP `GET /api/repos` / `GET /api/repo` expose `storagePath`, `contentRetention`, and `sourceAvailable`. HTTP `/api/file` and `/api/grep` return 410 unless retention is `full`. MCP `include_content` may still return symbol spans when retention is `symbol`.
 
-Use `node .gitnexus/run.cjs analyze --watch` for a long-lived local Git repository. It performs an initial analysis, queues scanner-admitted file changes, and retries intact failed batches with bounded backoff. Watch refreshes update only the graph: they skip AGENTS.md / CLAUDE.md injection and standard skill installation, so run a one-shot `analyze` when those generated files need updating. Watch rejects one-shot or context-output flags including `--force`, embedding flags, `--skills`, `--default-branch`, `--skip-agents-md`, `--skip-skills`, `--no-stats`, `--self-commit`, `--index-only`, and `--skip-git`. It never pulls remotes. Scheduled remote clone/pull is a different command: `gitnexus auto-sync`. Bare `gitnexus watch` is reserved and does not start either job. Running MCP and `serve` processes periodically check for a published replacement and reopen it without a restart. MCP checks are throttled to once every five seconds, so a tool call before the next check can briefly use the previous index.
+Use `node .gitnexus/run.cjs analyze --watch` for a long-lived local Git repository. It performs an initial analysis, queues scanner-admitted file changes, and retries intact failed batches with bounded backoff. Watch refreshes update only the graph: they skip AGENTS.md / CLAUDE.md injection and standard skill installation, so run a one-shot `analyze` when those generated files need updating. Watch rejects one-shot or context-output flags including `--force`, embedding flags, `--skills`, `--default-branch`, `--instruction-file`, `--skip-agents-md`, `--skip-skills`, `--no-stats`, `--self-commit`, `--index-only`, and `--skip-git`. It never pulls remotes. Scheduled remote clone/pull is a different command: `gitnexus auto-sync`. Bare `gitnexus watch` is reserved and does not start either job. Running MCP and `serve` processes periodically check for a published replacement and reopen it without a restart. MCP checks are throttled to once every five seconds, so a tool call before the next check can briefly use the previous index.
 
 ### status — Check index freshness
 
@@ -80,13 +80,14 @@ Generates repository documentation from the knowledge graph using an LLM. HTTP p
 | Flag                | Effect                                    |
 | ------------------- | ----------------------------------------- |
 | `--force`           | Force full regeneration, also required to re-generate an existing wiki in a different language |
-| `--provider <name>` | LLM provider: minimax, openai, openrouter, azure, custom, cursor, claude, codex, opencode, or grok (default: minimax). Local CLIs (`cursor`, `claude`, `codex`, `opencode`, `grok`) use your existing CLI login and skip `--api-key`. |
+| `--provider <name>` | LLM provider: minimax, anthropic, openai, openrouter, azure, custom, cursor, claude, codex, opencode, or grok (default: minimax). Local CLIs (`cursor`, `claude`, `codex`, `opencode`, `grok`) use your existing CLI login and skip `--api-key`. `anthropic` calls the Anthropic Messages API with `ANTHROPIC_API_KEY` (or `GITNEXUS_API_KEY` / `--api-key`); default model `claude-opus-5-5`. |
 | `--model <model>`   | LLM model (default: MiniMax-M3)           |
 | `--base-url <url>`  | LLM API base URL                          |
 | `--api-key <key>`   | LLM API key                               |
 | `--concurrency <n>` | Parallel LLM calls (default: 3)           |
 | `--timeout <seconds>` | LLM request timeout in seconds (default: disabled) |
 | `--retries <n>`     | Max LLM retry attempts per request (default: 3) |
+| `--max-completion-tokens <n>` | Max completion tokens per LLM request (default: 16384). `GITNEXUS_MAX_COMPLETION_TOKENS` overrides `maxCompletionTokens` in `~/.gitnexus/config.json`; the flag overrides both. |
 | `--lang <lang>`     | Output language for generated documentation (e.g. english, chinese, spanish, japanese) |
 | `--gist`            | Publish wiki as a public GitHub Gist      |
 

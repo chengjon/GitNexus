@@ -426,3 +426,15 @@ export const doctorCommand = async () => {
     console.log(line);
   }
 };
+
+// Structured doctor diagnostics surface (fork). Re-exported from a separate
+// module so the upstream console `doctorCommand` above stays untouched.
+export {
+  runDoctor,
+  defaultDeps,
+  type DoctorDeps,
+  type DoctorOptions,
+  type DoctorCheck,
+  type DoctorResult,
+  type DoctorStatus,
+} from './doctor-run.js';

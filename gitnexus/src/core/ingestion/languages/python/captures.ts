@@ -12,10 +12,10 @@
  *      binding, and `__init__` assignments from annotated parameters emit
  *      class-scoped instance-field bindings (see `receiver-binding.ts`).
  *
- * Pure given the input source text. No I/O, no globals consulted.
+ * No I/O. A `.ipynb` path also depends on `filePath` and `sourceMeta`, not only the source text.
  */
 
-import type { Capture, CaptureMatch } from 'gitnexus-shared';
+import type { Capture, CaptureMatch, Range } from 'gitnexus-shared';
 import {
   nodeToCapture,
   syntheticCapture,
@@ -23,7 +23,13 @@ import {
   type SyntaxNode,
 } from '../../utils/ast-helpers.js';
 import { splitImportStatement } from './import-decomposer.js';
-import { getPythonParser, getPythonScopeQuery } from './query.js';
+import { expandPythonScopeMatches, getPythonParser, pythonScopeQueryMatches } from './query.js';
+import {
+  extractNotebookPython,
+  isNotebookPath,
+  mapExtractLine,
+  type NotebookLineSegment,
+} from '../../ipynb-extractor.js';
 import {
   synthesizeConstructorFieldTypeBindings,
   synthesizeReceiverTypeBinding,
@@ -33,9 +39,23 @@ import { computePythonArityMetadata } from './arity-metadata.js';
 import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
-import { pythonFunctionDefinitionLabel } from './simple-hooks.js';
+import { isPythonGlobalDeclaration, pythonFunctionDefinitionLabel } from './simple-hooks.js';
 import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
 import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
+import { applyPythonLexicalBindings } from './lexical-bindings.js';
+import { isPythonTypeAnnotation, pythonAttributeAccessKinds } from './attribute-references.js';
+import {
+  beginPythonSubtypeDispatchCapture,
+  recordPythonSimplePositionalCall,
+  recordPythonSubtypeMethodShape,
+} from './subtype-dispatch.js';
+import {
+  beginPythonModuleAccessorCapture,
+  recordPythonLiteralAll,
+  recordPythonModuleAccessor,
+  synthesizePythonCallResultAssignment,
+} from './module-accessors.js';
+import { synthesizePythonInstanceFieldCaptures } from './instance-fields.js';
 
 const PYTHON_CALLABLE_CAPTURE_OPTIONS = {
   functionNodeTypes: new Set(['function_definition', 'lambda']),
@@ -71,39 +91,60 @@ const PYTHON_CALLABLE_CAPTURE_OPTIONS = {
 
 export function emitPythonScopeCaptures(
   sourceText: string,
-  _filePath: string,
+  filePath: string,
   cachedTree?: unknown,
+  sourceMeta?: {
+    sourceKind?: 'full-file' | 'pre-extracted-script';
+    notebookSegments?: readonly NotebookLineSegment[];
+  },
 ): readonly CaptureMatch[] {
+  beginPythonSubtypeDispatchCapture(filePath);
+  beginPythonModuleAccessorCapture(filePath);
+  let parseText = sourceText;
+  let tree = cachedTree as ReturnType<ReturnType<typeof getPythonParser>['parse']> | undefined;
+  let notebookSegments: readonly NotebookLineSegment[] | undefined;
+  if (isNotebookPath(filePath)) {
+    const resolved = resolveNotebookCaptureSource(sourceText, tree, sourceMeta);
+    if (resolved === null) return [];
+    parseText = resolved.parseText;
+    tree = resolved.tree;
+    notebookSegments = resolved.notebookSegments;
+  }
+  const subtypeLineMapper =
+    notebookSegments === undefined
+      ? undefined
+      : (line: number): number => mapExtractLine(line - 1, notebookSegments) + 1;
   // Skip the parse when the caller (the scope-resolution orchestrator's
   // `treeCache`) already produced a Tree for this source — empty under
   // worker-pool runs, so cache miss = re-parse. The cachedTree parameter
   // is typed as `unknown` at the
   // contract layer (see `LanguageProvider.emitScopeCaptures`); cast
   // here at the use site.
-  let tree = cachedTree as ReturnType<ReturnType<typeof getPythonParser>['parse']> | undefined;
   if (tree === undefined) {
     try {
-      tree = parseSourceSafe(getPythonParser(), sourceText, undefined, {
-        bufferSize: getTreeSitterBufferSize(sourceText),
+      tree = parseSourceSafe(getPythonParser(), parseText, undefined, {
+        bufferSize: getTreeSitterBufferSize(parseText),
       });
     } catch (err) {
-      throw scopeExtractionError('parse', _filePath, err);
+      throw scopeExtractionError('parse', filePath, err);
     }
     recordCacheMiss();
   } else {
     recordCacheHit();
   }
+  if (parseText.includes('__all__')) recordPythonLiteralAll(filePath, tree.rootNode);
 
-  let rawMatches: ReturnType<ReturnType<typeof getPythonScopeQuery>['matches']>;
+  let rawMatches: ReturnType<typeof pythonScopeQueryMatches>;
   try {
-    rawMatches = getPythonScopeQuery().matches(tree.rootNode);
+    rawMatches = pythonScopeQueryMatches(tree.rootNode);
   } catch (err) {
-    throw scopeExtractionError('scope query', _filePath, err);
+    throw scopeExtractionError('scope query', filePath, err);
   }
 
   const out: CaptureMatch[] = [];
+  const dependsCalleeSites = new Set<string>();
 
-  for (const m of rawMatches) {
+  for (const captures of expandPythonScopeMatches(rawMatches)) {
     // Group captures by their tag name. Tree-sitter strips the leading
     // `@`; we put it back so the central extractor's prefix lookups
     // (`@scope.`, `@declaration.`, …) work.
@@ -115,12 +156,55 @@ export function emitPythonScopeCaptures(
     // children on every match -> O(matches x rootChildren). That was the #1848
     // hotpath in Go (fixed in eaf0a305); the same shape lived here in Python.
     const nodeMap: Record<string, SyntaxNode> = {};
-    for (const c of m.captures) {
+    for (const c of captures) {
       const tag = '@' + c.name;
       grouped[tag] = nodeToCapture(tag, c.node);
       nodeMap[tag] = c.node;
     }
     if (Object.keys(grouped).length === 0) continue;
+
+    const bareRead = nodeMap['@reference.read.identifier'];
+    if (bareRead !== undefined && isPythonTypeAnnotation(bareRead)) continue;
+
+    const attribute = nodeMap['@reference.read.member'];
+    if (attribute !== undefined) {
+      const kinds = pythonAttributeAccessKinds(attribute);
+      for (const kind of kinds) {
+        const reference = { ...grouped };
+        delete reference['@reference.read.member'];
+        const tag = `@reference.${kind}.member`;
+        reference[tag] = nodeToCapture(tag, attribute);
+        synthesizeReceiverChainCapture(reference, nodeMap['@reference.receiver']);
+        out.push(reference);
+      }
+      continue;
+    }
+
+    recordPythonSubtypeCallShape(grouped, nodeMap, filePath, subtypeLineMapper);
+
+    const assignedNode = nodeMap['@declaration.variable'];
+    if (assignedNode !== undefined) {
+      const assignment = synthesizePythonCallResultAssignment(
+        assignedNode,
+        filePath,
+        subtypeLineMapper,
+      );
+      if (assignment !== undefined) out.push(assignment);
+    }
+
+    const declarationNode = nodeMap['@declaration.function'] ?? nodeMap['@declaration.class'];
+    const declarationName = grouped['@declaration.name']?.text;
+    if (
+      declarationNode !== undefined &&
+      declarationName !== undefined &&
+      isPythonGlobalDeclaration(declarationNode, declarationName)
+    ) {
+      grouped['@declaration.global'] = syntheticCapture(
+        '@declaration.global',
+        declarationNode,
+        declarationName,
+      );
+    }
 
     if (grouped['@import.statement'] !== undefined) {
       // `@import.statement` is captured directly ON the `import_statement` /
@@ -146,6 +230,14 @@ export function emitPythonScopeCaptures(
       continue;
     }
 
+    if (grouped['@scope.class'] !== undefined) {
+      out.push(
+        grouped,
+        ...synthesizePythonInstanceFieldCaptures(nodeMap['@scope.class']!, filePath),
+      );
+      continue;
+    }
+
     if (grouped['@scope.function'] !== undefined) {
       // Structural receiver chain for a call whose receiver is itself an
       // expression, so resolution can type it by folding over structure
@@ -160,6 +252,7 @@ export function emitPythonScopeCaptures(
       const scopeNode = nodeMap['@scope.function']!;
       const fnNode = scopeNode.type === 'function_definition' ? scopeNode : null;
       if (fnNode !== null) {
+        recordPythonModuleAccessor(filePath, fnNode, subtypeLineMapper);
         const parameterNames = computePythonArityMetadata(fnNode).parameterNames;
         if (parameterNames.length > 0) {
           grouped['@scope.lexical-names'] = syntheticCapture(
@@ -171,7 +264,13 @@ export function emitPythonScopeCaptures(
         const synth = synthesizeReceiverTypeBinding(fnNode);
         if (synth !== null) out.push(synth);
         out.push(...synthesizeConstructorFieldTypeBindings(fnNode));
-        for (const depRef of synthesizeDependsReferences(fnNode)) out.push(depRef);
+        for (const depRef of synthesizeDependsReferences(fnNode)) {
+          out.push(depRef);
+          const callee = depRef['@reference.call.free'];
+          if (callee) {
+            dependsCalleeSites.add(`${callee.range.startLine}:${callee.range.startCol}`);
+          }
+        }
       }
       continue;
     }
@@ -191,6 +290,7 @@ export function emitPythonScopeCaptures(
         if (pythonFunctionDefinitionLabel(fnNode, 'Function') === 'Method') {
           delete grouped['@declaration.function'];
           grouped['@declaration.method'] = { ...anchorCap, name: '@declaration.method' };
+          recordPythonSubtypeMethodShape(filePath, fnNode, subtypeLineMapper);
         }
         const arity = computePythonArityMetadata(fnNode);
         if (arity.parameterCount !== undefined) {
@@ -240,7 +340,119 @@ export function emitPythonScopeCaptures(
   out.push(...synthesizePythonInheritanceReferences(tree.rootNode));
   out.push(...synthesizeCallableFlowCaptures(tree.rootNode, PYTHON_CALLABLE_CAPTURE_OPTIONS));
 
-  return out;
+  const references =
+    dependsCalleeSites.size === 0
+      ? out
+      : out.filter((match) => {
+          const value = match['@reference.read.identifier'] ?? match['@reference.value-ref'];
+          return (
+            value === undefined ||
+            !dependsCalleeSites.has(`${value.range.startLine}:${value.range.startCol}`)
+          );
+        });
+  const lexicalCaptures = applyPythonLexicalBindings(
+    references,
+    tree.rootNode,
+    filePath,
+    notebookSegments === undefined ? undefined : (range) => remapRange(range, notebookSegments),
+  );
+  if (notebookSegments !== undefined) {
+    return lexicalCaptures.map((match) => remapCaptureMatch(match, notebookSegments));
+  }
+  return lexicalCaptures;
+}
+
+function resolveNotebookCaptureSource(
+  sourceText: string,
+  cachedTree: ReturnType<ReturnType<typeof getPythonParser>['parse']> | undefined,
+  sourceMeta?: {
+    sourceKind?: 'full-file' | 'pre-extracted-script';
+    notebookSegments?: readonly NotebookLineSegment[];
+  },
+): {
+  parseText: string;
+  tree: ReturnType<ReturnType<typeof getPythonParser>['parse']> | undefined;
+  notebookSegments?: readonly NotebookLineSegment[];
+} | null {
+  if (sourceMeta?.notebookSegments) {
+    return {
+      parseText: sourceText,
+      tree: cachedTree,
+      notebookSegments: sourceMeta.notebookSegments,
+    };
+  }
+  const extracted = extractNotebookPython(sourceText);
+  if (extracted === null) {
+    if (sourceMeta?.sourceKind === 'pre-extracted-script') {
+      return { parseText: sourceText, tree: cachedTree };
+    }
+    return null;
+  }
+  return {
+    parseText: extracted.pythonSource,
+    tree: sourceMeta?.sourceKind === 'pre-extracted-script' ? cachedTree : undefined,
+    notebookSegments: extracted.segments,
+  };
+}
+
+function remapRange(range: Range, segments: readonly NotebookLineSegment[]): Range {
+  return {
+    ...range,
+    startLine: mapExtractLine(range.startLine - 1, segments) + 1,
+    endLine: mapExtractLine(range.endLine - 1, segments) + 1,
+  };
+}
+
+function remapCaptureMatch(
+  match: CaptureMatch,
+  segments: readonly NotebookLineSegment[],
+): CaptureMatch {
+  const next: Record<string, Capture> = {};
+  for (const [key, cap] of Object.entries(match)) {
+    next[key] = { ...cap, range: remapRange(cap.range, segments) };
+  }
+  return next;
+}
+
+/**
+ * Record fixed positional argument counts only for Python's conservative
+ * missing-member subtype fallback. Ordinary reference arity stays unchanged:
+ * count-only metadata cannot model Python keyword binding or definition order.
+ */
+function recordPythonSubtypeCallShape(
+  grouped: Record<string, Capture>,
+  nodeMap: Readonly<Record<string, SyntaxNode>>,
+  filePath: string,
+  mapLine?: (line: number) => number,
+): void {
+  const callTag = (['@reference.call.free', '@reference.call.member'] as const).find(
+    (tag) => grouped[tag] !== undefined,
+  );
+  if (callTag === undefined) return;
+
+  // Decorator references use the same call tags but are anchored on a
+  // `decorator`, not a `call`, so they intentionally retain their old shape.
+  const callNode = nodeMap[callTag];
+  if (callNode === undefined || callNode.type !== 'call') return;
+
+  const argumentList = callNode.childForFieldName('arguments');
+  if (argumentList === null || argumentList.type !== 'argument_list') return;
+
+  const args = argumentList.namedChildren.filter(
+    (child): child is SyntaxNode => child !== null && child.type !== 'comment',
+  );
+  if (
+    args.some(
+      (arg) =>
+        arg.type === 'list_splat' ||
+        arg.type === 'dictionary_splat' ||
+        arg.type === 'keyword_argument',
+    )
+  ) {
+    return;
+  }
+
+  recordPythonSimplePositionalCall(filePath, callNode, args.length, mapLine);
 }
 
 /**

@@ -29,10 +29,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { UnresolvedReceiverSummary } from '../core/ingestion/scope-resolution/unresolved-receivers.js';
+import type { UnresolvedOverloadSummary } from '../core/ingestion/scope-resolution/unresolved-overloads.js';
 import type { NameFallbackSummary } from '../core/ingestion/scope-resolution/name-fallback-summary.js';
 import type { UndecidedSatisfactionSummary } from '../core/ingestion/scope-resolution/undecided-satisfaction.js';
 import { resolveStoragePath } from './storage-resolver.js';
 import type { ScopeExtractionFailureSummary } from '../core/ingestion/scope-resolution/scope-extraction-failures.js';
+import type { StoredRebuildReason } from '../core/rebuild-reasons.js';
 import { INDEX_METADATA_FILE, LEGACY_METADATA_FILE } from './storage-constants.js';
 
 export { GITNEXUS_DIR, INDEX_METADATA_FILE, LEGACY_METADATA_FILE } from './storage-constants.js';
@@ -41,6 +43,15 @@ export { GITNEXUS_DIR, INDEX_METADATA_FILE, LEGACY_METADATA_FILE } from './stora
 export type ContentRetention = 'full' | 'symbol' | 'none';
 export type FtsProfile = 'full' | 'symbol-no-file-content' | 'name-only';
 export const CONTENT_RETENTION_SCHEMA_VERSION = 1;
+
+/** Exact staged generation whose completed embedding groups can survive a retry. */
+export interface EmbeddingRecoveryReference {
+  /** A run-minted basename within this metadata file's index slot. */
+  stagingFile: string;
+  schemaFingerprint: string;
+  /** Active-window and inherited incomplete groups: never reusable until completed. */
+  unsafeNodeIds: string[];
+}
 
 /**
  * Versioned receipt for the analyzer process that produced an index.
@@ -99,15 +110,58 @@ export type PersistedFtsSkipReason =
   | 'tuple-missing';
 
 export interface RepoMeta {
+  /** Physical compaction baseline; each repository/branch advances independently. */
+  graphCompaction?: import('../core/incremental/compaction-policy.js').GraphCompactionState;
+  relationshipIntegrity?: import('../core/graph/relationship-integrity.js').RelationshipIntegrityReceipt;
   repoPath: string;
   /** Complete index directory selected for this successful analysis. */
   storagePath?: string;
   /**
-   * Shared-store checkouts only (#3352): the graph this slot reads when it is
-   * not `<storagePath>/lbug` — a commit graph under the same store. Resolved
-   * and validated by `resolveGraphPath`.
+   * The graph this slot reads: an owned private generation basename, or an
+   * absolute shared commit graph under the same store (#3352). Resolved and
+   * validated by `resolveGraphPath`. Absent means legacy `<storagePath>/lbug`.
    */
   graphPath?: string;
+  /** A verified logical generation, published independently of optional vectors.
+   * Private incremental writes invalidate this receipt before mutating its file. */
+  graphGeneration?: {
+    version: 1;
+    id: string;
+    /** Digest of covered content, including uncommitted source changes. */
+    coveredContent: string;
+  };
+  /** Checkout-owned durable work. Progress lives in its bounded journal. */
+  embeddingJob?: {
+    version: 1;
+    identity: string;
+    graphGeneration: string;
+    /** Mutable artifact ownership is separate from this graph-bound job. */
+    artifactIdentity?: string;
+    spaceKey?: string;
+  };
+  /** Direct receipt for a retained legacy source; missing historical fields
+   * remain unknown. The source is immutable and separate from graphPath. */
+  legacyVectorSource?: string;
+  /** Published only after complete coverage, native durability and index validation. */
+  vectorGeneration?: {
+    version: 1;
+    identity: string;
+    /** Absent in older separate stores, whose artifact identity equaled the job. */
+    artifactIdentity?: string;
+    graphGeneration: string;
+    /** Explicit permission to serve this completed historical artifact against
+     * a newer graph. graphGeneration remains its original coverage receipt. */
+    preservedForGraph?: string;
+    vectorIdentity: string;
+    inputIdentity: string;
+    dimensions: number;
+    nodes: number;
+    chunks: number;
+    /** Deterministic input failures exhausted three attempts in this job. */
+    excludedNodes?: number;
+    exclusionReason?: 'input-rejected';
+    indexKind: 'hnsw' | 'exact';
+  };
   lastCommit: string;
   indexedAt: string;
   /** Missing on legacy metadata means the upstream-compatible `full` profile. */
@@ -150,6 +204,13 @@ export interface RepoMeta {
    * matches the currently invoked analyzer.
    */
   runnerIdentity?: AnalyzerRunnerIdentity;
+  /** Parser artifacts and extraction options that produced the successful graph.
+   * Missing provenance never authorizes reuse. FTS-only repair preserves it.
+   */
+  parseCacheIdentity?: {
+    base: string;
+    pdg?: { identity: string; maxFunctionLines: number };
+  };
   /**
    * Canonical `origin` remote URL captured at index time. Used to
    * fingerprint the same logical repo across multiple on-disk clones
@@ -230,6 +291,9 @@ export interface RepoMeta {
       status: 'vector-index' | 'exact-scan' | 'unavailable';
       exactScanLimit: number;
       reason?: string;
+      /** Native availability and coverage of the current selection differ. */
+      coverage?: 'current' | 'preserved' | 'unknown';
+      sourceGraphGeneration?: string;
     };
   };
   /**
@@ -268,6 +332,11 @@ export interface RepoMeta {
    * annotations. A changed value invalidates persisted JVM Route evidence.
    */
   springVendorPrefixes?: string;
+  /**
+   * Canonical declared route aliases + handler wrappers (`goRouterAliases`,
+   * `goHandlerWrappers`). A changed value invalidates persisted Route evidence.
+   */
+  routeHookConfig?: string;
   /**
    * The resolved GITNEXUS_FTS_CJK_SEGMENTATION mode ('none' | 'bigram') the
    * existing index's content/description columns were last written under
@@ -325,6 +394,12 @@ export interface RepoMeta {
    */
   unresolvedReceiverMembers?: UnresolvedReceiverSummary;
   /**
+   * Final unresolved overload/implementation call sites, attributed by public
+   * candidate, caller and declaring-owner identity. A complete empty summary
+   * certifies measured-clean coverage; absence or invalid metadata is unverified.
+   */
+  unresolvedOverloads?: UnresolvedOverloadSummary;
+  /**
    * Files omitted from scope-resolution because their provider capture or
    * extraction step threw. The rest of each file may still be present in the
    * graph, so this is an index-completeness signal rather than a parse failure.
@@ -372,6 +447,14 @@ export interface RepoMeta {
    */
   fileHashes?: Record<string, string>;
   /**
+   * Digest of the graph rows the index holds for each file, recorded only for
+   * repositories with an incremental resolution group. A group member whose
+   * new rows match its digest is not rewritten when a sibling changes. An
+   * entry is refreshed only when that file's rows are written; a missing entry
+   * means "unknown" and forces a rewrite.
+   */
+  fileRowDigests?: Record<string, string>;
+  /**
    * Coverage policy used when `fileHashes` was recorded. `status` replays it
    * so analyze-time `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` cannot make
    * a later default-cap walk drop a file the index actually covers.
@@ -381,6 +464,11 @@ export interface RepoMeta {
    */
   indexCoverage?: {
     maxFileSizeBytes: number;
+    /**
+     * Dot directories indexed via `GITNEXUS_INCLUDE_DOT_DIRS`. Absent means
+     * none: the index predates the option or was built without it.
+     */
+    includeDotDirs?: string[];
     dirtyPaths?: string[];
   };
   /**
@@ -425,6 +513,8 @@ export interface RepoMeta {
    * to a known-good index.
    */
   incrementalInProgress?: {
+    /** Unique ownership fence for a prepared in-place graph publication. */
+    attemptId?: string;
     /** When the run started (epoch ms). */
     startedAt: number;
     /** Last dirty-flag refresh (epoch ms). */
@@ -459,6 +549,12 @@ export interface RepoMeta {
      *  diagnostics must show whether the write set was already
      *  under-expanded when the run died. */
     droppedImporterChunks?: number;
+    /**
+     * Why this run rebuilds (#3137), so an interrupted rebuild can name its
+     * causes on the next run. Untrusted on read: parse it with
+     * `readStoredRebuildReasons`, since the file is schema-less JSON.
+     */
+    reasons?: StoredRebuildReason[];
   };
   /**
    * Durable embedding-resume marker, written in two distinct situations that
@@ -514,6 +610,11 @@ export interface RepoMeta {
      * subset of their chunks; for `'partial'` they hold none.
      */
     pendingNodeIds?: string[];
+    /**
+     * Interrupted atomic builds only. This does not publish the staged graph
+     * or advance live embedding statistics; it identifies a recovery source.
+     */
+    recovery?: EmbeddingRecoveryReference;
   };
   /**
    * Name of the git branch this index represents (#2106). Absent for the

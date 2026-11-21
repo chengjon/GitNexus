@@ -3,13 +3,15 @@
  * index lock, missing-DB preflight, identity fail-closed, tri-state count,
  * closeLbug masking, and hash-only cache load.
  */
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   acquireIndexLockMock,
+  ensurePrivateSharedGraphMock,
   releaseMock,
   getStoragePathsMock,
   loadMetaMock,
@@ -20,6 +22,7 @@ const {
   executeWithReusedStatementMock,
   fetchExistingEmbeddingHashesMock,
   runEmbeddingPipelineMock,
+  runAnalysisEmbeddingPhaseMock,
   resolveEmbeddingIdentityMock,
   installEmbeddingRuntimeMock,
   resolveEmbeddingRuntimeMock,
@@ -27,6 +30,7 @@ const {
   reapEmbeddingSidecarMock,
 } = vi.hoisted(() => ({
   acquireIndexLockMock: vi.fn(),
+  ensurePrivateSharedGraphMock: vi.fn(),
   releaseMock: vi.fn(),
   getStoragePathsMock: vi.fn(),
   loadMetaMock: vi.fn(),
@@ -37,6 +41,7 @@ const {
   executeWithReusedStatementMock: vi.fn(),
   fetchExistingEmbeddingHashesMock: vi.fn(),
   runEmbeddingPipelineMock: vi.fn(),
+  runAnalysisEmbeddingPhaseMock: vi.fn(),
   resolveEmbeddingIdentityMock: vi.fn(),
   installEmbeddingRuntimeMock: vi.fn(),
   resolveEmbeddingRuntimeMock: vi.fn(),
@@ -46,6 +51,10 @@ const {
 
 vi.mock('../../src/storage/git.js', () => ({
   getGitRoot: () => '/tmp/emb-sync-repo',
+}));
+
+vi.mock('../../src/core/shared-store-analyze.js', () => ({
+  ensurePrivateSharedGraph: (...args: unknown[]) => ensurePrivateSharedGraphMock(...args),
 }));
 
 vi.mock('../../src/storage/index-lock.js', async (importOriginal) => ({
@@ -65,6 +74,10 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
   executeWithReusedStatement: (...args: unknown[]) => executeWithReusedStatementMock(...args),
   fetchExistingEmbeddingHashes: (...args: unknown[]) => fetchExistingEmbeddingHashesMock(...args),
+}));
+
+vi.mock('../../src/core/analysis-embedding-phase.js', () => ({
+  runAnalysisEmbeddingPhase: (...args: unknown[]) => runAnalysisEmbeddingPhaseMock(...args),
 }));
 
 vi.mock('../../src/core/embeddings/embedding-pipeline.js', () => ({
@@ -87,6 +100,19 @@ vi.mock('../../src/core/embeddings/embedding-sidecar-client.js', () => ({
 }));
 
 const IDENTITY = { model: 'test-model', dimensions: 768, provider: 'local' } as const;
+const heap = vi.hoisted(() => ({ bytes: 1024 ** 3 }));
+
+vi.mock('../../src/core/ingestion/utils/effective-ram.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/core/ingestion/utils/effective-ram.js')>()),
+  effectiveRamBytes: () => 8 * 1024 ** 3,
+}));
+vi.mock('node:v8', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:v8')>();
+  return {
+    ...actual,
+    getHeapStatistics: () => ({ ...actual.getHeapStatistics(), heap_size_limit: heap.bytes }),
+  };
+});
 
 const BASE_META = {
   repoPath: '/tmp/emb-sync-repo',
@@ -113,6 +139,25 @@ async function run(inputPath = '/tmp/emb-sync-repo') {
   await embeddingsSyncCommand(inputPath);
 }
 
+async function useRealIndexLock() {
+  vi.stubEnv('GITNEXUS_INDEX_LOCK_BACKEND', 'file');
+  const actual = await vi.importActual<typeof import('../../src/storage/index-lock.js')>(
+    '../../src/storage/index-lock.js',
+  );
+  acquireIndexLockMock.mockImplementation(
+    async (...args: Parameters<typeof actual.acquireIndexLock>) => {
+      const lock = await actual.acquireIndexLock(...args);
+      return {
+        ...lock,
+        release: () => {
+          lock.release();
+          releaseMock();
+        },
+      };
+    },
+  );
+}
+
 describe('embeddingsSyncCommand writer safety (#3065)', () => {
   const tmpDirs: string[] = [];
   const originalEmbeddingUrl = process.env.GITNEXUS_EMBEDDING_URL;
@@ -130,13 +175,18 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
   }
 
   beforeEach(() => {
+    heap.bytes = 1024 ** 3;
     vi.resetModules();
     acquireIndexLockMock.mockReset().mockResolvedValue(lockHandle());
+    ensurePrivateSharedGraphMock.mockReset().mockResolvedValue(true);
     releaseMock.mockReset();
     getStoragePathsMock.mockReset();
     loadMetaMock.mockReset().mockResolvedValue({ ...BASE_META });
     saveMetaMock.mockReset().mockResolvedValue(undefined);
     initLbugMock.mockReset().mockResolvedValue(undefined);
+    runAnalysisEmbeddingPhaseMock
+      .mockReset()
+      .mockResolvedValue({ ...BASE_META, stats: { embeddings: 2 } });
     closeLbugMock.mockReset().mockResolvedValue(undefined);
     executeQueryMock.mockReset().mockResolvedValue([{ cnt: 2 }]);
     executeWithReusedStatementMock.mockReset();
@@ -156,12 +206,36 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     if (originalEmbeddingUrl === undefined) delete process.env.GITNEXUS_EMBEDDING_URL;
     else process.env.GITNEXUS_EMBEDDING_URL = originalEmbeddingUrl;
     if (originalEmbeddingModel === undefined) delete process.env.GITNEXUS_EMBEDDING_MODEL;
     else process.env.GITNEXUS_EMBEDDING_MODEL = originalEmbeddingModel;
     await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
+
+  it('accounts for the running process heap when sync cannot respawn', async () => {
+    await store();
+    await run();
+    expect(runAnalysisEmbeddingPhaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resources: expect.objectContaining({ automatic: true, mainHeapMb: 1024 }),
+      }),
+    );
+  });
+
+  it.each([2096, 65536])(
+    'rejects a %i MiB running heap that cannot fit with the local model on 8 GiB before locking',
+    async (heapMb) => {
+      await store();
+      heap.bytes = heapMb * 1024 ** 2;
+      await expect(run()).rejects.toThrow('cannot admit');
+      expect(acquireIndexLockMock).not.toHaveBeenCalled();
+      expect(ensurePrivateSharedGraphMock).not.toHaveBeenCalled();
+      expect(initLbugMock).not.toHaveBeenCalled();
+      expect(runAnalysisEmbeddingPhaseMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('acquires the index lock before re-reading metadata and releases it in finally', async () => {
     const { dir } = await store();
@@ -177,16 +251,17 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
       order.push('loadMeta');
       return { ...BASE_META };
     });
-    initLbugMock.mockImplementation(async () => {
-      order.push('init');
+    runAnalysisEmbeddingPhaseMock.mockImplementation(async () => {
+      order.push('phase');
+      return BASE_META;
     });
 
     await run();
 
-    expect(acquireIndexLockMock).toHaveBeenCalledWith(dir);
+    expect(acquireIndexLockMock).toHaveBeenCalledWith(dir, { sweep: false });
     expect(order[0]).toBe('lock');
     expect(order.indexOf('loadMeta')).toBeGreaterThan(order.indexOf('lock'));
-    expect(order.indexOf('init')).toBeGreaterThan(order.indexOf('loadMeta'));
+    expect(order.indexOf('phase')).toBeGreaterThan(order.indexOf('loadMeta'));
     expect(order.at(-1)).toBe('release');
   });
 
@@ -299,101 +374,130 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
     expect(releaseMock).toHaveBeenCalled();
   });
 
-  it('persists an interrupted checkpoint from the pipeline checkpoint callbacks', async () => {
-    // The resume contract lives in these callbacks; a mock that never invokes
-    // them leaves the whole save path unexecuted.
-    await store();
-    runEmbeddingPipelineMock.mockImplementation(
-      async (
-        _executeQuery: unknown,
-        _executeWithReusedStatement: unknown,
-        _onProgress: unknown,
-        _config: unknown,
-        _signal: unknown,
-        _existing: unknown,
-        options: {
-          onCheckpointWindowStart: (checkpoint: Record<string, unknown>) => Promise<void>;
-          onCheckpoint: (checkpoint: Record<string, unknown>) => Promise<void>;
-        },
-      ) => {
-        await options.onCheckpointWindowStart({
-          nodeIds: ['n2', 'n3'],
-          nodesProcessed: 1,
-          totalNodes: 3,
-          chunksProcessed: 1,
-        });
-        await options.onCheckpoint({ nodesProcessed: 3, totalNodes: 3, chunksProcessed: 3 });
-        return { nodesProcessed: 3, chunksProcessed: 3, failedNodeIds: [] };
+  it.each([
+    {
+      name: 'valid staged receipt',
+      recovery: {
+        stagingFile: 'lbug.staging.12345678-1234-4123-8123-123456789abc',
+        schemaFingerprint: 'test-schema',
+        unsafeNodeIds: ['n2', 'inherited-window-node'],
       },
+    },
+    { name: 'null receipt', recovery: null },
+    { name: 'malformed receipt', recovery: { stagingFile: 'invalid' } },
+    { name: 'false receipt', recovery: false },
+  ])('preserves a $name before any writable sync work', async ({ recovery }) => {
+    const { dir, lbugPath, metaPath } = await store();
+    await useRealIndexLock();
+    const lockPath = path.join(dir, 'analyze.lock');
+    const sourcePath = path.join(dir, 'lbug.staging.12345678-1234-4123-8123-123456789abc');
+    await writeFile(sourcePath, 'completed paid vectors');
+    await writeFile(`${sourcePath}.wal`, 'unfinished window');
+    const metadataBytes = JSON.stringify({
+      ...BASE_META,
+      embeddingCheckpoint: {
+        ...IDENTITY,
+        at: '2026-01-01T00:00:00.000Z',
+        nodesProcessed: 1,
+        totalNodes: 2,
+        chunksProcessed: 1,
+        kind: 'interrupted',
+        pendingNodeIds: ['n2'],
+        recovery,
+      },
+    });
+    await writeFile(metaPath, metadataBytes);
+    loadMetaMock.mockImplementation(async () => {
+      expect(existsSync(lockPath)).toBe(true);
+      return JSON.parse(await readFile(metaPath, 'utf8'));
+    });
+    resolveEmbeddingRuntimeMock.mockReturnValue(null);
+
+    await expect(run()).rejects.toThrow(
+      /staged embeddings.*Run `gitnexus analyze` to recover them first/,
     );
 
-    await run();
-
-    type SavedMeta = {
-      stats?: { embeddings?: number };
-      embeddingCheckpoint?: { pendingNodeIds?: string[] };
-    };
-    const windowStart = saveMetaMock.mock.calls[0]?.[1] as SavedMeta;
-    expect(windowStart.embeddingCheckpoint?.pendingNodeIds).toEqual(['n2', 'n3']);
-    // The window marker carries no count, so the last known one must survive.
-    expect(windowStart.stats?.embeddings).toBe(1);
-
-    const windowEnd = saveMetaMock.mock.calls[1]?.[1] as SavedMeta;
-    expect(windowEnd.embeddingCheckpoint?.pendingNodeIds).toEqual([]);
-    expect(windowEnd.stats?.embeddings).toBe(2);
+    expect(acquireIndexLockMock).toHaveBeenCalledWith(dir, { sweep: false });
+    expect(loadMetaMock.mock.invocationCallOrder[0]).toBeGreaterThan(
+      acquireIndexLockMock.mock.invocationCallOrder[0]!,
+    );
+    expect(ensurePrivateSharedGraphMock).not.toHaveBeenCalled();
+    expect(resolveEmbeddingIdentityMock).not.toHaveBeenCalled();
+    expect(installEmbeddingRuntimeMock).not.toHaveBeenCalled();
+    expect(initLbugMock).not.toHaveBeenCalled();
+    expect(runEmbeddingPipelineMock).not.toHaveBeenCalled();
+    expect(saveMetaMock).not.toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(await readFile(metaPath, 'utf8')).toBe(metadataBytes);
+    expect(await readFile(lbugPath, 'utf8')).toBe('db');
+    expect(await readFile(sourcePath, 'utf8')).toBe('completed paid vectors');
+    expect(await readFile(`${sourcePath}.wal`, 'utf8')).toBe('unfinished window');
   });
 
-  it('keeps a partial checkpoint when some nodes failed to embed', async () => {
-    await store();
-    runEmbeddingPipelineMock.mockResolvedValue({
-      nodesProcessed: 2,
-      chunksProcessed: 2,
-      failedNodeIds: ['n9'],
+  it('sweeps orphaned staging files before writable sync work without a recovery receipt', async () => {
+    const { dir, metaPath } = await store();
+    await useRealIndexLock();
+    await writeFile(metaPath, JSON.stringify(BASE_META));
+    const sourcePath = path.join(dir, 'lbug.staging.12345678-1234-4123-8123-123456789abc');
+    await writeFile(sourcePath, 'orphaned database');
+    await writeFile(`${sourcePath}.wal`, 'orphaned WAL');
+    loadMetaMock.mockImplementation(async () => JSON.parse(await readFile(metaPath, 'utf8')));
+    ensurePrivateSharedGraphMock.mockImplementation(async () => {
+      expect(existsSync(path.join(dir, 'analyze.lock'))).toBe(true);
+      expect(existsSync(sourcePath)).toBe(false);
+      expect(existsSync(`${sourcePath}.wal`)).toBe(false);
+      return true;
     });
 
     await run();
 
-    const saved = saveMetaMock.mock.calls.at(-1)?.[1] as {
-      embeddingCheckpoint?: { pendingNodeIds?: string[] };
-    };
-    expect(saved.embeddingCheckpoint).toBeDefined();
-    expect(saved.embeddingCheckpoint?.pendingNodeIds).toEqual(['n9']);
+    expect(ensurePrivateSharedGraphMock).toHaveBeenCalledTimes(1);
+    expect(runAnalysisEmbeddingPhaseMock).toHaveBeenCalledTimes(1);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(path.join(dir, 'analyze.lock'))).toBe(false);
   });
 
-  it('does not publish a missing count cell as zero', async () => {
-    await store();
-    executeQueryMock.mockResolvedValue([{}]);
-
-    await expect(run()).rejects.toThrow('Could not verify persisted embedding count.');
-    expect(saveMetaMock).toHaveBeenCalledTimes(1);
-    const saved = saveMetaMock.mock.calls[0]?.[1] as {
-      stats?: { embeddings?: number };
-      embeddingCheckpoint?: { kind?: string; pendingNodeIds?: string[] };
-    };
-    expect(saved.stats?.embeddings).toBe(1);
-    expect(saved.embeddingCheckpoint?.kind).toBe('unverified-count');
-    expect(saved.embeddingCheckpoint?.pendingNodeIds).toEqual([]);
-    expect(releaseMock).toHaveBeenCalled();
+  it('does not clear durable partial work when the shared phase fails', async () => {
+    const { dir } = await store();
+    const retained = { ...BASE_META, embeddingJob: { identity: 'retained-work' } };
+    loadMetaMock.mockResolvedValue(retained);
+    runAnalysisEmbeddingPhaseMock.mockRejectedValue(new Error('provider unavailable'));
+    await expect(run()).rejects.toThrow('provider unavailable');
+    expect(runAnalysisEmbeddingPhaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadataDirectory: dir,
+        nodeLimit: 0,
+      }),
+    );
+    expect(saveMetaMock).not.toHaveBeenCalled();
+    expect(runEmbeddingPipelineMock).not.toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledOnce();
   });
 
-  it('keeps the pipeline error when closeLbug also rejects', async () => {
+  it('keeps the shared phase error without opening or closing a legacy writable graph', async () => {
     await store();
-    runEmbeddingPipelineMock.mockRejectedValue(new Error('pipeline boom'));
+    runAnalysisEmbeddingPhaseMock.mockRejectedValue(new Error('phase boom'));
     closeLbugMock.mockRejectedValue(new Error('close boom'));
-
-    await expect(run()).rejects.toThrow('pipeline boom');
-    expect(releaseMock).toHaveBeenCalled();
-  });
-
-  it('keeps the pipeline error when sidecar reap also throws', async () => {
-    await store();
-    runEmbeddingPipelineMock.mockRejectedValue(new Error('pipeline boom'));
     reapEmbeddingSidecarMock.mockImplementation(() => {
       throw new Error('reap boom');
     });
+    await expect(run()).rejects.toThrow('phase boom');
+    expect(initLbugMock).not.toHaveBeenCalled();
+    expect(closeLbugMock).not.toHaveBeenCalled();
+    expect(reapEmbeddingSidecarMock).not.toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledOnce();
+  });
 
-    await expect(run()).rejects.toThrow('pipeline boom');
-    expect(releaseMock).toHaveBeenCalled();
+  it('preserves a prepared graph receipt before any embedding or staging cleanup', async () => {
+    const { dir } = await store();
+    const receipt = path.join(dir, 'analysis-publication.json');
+    await writeFile(receipt, '{ malformed retained receipt');
+    await expect(run()).rejects.toThrow();
+    expect(await readFile(receipt, 'utf8')).toBe('{ malformed retained receipt');
+    expect(runAnalysisEmbeddingPhaseMock).not.toHaveBeenCalled();
+    expect(ensurePrivateSharedGraphMock).not.toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledOnce();
   });
 
   it('does not spawn npm on darwin/x64', async () => {
@@ -436,22 +540,29 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
   it('does not statically import the embedding pipeline', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/cli/embeddings-sync.ts', import.meta.url), 'utf8');
-    expect(src).not.toMatch(/^import .*embedding-pipeline/m);
-    expect(src).toContain("await import('../core/embeddings/embedding-pipeline.js')");
+    expect(src).not.toMatch(/^import .*analysis-embedding-phase/m);
+    expect(src).toContain("await import('../core/analysis-embedding-phase.js')");
   });
 
-  it('loads existing hashes without materializing cached vectors', async () => {
-    await store();
-    const hashes = new Map([
-      ['n1', 'h1'],
-      ['n2', 'h2'],
-    ]);
-    fetchExistingEmbeddingHashesMock.mockResolvedValue(hashes);
-
+  it('passes the owned graph generation without materializing hashes or vectors', async () => {
+    const { dir, metaPath } = await store();
+    const metadata = {
+      ...BASE_META,
+      graphPath: 'lbug.generation.' + 'a'.repeat(32),
+      graphGeneration: { id: 'a'.repeat(32) },
+    };
+    await writeFile(metaPath, JSON.stringify(metadata));
+    await writeFile(path.join(dir, metadata.graphPath), 'owned graph');
+    loadMetaMock.mockResolvedValue(metadata);
     await run();
-
-    expect(fetchExistingEmbeddingHashesMock).toHaveBeenCalledTimes(1);
-    const existingArg = runEmbeddingPipelineMock.mock.calls[0]?.[5];
-    expect(existingArg).toBe(hashes);
+    expect(runAnalysisEmbeddingPhaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        graphPath: path.join(dir, metadata.graphPath),
+        expectedGeneration: metadata.graphGeneration.id,
+      }),
+    );
+    expect(fetchExistingEmbeddingHashesMock).not.toHaveBeenCalled();
+    expect(runEmbeddingPipelineMock).not.toHaveBeenCalled();
+    expect(saveMetaMock).not.toHaveBeenCalled();
   });
 });

@@ -26,16 +26,14 @@ import {
 import { expandCopies } from './cobol/cobol-copy-expander.js';
 import { processJclFiles } from './cobol/jcl-processor.js';
 import { resolveCobolCopyTarget } from './languages/cobol/copy-target.js';
+import { COBOL_EXTENSIONS, JCL_EXTENSIONS } from './cobol/file-types.js';
+export { isCobolFile, isJclFile } from './cobol/file-types.js';
 
 import { logger } from '../logger.js';
 
 // ---------------------------------------------------------------------------
 // File detection
 // ---------------------------------------------------------------------------
-
-const COBOL_EXTENSIONS = new Set(['.cob', '.cbl', '.cobol', '.cpy', '.copybook']);
-
-const JCL_EXTENSIONS = new Set(['.jcl', '.job', '.proc']);
 
 const COPYBOOK_EXTENSIONS = new Set(['.cpy', '.copybook']);
 
@@ -65,16 +63,6 @@ export interface CobolProcessResult {
   inspects: number;
   initializes: number;
   arithmeticOps: number;
-}
-
-/** Returns true if the file is a COBOL or copybook file. */
-export function isCobolFile(filePath: string): boolean {
-  return COBOL_EXTENSIONS.has(path.extname(filePath).toLowerCase());
-}
-
-/** Returns true if the file is a JCL file. */
-export function isJclFile(filePath: string): boolean {
-  return JCL_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
 /** Returns true if the file is a COBOL copybook. */
@@ -293,12 +281,15 @@ export const processCobol = (
 // Graph mapping
 // ---------------------------------------------------------------------------
 
-/** Generate a deterministic Property node ID using composite key (section:level:name). */
+/** Preserve distinct declarations with the same level/name in different groups. */
 function generatePropertyId(
   filePath: string,
-  item: { section: string; level: number; name: string },
+  item: { section: string; level: number; name: string; line: number },
 ): string {
-  return generateId('Property', `${filePath}:${item.section}:${item.level}:${item.name}`);
+  return generateId(
+    'Property',
+    `${filePath}:${item.section}:${item.level}:${item.name}@${item.line}`,
+  );
 }
 
 /**

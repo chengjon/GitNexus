@@ -42,7 +42,16 @@ import {
   stampEmbeddingCount,
 } from '../helpers/embedding-seed.js';
 import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
+import { RebuildReasonCollector } from '../../src/core/rebuild-reasons.js';
+import { MAX_INCREMENTAL_WRITES } from '../../src/core/incremental/compaction-policy.js';
 import { SCHEMA_FINGERPRINT } from '../../src/core/lbug/schema.js';
+import {
+  isLanguageAvailable,
+  loadParser,
+  loadLanguage,
+} from '../../src/core/tree-sitter/parser-loader.js';
+import { SupportedLanguages } from '../../src/config/supported-languages.js';
+import { DART_PACKAGE_IDENTITY_REASON } from '../../src/core/ingestion/languages/dart/package-dependencies.js';
 import {
   SPRING_AOP_FEATURE,
   SPRING_BEAN_INVENTORY_FEATURE,
@@ -51,6 +60,7 @@ import {
   SPRING_ROUTE_BINDINGS_FEATURE,
 } from '../../src/core/ingestion/frameworks/spring/analysis-features.js';
 import { springVendorPrefixesKey } from '../../src/core/ingestion/frameworks/spring/vendor-prefixes.js';
+import { routeHookConfigKey } from '../../src/core/ingestion/route-hook-config.js';
 import {
   decodeSpringAopReason,
   SPRING_AOP_EVIDENCE_ID_PREFIX,
@@ -76,6 +86,32 @@ const gitCommitAll = (cwd: string, message: string): void => {
 };
 
 const SPRING_SERVICE = 'org.springframework.stereotype.Service';
+
+/**
+ * The collector's own output shapes, taken from the real formatter rather than
+ * re-typed: a single-reason summary, a numbered summary's header for `count`
+ * reasons, and the post-pipeline follow-up line. A reason with empty text
+ * reduces each to its fixed part.
+ */
+const rebuildLineShapes = (count: number) => {
+  const single = new RebuildReasonCollector();
+  single.add({ key: 'user-force', text: '' });
+  const numbered = new RebuildReasonCollector();
+  const keys = ['user-force', 'skills', 'parse-cache-bypass', 'drop-embeddings'] as const;
+  for (const key of keys.slice(0, count)) numbered.add({ key, text: '' });
+  const late = new RebuildReasonCollector();
+  late.formatSummary();
+  late.add({ key: 'user-force', text: '' });
+  const lateNonForcing = new RebuildReasonCollector();
+  lateNonForcing.formatSummary();
+  lateNonForcing.add({ key: 'escalated-full-write', text: '', forcing: false });
+  return {
+    singleSummary: single.formatSummary() ?? '',
+    numberedHeader: (numbered.formatSummary() ?? '').split('\n')[0],
+    followUp: late.formatFollowUp() ?? '',
+    nonForcingFollowUp: lateNonForcing.formatFollowUp() ?? '',
+  };
+};
 
 function withoutAnalysisFeature(meta: RepoMeta, featureId: string): RepoMeta {
   return {
@@ -529,6 +565,83 @@ const JAVA_DI_FIXTURE: ReadonlyArray<readonly [string, string]> = [
 ];
 
 describe('runFullAnalysis — incremental orchestration', () => {
+  it('adds and removes name-only calls between untouched files when a competing definition changes', async () => {
+    const repo = await setupMiniRepo();
+    vi.stubEnv('GITNEXUS_HOME', path.join(repo.dbPath, '.git', 'gitnexus-home'));
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+      const { LocalBackend } = await import('../../src/mcp/local/local-backend.js');
+      const checkImpact = async () => {
+        const backend = new LocalBackend();
+        try {
+          expect(await backend.init()).toBe(true);
+          const result = await backend.callTool('impact', {
+            repo: repo.dbPath,
+            target: 'dispatchEvent',
+            direction: 'upstream',
+            maxDepth: 1,
+          });
+          expect(result).toMatchObject({
+            summary: { direct: 1 },
+            byDepth: { 1: [{ filePath: 'bound.js' }] },
+          });
+        } finally {
+          await backend.disconnect();
+        }
+      };
+      const competing = path.join(repo.dbPath, 'shadow.js');
+      const definition = 'export function dispatchEvent(x) { return x }';
+      await writeFile(path.join(repo.dbPath, 'core.js'), definition);
+      await writeFile(competing, definition);
+      await writeFile(
+        path.join(repo.dbPath, 'bundle.js'),
+        'export function loose(x) { return dispatchEvent(x) }',
+      );
+      await writeFile(
+        path.join(repo.dbPath, 'bound.js'),
+        'import { dispatchEvent } from "./core.js"; export function bound(x) { return dispatchEvent(x) }',
+      );
+      gitCommitAll(repo.dbPath, 'add competing definitions');
+      const analyze = async (force = false) => {
+        const logs: string[] = [];
+        await runFullAnalysis(
+          repo.dbPath,
+          { force, skipAgentsMd: true, skipFts: true },
+          { onProgress() {}, onLog: (line) => logs.push(line) },
+        );
+        if (!force) {
+          expect(logs.join('\n')).toContain('Incremental: changed=');
+          expect(logs.join('\n')).not.toContain('switching to a full DB write');
+        }
+        await adapter.initLbug(getStoragePaths(repo.dbPath).lbugPath);
+        try {
+          return await adapter.executeQuery(
+            "MATCH (a:Function)-[r:CodeRelation]->(b:Function) WHERE b.filePath = 'core.js' AND r.type = 'CALLS' RETURN a.name AS caller, r.reason AS reason ORDER BY caller",
+          );
+        } finally {
+          await adapter.closeLbug();
+        }
+      };
+      const bound = { caller: 'bound', reason: 'import-resolved' };
+      const baseline = await analyze(true);
+      expect(baseline).toEqual([bound]);
+      await rm(competing);
+      gitCommitAll(repo.dbPath, 'remove competing definition');
+      const unique = await analyze();
+      expect(unique).toEqual([bound, { caller: 'loose', reason: 'global-name-fallback' }]);
+      await checkImpact();
+      expect(await analyze(true)).toEqual(unique);
+      await checkImpact();
+      await writeFile(competing, definition);
+      gitCommitAll(repo.dbPath, 'restore competing definition');
+      expect(await analyze()).toEqual(baseline);
+    } finally {
+      vi.unstubAllEnvs();
+      await repo.cleanup();
+    }
+  }, 120_000);
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -595,7 +708,10 @@ describe('runFullAnalysis — incremental orchestration', () => {
       expect(cold.alreadyUpToDate).toBeUndefined();
       expect(cold.pipelineResult?.parseCacheHitFileCount ?? 0).toBe(0);
       expect(cold.pipelineResult?.reparsedFileCount).toBe(7);
-      expect(logs.join('\n')).toContain('Parser cache bypass requested');
+      // Its own reason, not a borrowed --force.
+      expect(cold.rebuildReasons).toEqual(['parse-cache-bypass']);
+      const { singleSummary } = rebuildLineShapes(1);
+      expect(logs.filter((m) => m.startsWith(singleSummary))).toHaveLength(1);
     } finally {
       await repo.cleanup();
     }
@@ -629,6 +745,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
         { onProgress: () => {} },
       );
       expect(enabled.alreadyUpToDate).toBeUndefined();
+      expect(enabled.rebuildReasons).toEqual(['spring-actuator']);
 
       const { storagePath } = getStoragePaths(repo.dbPath);
       const enabledMeta = await loadMeta(storagePath);
@@ -667,9 +784,10 @@ describe('runFullAnalysis — incremental orchestration', () => {
         { onProgress: () => {}, onLog: (message) => disableLogs.push(message) },
       );
       expect(disabled.alreadyUpToDate).toBeUndefined();
-      expect(disableLogs.join('\n')).toContain(
-        'Spring Actuator runtime enrichment disabled; rebuilding to remove runtime evidence.',
-      );
+      expect(disabled.rebuildReasons).toEqual(['spring-actuator']);
+      expect(
+        disableLogs.filter((m) => m.startsWith(rebuildLineShapes(1).singleSummary)),
+      ).toHaveLength(1);
       expect((await loadMeta(storagePath))?.springActuator).toEqual({
         enabled: false,
         repoRelativeInputs: [runtimeInput],
@@ -692,10 +810,11 @@ describe('runFullAnalysis — incremental orchestration', () => {
         { onProgress: () => {}, onLog: (message) => forceLogs.push(message) },
       );
       expect(forcedSteady.alreadyUpToDate).toBeUndefined();
+      expect(forcedSteady.rebuildReasons).toEqual(['user-force']);
       expect(forceLogs.join('\n')).toContain(
         'Rebuilt the graph and FTS while reusing cached parser output',
       );
-      expect(forceLogs.join('\n')).toContain('increment SCHEMA_BUMP');
+      expect(forceLogs.join('\n')).toContain('Parser compatibility is derived automatically');
       expect(
         await readActuatorSnapshotLeakRows(repo.dbPath, `${runtimeInput}/env.json`, secretValue),
       ).toEqual([]);
@@ -856,6 +975,43 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 300_000);
 
+  it('rebuilds when the declared route aliases or handler wrappers change', async () => {
+    const repo = await setupSpringBeanIncrementalRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const config = {
+        skipAgentsMd: true,
+        routeHookConfig: {
+          routeFrameworkAliases: [
+            { importPath: 'example.com/infra/pkg', type: 'Engine', framework: 'gin' },
+          ],
+          routeHandlerWrappers: ['common.Wrapper'],
+        },
+      };
+      await runFullAnalysis(repo.dbPath, config, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      expect((await loadMeta(storagePath))?.routeHookConfig).toBe(
+        routeHookConfigKey(config.routeHookConfig),
+      );
+
+      const steady = await runFullAnalysis(repo.dbPath, config, { onProgress: () => {} });
+      expect(steady.alreadyUpToDate).toBe(true);
+
+      const logs: string[] = [];
+      const rebuilt = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+      expect(rebuilt.alreadyUpToDate).toBeUndefined();
+      expect(rebuilt.rebuildReasons).toContain('route-hook-config');
+      expect(logs.join('\n')).toContain('no longer configured');
+      expect((await loadMeta(storagePath))?.routeHookConfig).toBe(routeHookConfigKey());
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
   it('rebuilds a JVM index when the registered Spring vendor prefixes change', async () => {
     const repo = await setupSpringBeanIncrementalRepo();
     try {
@@ -874,6 +1030,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
       );
 
       expect(rebuilt.alreadyUpToDate).toBeUndefined();
+      expect(rebuilt.rebuildReasons).toContain('spring-vendor-prefixes');
       expect(logs.join('\n')).toContain('Spring vendor mapping prefixes changed');
       expect((await loadMeta(storagePath))?.springVendorPrefixes).toBe(springVendorPrefixesKey());
 
@@ -975,13 +1132,19 @@ describe('runFullAnalysis — incremental orchestration', () => {
       gitCommitAll(repo.dbPath, 'add first JVM source file');
 
       const logs: string[] = [];
-      await runFullAnalysis(
+      const result = await runFullAnalysis(
         repo.dbPath,
         { skipAgentsMd: true },
         { onProgress: () => {}, onLog: (message) => logs.push(message) },
       );
 
-      expect(logs.join('\n')).toContain(`missing:${SPRING_BEAN_INVENTORY_FEATURE.id}`);
+      // Found only after the pipeline: no summary, exactly one follow-up line.
+      expect(result.rebuildReasons).toEqual(['analysis-features']);
+      const { singleSummary, followUp } = rebuildLineShapes(1);
+      const followUps = logs.filter((m) => m.startsWith(followUp));
+      expect(followUps).toHaveLength(1);
+      expect(followUps[0]).toContain(`missing:${SPRING_BEAN_INVENTORY_FEATURE.id}`);
+      expect(logs.filter((m) => m.startsWith(singleSummary))).toEqual([]);
       expect(logs.join('\n')).not.toContain('Incremental:');
       expect((await loadMeta(storagePath))!.analysisFeatures).toEqual({
         [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
@@ -1115,6 +1278,127 @@ describe('runFullAnalysis — incremental orchestration', () => {
       expect(secondMeta!.stats?.edges).toBe(firstMeta!.stats?.edges);
       expect(secondMeta!.stats?.communities).toBe(firstMeta!.stats?.communities);
       expect(secondMeta!.stats?.processes).toBe(firstMeta!.stats?.processes);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('re-indexes a dirty snapshot after the file is restored at the same HEAD', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const target = path.join(repo.dbPath, 'src', 'logger.ts');
+      const clean = await readFile(target, 'utf-8');
+
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      await writeFile(target, `${clean}\n// temporary dirty snapshot\n`, 'utf-8');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const dirtyMeta = await loadMeta(storagePath);
+      expect(dirtyMeta?.indexCoverage?.dirtyPaths).toContain('src/logger.ts');
+      const dirtyHash = dirtyMeta?.fileHashes?.['src/logger.ts'];
+
+      await writeFile(target, clean, 'utf-8');
+      const restored = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+
+      expect(restored.alreadyUpToDate).toBeUndefined();
+      const restoredMeta = await loadMeta(storagePath);
+      expect(restoredMeta?.indexCoverage?.dirtyPaths).toEqual([]);
+      expect(restoredMeta?.fileHashes?.['src/logger.ts']).not.toBe(dirtyHash);
+
+      const steady = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+      expect(steady.alreadyUpToDate).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('re-indexes a restored assume-unchanged edit, then returns to the fast path', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const target = path.join(repo.dbPath, 'src', 'logger.ts');
+      const clean = await readFile(target, 'utf-8');
+
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      execSync('git update-index --assume-unchanged src/logger.ts', {
+        cwd: repo.dbPath,
+        stdio: 'pipe',
+      });
+
+      await writeFile(target, `${clean}\n// hidden dirty snapshot\n`, 'utf-8');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const dirtyMeta = await loadMeta(storagePath);
+      expect(dirtyMeta?.indexCoverage?.dirtyPaths).toContain('src/logger.ts');
+      const dirtyHash = dirtyMeta?.fileHashes?.['src/logger.ts'];
+
+      await writeFile(target, clean, 'utf-8');
+      execSync('git update-index --no-assume-unchanged src/logger.ts', {
+        cwd: repo.dbPath,
+        stdio: 'pipe',
+      });
+      const restored = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+      expect(restored.alreadyUpToDate).toBeUndefined();
+
+      const restoredMeta = await loadMeta(storagePath);
+      expect(restoredMeta?.indexCoverage?.dirtyPaths).toEqual([]);
+      expect(restoredMeta?.fileHashes?.['src/logger.ts']).not.toBe(dirtyHash);
+
+      const steady = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+      expect(steady.alreadyUpToDate).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  it('clears a mode-only dirty receipt when the clean content still matches', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+
+      execSync('git update-index --chmod=+x src/logger.ts', {
+        cwd: repo.dbPath,
+        stdio: 'pipe',
+      });
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const dirtyMeta = await loadMeta(storagePath);
+      expect(dirtyMeta?.indexCoverage?.dirtyPaths).toContain('src/logger.ts');
+
+      execSync('git update-index --chmod=-x src/logger.ts', {
+        cwd: repo.dbPath,
+        stdio: 'pipe',
+      });
+      const restored = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+
+      expect(restored.alreadyUpToDate).toBe(true);
+      const restoredMeta = await loadMeta(storagePath);
+      expect(restoredMeta?.indexCoverage?.dirtyPaths).toEqual([]);
     } finally {
       await repo.cleanup();
     }
@@ -1337,6 +1621,17 @@ describe('runFullAnalysis — incremental orchestration', () => {
       // The importer expansion fired AND the valve rerouted the write plan.
       expect(joined).toContain('importer(s) added to writable set');
       expect(joined).toContain('switching to a full DB write');
+      // Announced as the one follow-up line, carrying the escalation's own
+      // text, and non-forcing: the run stayed on the incremental branch
+      // (`incrementalStats` exists only there) and wrote the full plan.
+      expect(incremental.rebuildReasons).toEqual(['escalated-full-write']);
+      const { singleSummary, followUp, nonForcingFollowUp } = rebuildLineShapes(1);
+      const followUps = logs.filter((m) => m.startsWith(nonForcingFollowUp));
+      expect(followUps).toHaveLength(1);
+      expect(followUps[0]).toContain('switching to a full DB write');
+      expect(logs.filter((m) => m.startsWith(followUp))).toEqual([]);
+      expect(logs.filter((m) => m.startsWith(singleSummary))).toEqual([]);
+      expect(incremental.incrementalStats?.writeMode).toBe('full');
 
       const { storagePath } = getStoragePaths(repo.dbPath);
       const escalatedMeta = await loadMeta(storagePath);
@@ -1363,97 +1658,96 @@ describe('runFullAnalysis — incremental orchestration', () => {
     }
   }, 600_000);
 
-  // U4 / KTD10 (tri-review 4669518496): a SURGICAL preserve-mode run (below
-  // both valve gates) must keep embedding rows in lockstep with their files
-  // now that deleteNodesForFiles really deletes embedding rows via the
-  // nodeId join:
-  //   - changed-file rows are deleted with their nodes and RESTORED from the
-  //     cache (the old insert-all restore lost them when a surviving row's
-  //     PK conflict aborted the rest of the batch),
-  //   - deleted-file rows are gone (join-delete) and NOT resurrected by the
-  //     restore (live-graph filter),
-  //   - unchanged rows are untouched (restore-scope filter, no conflicts),
-  //   - a LEGACY ORPHAN row — stranded while the embedding delete was a
-  //     no-op, unreachable by the node join forever — is swept by exact id
-  //     (this shipping review, FIX 3).
-  it('surgical incremental run keeps embedding rows in lockstep: changed restored, deleted gone, unchanged intact, legacy orphan swept (tri-review 4669518496 KTD10 + FIX 3)', async () => {
-    const repo = await setupMiniRepo();
-    try {
-      const CHANGED_FILE = 'src/logger.ts';
-      const UNCHANGED_FILE = 'src/db.ts';
-      const DELETED_FILE = 'src/formatter.ts';
-      // A fabricated nodeId no graph will ever contain: the P2-1-era no-op
-      // delete left rows like this stranded in real DBs (schema version
-      // stays 6, so they are still out there).
-      const LEGACY_ORPHAN_NODE_ID = 'Function:src/ghost.ts:ghost:1';
+  it.each(['compact-delete', 'selective-delete', 'selective-modify'] as const)(
+    'keeps embedding rows in lockstep across %s, including legacy orphans',
+    async (mode) => {
+      const repo = await setupMiniRepo();
+      try {
+        const CHANGED_FILE = 'src/logger.ts';
+        const UNCHANGED_FILE = 'src/db.ts';
+        const DELETED_FILE = 'src/formatter.ts';
+        // A fabricated nodeId no graph will ever contain: the P2-1-era no-op
+        // delete left rows like this stranded in real DBs (schema version
+        // stays 6, so they are still out there).
+        const LEGACY_ORPHAN_NODE_ID = 'Function:src/ghost.ts:ghost:1';
 
-      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
-      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+        const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+        await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
 
-      const { storagePath } = getStoragePaths(repo.dbPath);
-      const idsByFile = await seedEmbeddingsForFiles(
-        repo.dbPath,
-        [CHANGED_FILE, UNCHANGED_FILE, DELETED_FILE],
-        3,
-      );
-      for (const fp of [CHANGED_FILE, UNCHANGED_FILE, DELETED_FILE]) {
-        expect((idsByFile.get(fp) ?? []).length).toBeGreaterThan(0);
+        const { storagePath } = getStoragePaths(repo.dbPath);
+        const idsByFile = await seedEmbeddingsForFiles(
+          repo.dbPath,
+          [CHANGED_FILE, UNCHANGED_FILE, DELETED_FILE],
+          3,
+        );
+        for (const fp of [CHANGED_FILE, UNCHANGED_FILE, DELETED_FILE]) {
+          expect((idsByFile.get(fp) ?? []).length).toBeGreaterThan(0);
+        }
+        await seedEmbeddingForNodeId(repo.dbPath, LEGACY_ORPHAN_NODE_ID);
+        const seededTotal = [...idsByFile.values()].flat().length + 1;
+        await stampEmbeddingCount(storagePath, seededTotal);
+        if (mode === 'compact-delete') {
+          const meta = (await loadMeta(storagePath))!;
+          await saveMeta(storagePath, {
+            ...meta,
+            graphCompaction: {
+              ...meta.graphCompaction!,
+              incrementalWrites: MAX_INCREMENTAL_WRITES,
+            },
+          });
+        }
+
+        // Append a comment in every mode so node line numbers stay stable.
+        // Delete another file only in the delete variants, then commit the edits.
+        const target = path.join(repo.dbPath, CHANGED_FILE);
+        await writeFile(
+          target,
+          (await readFile(target, 'utf-8')) + '\n// embeddings parity touch\n',
+          'utf-8',
+        );
+        if (mode !== 'selective-modify') await rm(path.join(repo.dbPath, DELETED_FILE));
+        gitCommitAll(repo.dbPath, mode);
+
+        const logs: string[] = [];
+        const run = await runFullAnalysis(
+          repo.dbPath,
+          { skipAgentsMd: true },
+          { onProgress: () => {}, onLog: (m) => logs.push(m) },
+        );
+        expect(run.alreadyUpToDate).toBeUndefined();
+        expect(run.incrementalStats?.writeMode).toBe(
+          mode === 'compact-delete' ? 'full' : 'incremental',
+        );
+        if (mode !== 'compact-delete') {
+          expect(logs.join('\n')).not.toContain('switching to a full DB write');
+          const expectedSweepCount =
+            1 + (mode === 'selective-delete' ? (idsByFile.get(DELETED_FILE) ?? []).length : 0);
+          expect(logs.join('\n')).toContain(
+            `Swept ${expectedSweepCount} cached embedding row(s) with no live owning node`,
+          );
+        }
+
+        const after = await loadMeta(storagePath);
+        expect(after!.incrementalInProgress).toBeUndefined();
+        const expectedSurvivors = [
+          ...(idsByFile.get(CHANGED_FILE) ?? []),
+          ...(idsByFile.get(UNCHANGED_FILE) ?? []),
+          ...(mode === 'selective-modify' ? (idsByFile.get(DELETED_FILE) ?? []) : []),
+        ];
+        // stats.embeddings excludes deleted-file rows and the legacy orphan.
+        expect(after!.stats?.embeddings).toBe(expectedSurvivors.length);
+        // Exact surviving nodeId set — pins all four behaviors at once (a
+        // batch-abort loss, a leaked deleted-file row, a dropped unchanged
+        // row, or a lingering legacy orphan each break set equality).
+        expect((await readEmbeddingNodeIds(repo.dbPath)).sort()).toEqual(
+          [...expectedSurvivors].sort(),
+        );
+      } finally {
+        await repo.cleanup();
       }
-      await seedEmbeddingForNodeId(repo.dbPath, LEGACY_ORPHAN_NODE_ID);
-      const seededTotal = [...idsByFile.values()].flat().length + 1;
-      await stampEmbeddingCount(storagePath, seededTotal);
-
-      // One file modified (comment-only, appended at EOF so node ids keep
-      // their line numbers), one file deleted — committed so lastCommit moves.
-      const target = path.join(repo.dbPath, CHANGED_FILE);
-      await writeFile(
-        target,
-        (await readFile(target, 'utf-8')) + '\n// embeddings parity touch\n',
-        'utf-8',
-      );
-      await rm(path.join(repo.dbPath, DELETED_FILE));
-      gitCommitAll(repo.dbPath, 'modify logger + delete formatter');
-
-      const logs: string[] = [];
-      const run = await runFullAnalysis(
-        repo.dbPath,
-        { skipAgentsMd: true },
-        { onProgress: () => {}, onLog: (m) => logs.push(m) },
-      );
-      expect(run.alreadyUpToDate).toBeUndefined();
-      // 7-file repo — far below the 50-file valve floor: this MUST have been
-      // the surgical write plan, or every assertion below is vacuously about
-      // the escalated path instead.
-      expect(logs.join('\n')).not.toContain('switching to a full DB write');
-
-      // The surgical run swept the fabricated legacy orphan by exact id
-      // (FIX 3). The logged count also includes DELETED_FILE's cached rows —
-      // live-graph rejects whose DB rows were already join-deleted with the
-      // file, so their exact-id DELETEs match nothing (documented no-op).
-      const expectedSweepCount = 1 + (idsByFile.get(DELETED_FILE) ?? []).length;
-      expect(logs.join('\n')).toContain(
-        `Swept ${expectedSweepCount} cached embedding row(s) with no live owning node`,
-      );
-
-      const after = await loadMeta(storagePath);
-      expect(after!.incrementalInProgress).toBeUndefined();
-      const expectedSurvivors = [
-        ...(idsByFile.get(CHANGED_FILE) ?? []),
-        ...(idsByFile.get(UNCHANGED_FILE) ?? []),
-      ];
-      // stats.embeddings excludes both the deleted-file rows AND the swept
-      // legacy orphan.
-      expect(after!.stats?.embeddings).toBe(expectedSurvivors.length);
-      // Exact surviving nodeId set — pins all four behaviors at once (a
-      // batch-abort loss, a leaked deleted-file row, a dropped unchanged
-      // row, or a lingering legacy orphan each break set equality).
-      expect((await readEmbeddingNodeIds(repo.dbPath)).sort()).toEqual(
-        [...expectedSurvivors].sort(),
-      );
-    } finally {
-      await repo.cleanup();
-    }
-  }, 600_000);
+    },
+    600_000,
+  );
 
   // #2409 defect 2 (dirty-flag recovery parks WAL/shadow sidecars before any
   // open) is covered in incremental-dirty-recovery.test.ts — its own file so
@@ -1497,12 +1791,102 @@ describe('runFullAnalysis — incremental orchestration', () => {
       // explicitly cannot fire because the dirty-flag check rewrote
       // `options.force` to true.
       expect(recovered.alreadyUpToDate).toBeUndefined();
+      expect(recovered.rebuildReasons).toEqual(['interrupted-rebuild']);
 
       const after = await loadMeta(storagePath);
       expect(after!.incrementalInProgress).toBeUndefined();
       expect(logs.join('\n')).toContain(
         'last dirty state: phase=load-graph, toWrite=3, importerExpansion=153, effectiveWrite=167, deleteCount=169',
       );
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  // #2798/#3041: the invariant the INCREMENTAL_SCHEMA_VERSION ladder used to
+  // backstop. It is implicit nowhere else: no other gate observes analyzer code
+  // that emits no DDL, so dropping the runner-identity reason silently re-opens
+  // same-commit top-ups across an analyzer that changed how the graph is
+  // shaped. Pinned on the returned reasons (it used to be a source regex over
+  // run-analyze.ts). The predicate's OWN behaviour — a moved build digest with
+  // unmoved DDL, an absent/null/legacy/malformed receipt, an alternate
+  // diagnostic entrypoint — is asserted in analyzer-identity.test.ts.
+  it('a stamped runner identity that differs forces a full rebuild with the runner-identity reason', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const meta = await loadMeta(storagePath);
+      if (meta?.runnerIdentity === undefined) throw new Error('first run stamped no identity');
+      // Same commit, clean tree, same DDL: only the analyzer build digest moved.
+      const { invokedArtifact } = meta.runnerIdentity;
+      await saveMeta(storagePath, {
+        ...meta,
+        runnerIdentity: {
+          ...meta.runnerIdentity,
+          invokedArtifact: { ...invokedArtifact, digest: '0'.repeat(64) },
+        },
+      });
+
+      const reanalyzed = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {} },
+      );
+
+      expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(reanalyzed.rebuildReasons).toEqual(['runner-identity']);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  // an upgrade that trips several reasons at once names them in ONE
+  // numbered block and prints no other rebuild line.
+  it('schema, runner identity, and a new Actuator request print one numbered block of three', async () => {
+    const repo = await setupMiniRepo();
+    const runtimeInput = 'runtime-actuator';
+    try {
+      await mkdir(path.join(repo.dbPath, runtimeInput), { recursive: true });
+      await writeFile(
+        path.join(repo.dbPath, runtimeInput, 'env.json'),
+        JSON.stringify({ propertySources: [] }),
+        'utf-8',
+      );
+      gitCommitAll(repo.dbPath, 'add actuator runtime snapshot');
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const meta = await loadMeta(storagePath);
+      if (meta?.runnerIdentity === undefined) throw new Error('first run stamped no identity');
+      const { invokedArtifact } = meta.runnerIdentity;
+      await saveMeta(storagePath, {
+        ...meta,
+        schemaFingerprint: 'b1c2d3e4f5a6',
+        runnerIdentity: {
+          ...meta.runnerIdentity,
+          invokedArtifact: { ...invokedArtifact, digest: '0'.repeat(64) },
+        },
+      });
+
+      const logs: string[] = [];
+      const upgraded = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true, springActuatorPath: runtimeInput },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(upgraded.rebuildReasons).toEqual([
+        'schema-fingerprint',
+        'runner-identity',
+        'spring-actuator',
+      ]);
+      const { singleSummary, numberedHeader, followUp } = rebuildLineShapes(3);
+      const blocks = logs.filter((m) => m.startsWith(numberedHeader));
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].split('\n')).toHaveLength(4);
+      expect(logs.filter((m) => m.startsWith(singleSummary) || m.startsWith(followUp))).toEqual([]);
     } finally {
       await repo.cleanup();
     }
@@ -1540,10 +1924,45 @@ describe('runFullAnalysis — incremental orchestration', () => {
       // Pipeline actually ran (schemaFingerprint mismatch → force=true), and the
       // notice names the stamp it rejected rather than a generic placeholder.
       expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(reanalyzed.rebuildReasons).toEqual(['schema-fingerprint']);
       expect(logs.join('\n')).toContain('index schema changed (built by b1c2d3e4f5a6,');
       // And the rebuild restamped this build's digest (that path runs saveMeta).
       const restamped = await loadMeta(storagePath);
       expect(restamped!.schemaFingerprint).toBe(SCHEMA_FINGERPRINT);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 300_000);
+
+  // A recorded graph-write collapse at an unchanged commit must not take the
+  // alreadyUpToDate fast path: the gate forces a full rebuild and names it.
+  it('a recorded graphWriteCollapsed stamp forces a full rebuild on an unchanged-commit re-analyze', async () => {
+    const repo = await setupMiniRepo();
+    try {
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      await runFullAnalysis(repo.dbPath, { skipAgentsMd: true }, { onProgress: () => {} });
+      const { storagePath } = getStoragePaths(repo.dbPath);
+      const meta = await loadMeta(storagePath);
+      expect(meta?.graphWriteCollapsed).toBeUndefined();
+      expect(meta).toBeTruthy();
+
+      // Same commit, clean tree, same DDL: only the collapse stamp differs.
+      const collapsed: RepoMeta = {
+        ...(meta as RepoMeta),
+        graphWriteCollapsed: { expected: 500, persisted: 3 },
+      };
+      await saveMeta(storagePath, collapsed);
+
+      const logs: string[] = [];
+      const reanalyzed = await runFullAnalysis(
+        repo.dbPath,
+        { skipAgentsMd: true },
+        { onProgress: () => {}, onLog: (message) => logs.push(message) },
+      );
+
+      expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(reanalyzed.rebuildReasons).toContain('graph-write-collapse');
+      expect(logs.join('\n')).toContain('previous run persisted 3 of 500 expected relationships');
     } finally {
       await repo.cleanup();
     }
@@ -1578,6 +1997,7 @@ describe('runFullAnalysis — incremental orchestration', () => {
       );
       // Pipeline actually ran (cjkSegmentation mismatch → force=true).
       expect(reanalyzed.alreadyUpToDate).toBeUndefined();
+      expect(reanalyzed.rebuildReasons).toContain('cjk-segmentation');
       // And the meta is restamped to the live resolved mode.
       const restamped = await loadMeta(storagePath);
       expect(restamped!.cjkSegmentation).toBe('bigram');
@@ -1726,6 +2146,166 @@ describe('runFullAnalysis — incremental orchestration', () => {
  * 'exact-scan', which the unit-level wiring pin in
  * run-analyze-fts-repair.test.ts covers platform-independently.
  */
+let dartAvailable = isLanguageAvailable(SupportedLanguages.Dart);
+if (dartAvailable) {
+  try {
+    await loadParser();
+    await loadLanguage(SupportedLanguages.Dart);
+  } catch {
+    dartAvailable = false;
+  }
+}
+
+describe.skipIf(!dartAvailable)('Dart pubspec-only incremental persistence (#2963)', () => {
+  it.each([
+    {
+      name: 'rename',
+      initial: 'name: app',
+      next: 'name: renamed',
+      file: 'pubspec.yaml',
+      nextResolves: false,
+    },
+    {
+      name: 'addition',
+      initial: null,
+      next: 'name: app',
+      file: 'pubspec.yaml',
+      nextResolves: true,
+    },
+    {
+      name: 'duplicate',
+      initial: 'name: app',
+      next: 'name: app',
+      file: 'nested/pubspec.yaml',
+      nextResolves: false,
+    },
+    {
+      name: 'repair',
+      initial: 'name: [invalid',
+      next: 'name: app',
+      file: 'pubspec.yaml',
+      nextResolves: true,
+    },
+  ])(
+    'persists $name and its reversal with forced-rebuild parity',
+    async ({ initial, next, file, nextResolves }) => {
+      const repo = await createTempDir();
+      const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+      const { runFullAnalysis } = await import('../../src/core/run-analyze.js');
+      const options = { skipAgentsMd: true, skipFts: true };
+      const progress = { onProgress: () => {} };
+      const readEdges = async () => {
+        await adapter.initLbug(getStoragePaths(repo.dbPath).lbugPath, { skipFts: true });
+        try {
+          return await adapter.executeQuery(
+            `MATCH (a)-[r:CodeRelation]->(b) WHERE r.type IN ['IMPORTS', 'CALLS'] ` +
+              `RETURN a.id AS source, b.id AS target, r.type AS type, r.reason AS reason, ` +
+              `a.filePath AS sourceFile, b.filePath AS targetFile, b.name AS targetName ` +
+              `ORDER BY source, target, type, reason`,
+          );
+        } finally {
+          await adapter.closeLbug();
+        }
+      };
+      try {
+        await mkdir(path.join(repo.dbPath, 'lib'), { recursive: true });
+        await mkdir(path.join(repo.dbPath, 'nested'), { recursive: true });
+        await writeFile(path.join(repo.dbPath, '.gitignore'), '.gitnexus/\n');
+        await writeFile(
+          path.join(repo.dbPath, 'lib/model.dart'),
+          'class Model { void save() {} }\n',
+        );
+        await writeFile(
+          path.join(repo.dbPath, 'lib/bridge.dart'),
+          "import 'package:app/model.dart';\nModel buildModel() => Model();\n",
+        );
+        await writeFile(
+          path.join(repo.dbPath, 'lib/main.dart'),
+          "import './bridge.dart';\nvoid run() { buildModel().save(); }\n",
+        );
+        await writeFile(
+          path.join(repo.dbPath, 'nested/decoy.dart'),
+          'class Model { void save() {} }\n',
+        );
+        if (initial !== null) await writeFile(path.join(repo.dbPath, 'pubspec.yaml'), initial);
+        execSync('git init -q', { cwd: repo.dbPath, stdio: 'pipe' });
+        gitCommitAll(repo.dbPath, 'Dart package fixture');
+        await runFullAnalysis(repo.dbPath, options, progress);
+        const initialEdges = await readEdges();
+        expect(
+          initialEdges.filter(
+            (edge) =>
+              edge.type === 'IMPORTS' &&
+              edge.source === 'File:lib/bridge.dart' &&
+              edge.target === 'File:lib/model.dart',
+          ),
+        ).toHaveLength(initial === 'name: app' ? 1 : 0);
+
+        for (const [content, resolves] of [
+          [next, nextResolves],
+          [file === 'pubspec.yaml' ? initial : null, initial === 'name: app'],
+        ] as const) {
+          const target = path.join(repo.dbPath, file);
+          if (content === null) await rm(target);
+          else await writeFile(target, content);
+          gitCommitAll(repo.dbPath, 'Update package identity');
+          const incremental = await runFullAnalysis(repo.dbPath, options, progress);
+          expect(incremental.incrementalStats?.writeMode).toBe('incremental');
+          const incrementalEdges = await readEdges();
+          const imports = incrementalEdges.filter(
+            (edge) =>
+              edge.type === 'IMPORTS' &&
+              edge.source === 'File:lib/bridge.dart' &&
+              edge.target === 'File:lib/model.dart',
+          );
+          expect(imports).toHaveLength(resolves ? 1 : 0);
+          expect(
+            incrementalEdges.filter(
+              (edge) =>
+                edge.type === 'CALLS' &&
+                edge.sourceFile === 'lib/main.dart' &&
+                edge.targetFile === 'lib/model.dart' &&
+                edge.targetName === 'save',
+            ),
+          ).toHaveLength(resolves ? 1 : 0);
+          const meta = await loadMeta(getStoragePaths(repo.dbPath).storagePath);
+          expect(Object.hasOwn(meta?.fileHashes ?? {}, file)).toBe(content !== null);
+          const identityToFile = incrementalEdges.filter(
+            (edge) =>
+              edge.type === 'IMPORTS' &&
+              edge.reason === DART_PACKAGE_IDENTITY_REASON &&
+              edge.source === 'File:lib/main.dart' &&
+              edge.target === `File:${file}`,
+          );
+          if (content === 'name: app') {
+            expect(identityToFile).toEqual([
+              {
+                source: 'File:lib/main.dart',
+                target: `File:${file}`,
+                type: 'IMPORTS',
+                reason: DART_PACKAGE_IDENTITY_REASON,
+                sourceFile: 'lib/main.dart',
+                targetFile: file,
+                targetName: 'pubspec.yaml',
+              },
+            ]);
+          } else {
+            // Rename and deletion must drop the identity edge. A stale edge
+            // would keep rewriting importers after the package name is gone.
+            expect(identityToFile).toEqual([]);
+          }
+          await runFullAnalysis(repo.dbPath, { ...options, force: true }, progress);
+          expect(await readEdges()).toEqual(incrementalEdges);
+        }
+      } finally {
+        await adapter.closeLbug();
+        await repo.cleanup();
+      }
+    },
+    300_000,
+  );
+});
+
 describe('runFullAnalysis — escalated wipe recreates the vector index (#2409, tri-review 4669518496 P1)', () => {
   let vectorAvailable = false;
   let skipWarned = false;
@@ -1915,9 +2495,10 @@ describe('runFullAnalysis — AsyncAPI document reading', () => {
         { onProgress: () => {}, onLog: (message) => enabledLogs.push(message) },
       );
       expect(enabled.alreadyUpToDate).toBeUndefined();
-      expect(enabledLogs.join('\n')).toContain(
-        'AsyncAPI document reading requested; forcing a full rebuild.',
-      );
+      expect(enabled.rebuildReasons).toEqual(['asyncapi']);
+      expect(
+        enabledLogs.filter((m) => m.startsWith(rebuildLineShapes(1).singleSummary)),
+      ).toHaveLength(1);
       // The forward into PipelineOptions is what puts this node in the graph;
       // without it the flag parses and nothing else happens.
       expect(await readDocumentDestinations(repo.dbPath)).toEqual([
@@ -1946,9 +2527,10 @@ describe('runFullAnalysis — AsyncAPI document reading', () => {
         { onProgress: () => {}, onLog: (message) => disableLogs.push(message) },
       );
       expect(disabled.alreadyUpToDate).toBeUndefined();
-      expect(disableLogs.join('\n')).toContain(
-        'AsyncAPI document reading disabled; rebuilding to remove document-derived evidence.',
-      );
+      expect(disabled.rebuildReasons).toEqual(['asyncapi']);
+      expect(
+        disableLogs.filter((m) => m.startsWith(rebuildLineShapes(1).singleSummary)),
+      ).toHaveLength(1);
       expect(await readDocumentDestinations(repo.dbPath)).toEqual([]);
       expect((await loadMeta(storagePath))?.asyncApiSpec).toBeUndefined();
 

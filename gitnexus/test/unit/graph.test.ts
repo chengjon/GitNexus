@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createKnowledgeGraph } from '../../src/core/graph/graph.js';
-import type { GraphNode, GraphRelationship } from '../../src/core/graph/types.js';
+import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
 
 function makeNode(id: string, name: string, filePath: string = 'src/test.ts'): GraphNode {
   return {
@@ -32,6 +32,20 @@ function makeRel(
 }
 
 describe('createKnowledgeGraph', () => {
+  it.each([{ sourceId: 'different' }, { targetId: 'different' }, { type: 'EXTENDS' as const }])(
+    'rejects conflicting identity without a collector: %j',
+    (change) => {
+      const graph = createKnowledgeGraph();
+      const first = makeRel('fn:foo', 'fn:bar');
+      graph.addRelationship(first);
+      expect(() => graph.addRelationship({ ...first, ...change })).toThrow(
+        /Conflicting graph relationship identity/,
+      );
+      expect(graph.relationshipCount).toBe(1);
+      expect(graph.getRelationship(first.id)).toEqual(first);
+    },
+  );
+
   // ─── addNode / getNode ─────────────────────────────────────────────
 
   it('adds and retrieves a node', () => {
@@ -410,8 +424,9 @@ describe('createKnowledgeGraph', () => {
       const node: Parameters<typeof g.addNode>[0] = {
         id: 'cluster:x',
         label: 'Community',
-        properties: { name: 'x' },
+        properties: { name: 'x', filePath: '' },
       };
+      Reflect.deleteProperty(node.properties, 'filePath');
       g.addNode(node);
       g.addNode(makeNode('fn:a', 'a', 'src/a.ts'));
 

@@ -11,6 +11,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import { PassThrough } from 'node:stream';
+import type { Response } from 'express';
 import type { GraphRelationship } from 'gitnexus-shared';
 import { withTestLbugDB } from '../helpers/test-indexed-db.js';
 import { skipUnlessFtsAvailable } from '../helpers/fts-availability.js';
@@ -59,6 +61,39 @@ withTestLbugDB(
 
         const folderRows = await coreExecuteQuery('MATCH (n:Folder) RETURN n.id AS id');
         expect(folderRows).toHaveLength(1);
+      });
+
+      it('serializes CSV-loaded empty relationship reasons as strings in both graph APIs', async () => {
+        const { executeQuery } = await import('../../src/core/lbug/lbug-adapter.js');
+        const { buildGraph, streamGraphNdjson } = await import('../../src/server/api.js');
+        const stored = await executeQuery(
+          'MATCH ()-[r:CodeRelation]->() RETURN r.reason AS reason',
+        );
+        expect(stored).toEqual(Array.from({ length: 4 }, () => ({ reason: null })));
+
+        const buffered = JSON.parse(JSON.stringify(await buildGraph()));
+        const response = new PassThrough();
+        let ndjson = '';
+        response.on('data', (chunk: Buffer) => {
+          ndjson += chunk.toString();
+        });
+        try {
+          await streamGraphNdjson(response as unknown as Response);
+        } finally {
+          response.destroy();
+        }
+        const streamed = ndjson
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line))
+          .filter((record) => record.type === 'relationship')
+          .map((record) => record.data);
+        expect(buffered.relationships).toHaveLength(4);
+        expect({
+          buffered: buffered.relationships.map((rel: GraphRelationship) => rel.reason),
+          streamed: streamed.map((rel: GraphRelationship) => rel.reason),
+        }).toEqual({ buffered: ['', '', '', ''], streamed: ['', '', '', ''] });
+        expect(streamed).toEqual(expect.arrayContaining(buffered.relationships));
       });
 
       it('createFTSIndex: creates FTS index on Function table without error', async (ctx) => {
@@ -233,6 +268,44 @@ withTestLbugDB(
           `MATCH ()-[r:CodeRelation]->() WHERE r.type = 'QUERIES' RETURN count(r) AS cnt`,
         );
         expect(Number((queriesLeft[0] as { cnt: number }).cnt)).toBe(1);
+      });
+
+      it('refreshes global resolution edges together and keeps bound calls at the same confidence', async () => {
+        const { executeQuery, deleteGlobalResolutionEdges } =
+          await import('../../src/core/lbug/lbug-adapter.js');
+        const { impactEdgePredicate } = await import('gitnexus-shared');
+        const [a, b] = (await executeQuery('MATCH (n:Function) RETURN n.id AS id ORDER BY id')) as {
+          id: string;
+        }[];
+        const calls = "MATCH ()-[r:CodeRelation]->() WHERE r.type = 'CALLS'";
+        const reasons =
+          ' RETURN r.reason AS reason, r.confidence AS confidence ORDER BY reason, confidence';
+        const baseline = await executeQuery(calls + reasons);
+        try {
+          for (const [type, reason] of [
+            ['CALLS', 'global-name-fallback'],
+            ['CALLS', 'test-bound-call'],
+            ['INJECTS', 'test-binding'],
+            ['ADVISED_BY', 'test-binding'],
+          ]) {
+            await executeQuery(
+              `MATCH (a:Function {id: '${a.id}'}), (b:Function {id: '${b.id}'}) ` +
+                `CREATE (a)-[:CodeRelation {type: '${type}', confidence: 0.5, reason: '${reason}'}]->(b)`,
+            );
+          }
+          const before = await executeQuery(calls + ' AND ' + impactEdgePredicate('r') + reasons);
+          expect(before).toContainEqual({ reason: 'test-bound-call', confidence: 0.5 });
+          expect(before).not.toContainEqual(
+            expect.objectContaining({ reason: 'global-name-fallback' }),
+          );
+          await expect(deleteGlobalResolutionEdges()).resolves.toEqual({ edgesDeleted: 3 });
+          expect(await executeQuery(calls + reasons)).toEqual(before);
+        } finally {
+          await executeQuery(
+            "MATCH ()-[r:CodeRelation]->() WHERE r.reason IN ['global-name-fallback', 'test-bound-call', 'test-binding'] DELETE r",
+          );
+        }
+        expect(await executeQuery(calls + reasons)).toEqual(baseline);
       });
 
       it('deleteAllAdvisedBy: removes only ADVISED_BY edges and is benign when none exist (#2416)', async () => {

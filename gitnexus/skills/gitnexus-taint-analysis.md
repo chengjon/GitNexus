@@ -99,8 +99,11 @@ parameter, source)`. Seed from `source→callee-arg`, propagate via
   before firing — the recurring multi-source bug class. (Bit M3; bit M4 U9.)
 - **Name-based call join.** Match a summary's call-arg edge to a `CALLS` edge by
   CALLEE NAME, not call-site line — line-base parity (CFG 1-based vs reference
-  site) is fragile; the callee identity is exact and context-insensitivity
-  taints the callee's param identically at every call site.
+  site) is fragile, and context-insensitivity taints the callee's param
+  identically at every call site. The name is not an identity: when one caller
+  calls two distinct callees that share a name, the flow reaches both
+  (over-attribution, see below), and a call-arg edge with no callee name
+  matches every outgoing call of its caller.
 - Persisted as `TAINT_PATH` edges (Function→Function), function-level hop chain
   in `reason` via the same codec; confidence < the intra-procedural 1.0.
 
@@ -141,10 +144,12 @@ finding is NOT proof of safety.
   `taint/path-codec.ts`. Two hand-rolled copies of a wire format drift — never
   fork it. New metadata extends the format WITHIN the version when writer +
   reader ship together.
-- **Cache versioning.** A worker-harvest shape change bumps the parse-cache pdg
-  NAMESPACE (`pdg:N`), NOT `SCHEMA_BUMP` (which cold-invalidates every user).
-  Persisted-graph/config changes ride `RepoMeta.pdg`'s key-union mismatch →
-  full writeback. Model content rides `taintModelVersion`.
+- **Cache compatibility.** Worker-harvest changes invalidate automatically
+  through the PDG artifact identity. Keep extraction-only dependencies in the
+  PDG ownership boundary and verify that ordinary parse keys remain stable.
+  Shared parser changes belong to the base identity. Persisted-graph/config
+  changes ride `RepoMeta.pdg`'s key-union mismatch → full writeback.
+  Model content rides `taintModelVersion`.
 
 ## Adding a source / sink / sanitizer
 

@@ -23,6 +23,7 @@ describe('uninstallCommand', () => {
   let tempHome: string;
   let originalHome: string | undefined;
   let originalUserProfile: string | undefined;
+  let originalCodexHome: string | undefined;
   let originalSkillsRoot: string | undefined;
   let originalExitCode: typeof process.exitCode;
   let skillsRoot: string;
@@ -35,6 +36,8 @@ describe('uninstallCommand', () => {
 
     originalHome = process.env.HOME;
     originalUserProfile = process.env.USERPROFILE;
+    originalCodexHome = process.env.CODEX_HOME;
+    delete process.env.CODEX_HOME;
     originalSkillsRoot = process.env.GITNEXUS_TEST_SKILLS_ROOT;
     originalExitCode = process.exitCode;
 
@@ -57,6 +60,8 @@ describe('uninstallCommand', () => {
     vi.restoreAllMocks();
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
     if (originalSkillsRoot === undefined) delete process.env.GITNEXUS_TEST_SKILLS_ROOT;
     else process.env.GITNEXUS_TEST_SKILLS_ROOT = originalSkillsRoot;
     // The command sets process.exitCode=1 on partial failure; restore it so a
@@ -157,6 +162,57 @@ describe('uninstallCommand', () => {
     await expect(fs.access(path.join(skillsDir, 'my-skill'))).resolves.toBeUndefined();
   });
 
+  it('removes the MCP entry, hooks and skills from $CLAUDE_CONFIG_DIR when it is set', async () => {
+    const configDir = path.join(tempHome, 'relocated', 'claude');
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    try {
+      await fs.mkdir(path.join(configDir, 'skills', 'gitnexus-cli'), { recursive: true });
+      await fs.writeFile(
+        path.join(configDir, 'skills', 'gitnexus-cli', 'SKILL.md'),
+        '# y',
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(configDir, '.claude.json'),
+        JSON.stringify({ keep: 1, mcpServers: { gitnexus: { command: 'npx' } } }),
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(configDir, 'settings.json'),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: [{ type: 'command', command: 'node ".../gitnexus-hook.cjs"' }],
+              },
+            ],
+          },
+        }),
+        'utf-8',
+      );
+      const hookDir = path.join(configDir, 'hooks', 'gitnexus');
+      await fs.mkdir(hookDir, { recursive: true });
+      await fs.writeFile(path.join(hookDir, 'gitnexus-hook.cjs'), '// hook', 'utf-8');
+
+      const uninstallCommand = await importUninstall();
+      await uninstallCommand({ force: true });
+
+      const mcp = JSON.parse(await fs.readFile(path.join(configDir, '.claude.json'), 'utf-8'));
+      expect(mcp.keep).toBe(1);
+      expect(mcp.mcpServers?.gitnexus).toBeUndefined();
+      const settings = JSON.parse(
+        await fs.readFile(path.join(configDir, 'settings.json'), 'utf-8'),
+      );
+      expect(settings.hooks.PreToolUse).toHaveLength(0);
+      await expect(fs.access(hookDir)).rejects.toThrow();
+      await expect(fs.access(path.join(configDir, 'skills', 'gitnexus-cli'))).rejects.toThrow();
+    } finally {
+      // vitest.config.ts pins it to '' so a developer shell's value never leaks in.
+      process.env.CLAUDE_CONFIG_DIR = '';
+    }
+  });
+
   // ── renamed skills: the legacy dir name must still be uninstalled ──
   it('removes a legacy renamed skill dir (gitnexus-pr-review) absent from the bundled source', async () => {
     const skillsDir = path.join(tempHome, '.claude', 'skills');
@@ -201,6 +257,52 @@ describe('uninstallCommand', () => {
     expect(result).not.toContain('[mcp_servers.gitnexus]');
     expect(result).toContain('[mcp_servers.other]');
     expect(result).toContain('command = "other"');
+  });
+
+  it('dry-runs and removes only the active CODEX_HOME MCP entry', async () => {
+    const activeHome = path.join(tempHome, 'active-codex');
+    const activeConfig = path.join(activeHome, 'config.toml');
+    const defaultConfig = path.join(tempHome, '.codex', 'config.toml');
+    const activeHooks = path.join(activeHome, 'hooks.json');
+    const defaultHooks = path.join(tempHome, '.codex', 'hooks.json');
+    const activeScriptDir = path.join(activeHome, 'hooks', 'gitnexus');
+    const defaultScriptDir = path.join(tempHome, '.codex', 'hooks', 'gitnexus');
+    const activeRaw = '[mcp_servers.gitnexus]\ncommand = "active"\n';
+    const defaultRaw = '[mcp_servers.gitnexus]\ncommand = "default"\n';
+    const hooksRaw = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [{ type: 'command', command: 'node gitnexus-hook.cjs' }] },
+          { matcher: 'Read', hooks: [{ type: 'command', command: 'user-hook' }] },
+        ],
+      },
+    });
+    await fs.mkdir(activeHome);
+    await fs.mkdir(path.dirname(defaultConfig));
+    await fs.mkdir(activeScriptDir, { recursive: true });
+    await fs.mkdir(defaultScriptDir, { recursive: true });
+    await fs.writeFile(activeConfig, activeRaw);
+    await fs.writeFile(defaultConfig, defaultRaw);
+    await fs.writeFile(activeHooks, hooksRaw);
+    await fs.writeFile(defaultHooks, hooksRaw);
+    process.env.CODEX_HOME = activeHome;
+
+    const uninstallCommand = await importUninstall();
+    await uninstallCommand();
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(activeConfig);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(activeHooks);
+    expect(await fs.readFile(activeConfig, 'utf-8')).toBe(activeRaw);
+    expect(await fs.readFile(activeHooks, 'utf-8')).toBe(hooksRaw);
+
+    await uninstallCommand({ force: true });
+    expect(await fs.readFile(activeConfig, 'utf-8')).not.toContain('[mcp_servers.gitnexus]');
+    expect(await fs.readFile(defaultConfig, 'utf-8')).toBe(defaultRaw);
+    const remaining = JSON.parse(await fs.readFile(activeHooks, 'utf-8'));
+    expect(remaining.hooks.PreToolUse).toHaveLength(1);
+    expect(remaining.hooks.PreToolUse[0].hooks[0].command).toBe('user-hook');
+    expect(await fs.readFile(defaultHooks, 'utf-8')).toBe(hooksRaw);
+    await expect(fs.access(activeScriptDir)).rejects.toThrow();
+    await expect(fs.access(defaultScriptDir)).resolves.toBeUndefined();
   });
 
   it('leaves a corrupt JSON config untouched', async () => {
@@ -367,6 +469,83 @@ describe('uninstallCommand', () => {
     expect(raw).toContain('"gitnexus"');
   });
 
+  // ── OpenCode hooks plugin: a single auto-loaded file ──
+  it('removes the OpenCode hooks plugin file, preserving sibling plugins', async () => {
+    const pluginFile = path.join(tempHome, '.config', 'opencode', 'plugins', 'gitnexus.js');
+    const sibling = path.join(tempHome, '.config', 'opencode', 'plugins', 'mine.js');
+    await fs.mkdir(path.dirname(pluginFile), { recursive: true });
+    await fs.writeFile(pluginFile, '// gitnexus', 'utf-8');
+    await fs.writeFile(sibling, '// mine', 'utf-8');
+
+    const uninstallCommand = await importUninstall();
+    await uninstallCommand({ force: true });
+
+    await expect(fs.access(pluginFile)).rejects.toThrow();
+    expect(await fs.readFile(sibling, 'utf-8')).toBe('// mine');
+  });
+
+  it('dry-run keeps the OpenCode hooks plugin file', async () => {
+    const pluginFile = path.join(tempHome, '.config', 'opencode', 'plugins', 'gitnexus.js');
+    await fs.mkdir(path.dirname(pluginFile), { recursive: true });
+    await fs.writeFile(pluginFile, '// gitnexus', 'utf-8');
+
+    const uninstallCommand = await importUninstall();
+    await uninstallCommand();
+
+    expect(await fs.readFile(pluginFile, 'utf-8')).toBe('// gitnexus');
+  });
+
+  it('reports a non-ENOENT stat error on the plugin file instead of silently skipping', async () => {
+    const pluginFile = path.join(tempHome, '.config', 'opencode', 'plugins', 'gitnexus.js');
+    await fs.mkdir(path.dirname(pluginFile), { recursive: true });
+    await fs.writeFile(pluginFile, '// gitnexus', 'utf-8');
+
+    // Simulate EACCES on the plugin lookup only; every other call passes
+    // through. removeFile uses lstat (symlink-safe), so spy on that.
+    const realLstat = fs.lstat.bind(fs);
+    const statSpy = vi.spyOn(fs, 'lstat').mockImplementation((async (p: any, ...rest: any[]) => {
+      if (String(p).endsWith(path.join('plugins', 'gitnexus.js'))) {
+        const err: any = new Error(`EACCES: permission denied, stat '${p}'`);
+        err.code = 'EACCES';
+        throw err;
+      }
+      return (realLstat as any)(p, ...rest);
+    }) as any);
+
+    const logSpy = vi.spyOn(console, 'log');
+    const uninstallCommand = await importUninstall();
+    await uninstallCommand({ force: true });
+
+    // Before the fix, removeFile swallowed every stat error → plugin left in
+    // place with no error reported. Now EACCES surfaces in the Errors block.
+    const output = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(output).toContain('hooks plugin');
+    expect(statSpy).toHaveBeenCalled();
+    // The plugin file was never reached (rm), so it still exists.
+    expect(await fs.readFile(pluginFile, 'utf-8')).toBe('// gitnexus');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('removes a dangling plugin symlink instead of treating it as absent', async () => {
+    const pluginFile = path.join(tempHome, '.config', 'opencode', 'plugins', 'gitnexus.js');
+    const missingTarget = path.join(tempHome, 'does-not-exist.js');
+    await fs.mkdir(path.dirname(pluginFile), { recursive: true });
+    try {
+      await fs.symlink(missingTarget, pluginFile);
+    } catch (err: any) {
+      // Windows without developer mode / admin cannot create symlinks.
+      if (['EPERM', 'EOPNOTSUPP', 'UNKNOWN'].includes(err?.code)) return;
+      throw err;
+    }
+
+    const uninstallCommand = await importUninstall();
+    await uninstallCommand({ force: true });
+
+    // Before the fix, stat() followed the link, ENOENT'd, and the symlink
+    // survived at the auto-loaded plugins path.
+    await expect(fs.lstat(pluginFile)).rejects.toThrow();
+  });
+
   // ── Antigravity MCP + hooks (AfterTool / gitnexus-antigravity-hook) ──
   it('removes Antigravity MCP and AfterTool hooks plus the adapter script dir', async () => {
     const mcpPath = path.join(tempHome, '.gemini', 'antigravity', 'mcp_config.json');
@@ -418,16 +597,50 @@ describe('uninstallCommand', () => {
     const raw = ['[mcp_servers.gitnexus]', 'command = "gitnexus"', 'args = ["mcp"]', ''].join('\n');
     await fs.writeFile(configPath, raw, 'utf-8');
 
-    const uninstallCommand = await importUninstall();
-    await uninstallCommand({ force: true });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    try {
+      const uninstallCommand = await importUninstall();
+      await uninstallCommand({ force: true });
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
 
     expect(execFileMock).toHaveBeenCalledWith(
       'codex',
       ['mcp', 'remove', 'gitnexus'],
-      expect.any(Object),
+      expect.objectContaining({ shell: false }),
       expect.any(Function),
     );
     // CLI path handles removal; we must not also rewrite the file.
+    expect(await fs.readFile(configPath, 'utf-8')).toBe(raw);
+  });
+
+  it('runs `codex mcp remove` as one shell command line on Windows', async () => {
+    execFileMock.mockImplementationOnce((...args: any[]) => {
+      const callback = args.at(-1);
+      if (typeof callback === 'function') callback(null, '', '');
+    });
+    const configPath = path.join(tempHome, '.codex', 'config.toml');
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    const raw = ['[mcp_servers.gitnexus]', 'command = "gitnexus"', 'args = ["mcp"]', ''].join('\n');
+    await fs.writeFile(configPath, raw, 'utf-8');
+
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const uninstallCommand = await importUninstall();
+      await uninstallCommand({ force: true });
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      'codex mcp remove gitnexus',
+      [],
+      expect.objectContaining({ shell: true }),
+      expect.any(Function),
+    );
     expect(await fs.readFile(configPath, 'utf-8')).toBe(raw);
   });
 

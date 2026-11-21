@@ -119,7 +119,7 @@ describe('createRouteLimiter — integration with a real route', () => {
     const res = await fetch(`${baseUrl}/test/file`);
     expect(res.status).toBe(429);
     const body = await res.json();
-    expect(body.error).toContain('Too many');
+    expect(body).toHaveProperty('error', expect.stringContaining('Too many'));
   });
 
   it('emits draft-7 RateLimit response header (combined form), not legacy X-RateLimit-*', async () => {
@@ -313,10 +313,10 @@ describe('production routes — rate-limit middleware wiring', () => {
     );
   });
 
-  it('embed route flushes WAL via flushWAL, not inline executeQuery (#1376)', () => {
-    // The embed handler must call the consolidated helper, not hand-roll
-    // its own try/catch around executeQuery('CHECKPOINT').
-    expect(apiSource).toMatch(/await flushWAL\(\)/);
+  it('embed route delegates durable publication to the shared phase (#1376)', () => {
+    // The phase owns the vector writer and its durable checkpoint. The HTTP
+    // reader must not checkpoint its read-only graph connection.
+    expect(apiSource).toMatch(/await runAnalysisEmbeddingPhase\(/);
     expect(apiSource).not.toMatch(/executeQuery\('CHECKPOINT'\)/);
   });
 });

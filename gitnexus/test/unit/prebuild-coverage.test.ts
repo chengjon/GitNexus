@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load } from 'js-yaml';
+import { createHash } from 'node:crypto';
+import { classifyBinaryHeader } from '../../src/core/lbug/extension-load-error.js';
 
 /**
  * Regression guard: every tree-sitter grammar GitNexus ships must provide a
@@ -151,12 +153,22 @@ describe('vendored grammar prebuild coverage (toolchain-free on every supported 
 
 describe('npm-dependency grammar prebuild coverage', () => {
   const pkg = JSON.parse(readFileSync(path.join(GITNEXUS_ROOT, 'package.json'), 'utf8'));
+  // A grammar is recognised by its package basename so a scoped package
+  // (`@scope/tree-sitter-x`) is included; the `tree-sitter` runtime and
+  // non-grammar packages are not.
   const npmGrammars = Object.keys(pkg.dependencies ?? {})
-    .filter((d) => /^tree-sitter-/.test(d))
+    .filter((d) => /^tree-sitter-/.test(d.split('/').pop() ?? ''))
     .sort();
 
   it('discovers the npm grammar dependencies', () => {
     expect(npmGrammars.length).toBeGreaterThan(0);
+  });
+
+  it('enumerates scoped and unscoped grammars but not the runtime or other packages', () => {
+    expect(npmGrammars).toContain('@eagleoutice/tree-sitter-r');
+    expect(npmGrammars).toContain('tree-sitter-go');
+    expect(npmGrammars).not.toContain('tree-sitter');
+    expect(npmGrammars).not.toContain('@ladybugdb/core');
   });
 
   for (const grammar of npmGrammars) {
@@ -370,4 +382,52 @@ describe('prebuild workflow rebuild loop guard', () => {
       expect(result.output).not.toContain('any=true');
     },
   );
+});
+
+describe('bundled Linux ARM64 repair architecture', () => {
+  const repairs = [
+    ['tree-sitter-cpp', '0.23.4'],
+    ['tree-sitter-java', '0.23.5'],
+    ['tree-sitter-ruby', '0.23.1'],
+    ['tree-sitter-javascript', '0.23.1'],
+    ['tree-sitter-typescript', '0.23.2'],
+  ];
+  for (const [name, version] of repairs) {
+    it(`${name}@${version}: installed ARM64 prebuild is an AArch64 N-API binary`, () => {
+      const dir =
+        name === 'tree-sitter-javascript'
+          ? path.join(NODE_MODULES, 'tree-sitter-typescript/node_modules', name)
+          : path.join(NODE_MODULES, name);
+      const bytes = readFileSync(path.join(dir, 'prebuilds/linux-arm64', `${name}.node`));
+      expect(classifyBinaryHeader(bytes, bytes.length, 'linux', 'arm64')).toBe('valid');
+      expect(classifyBinaryHeader(bytes, bytes.length, 'linux', 'x64')).toBe('corrupt');
+      expect(bytes.includes(NAPI_SYMBOL)).toBe(true);
+    });
+  }
+
+  it('pins the five repair identities, pristine source provenance, and replacement checksums', () => {
+    const dir = path.join(GITNEXUS_ROOT, 'prebuilds/bundled');
+    const manifest = JSON.parse(readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+    // Independent audit pin: review regenerated artifacts and their provenance
+    // before updating this hash. Parse/stringify ignores formatting-only changes.
+    expect(createHash('sha256').update(JSON.stringify(manifest)).digest('hex')).toBe(
+      '2aa9eda6086233ce620564a63f9ed422c424b0d89b10e58b0e906e091db2aa3f',
+    );
+    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.tuple).toBe('linux-arm64');
+    expect(
+      manifest.packages.map((entry: { name: string; version: string }) => [
+        entry.name,
+        entry.version,
+      ]),
+    ).toEqual(repairs);
+    for (const entry of manifest.packages) {
+      const bytes = readFileSync(path.join(dir, entry.file));
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(entry.sha256);
+      expect(classifyBinaryHeader(bytes, bytes.length, 'linux', 'arm64')).toBe('valid');
+      expect(entry.source.integrity).toMatch(/^sha512-/);
+      expect(entry.source.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(entry.source.generatedSourcesUnchanged).toBe(true);
+    }
+  });
 });

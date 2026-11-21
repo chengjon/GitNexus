@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatDetectChangesResult } from '../../src/cli/detect-changes-format.js';
 import { setCliLanguage } from '../../src/cli/i18n/index.js';
+import { parseDiffHunks } from '../../src/storage/git.js';
 
 describe('formatDetectChangesResult — zero-symbol honesty (#3131)', () => {
   beforeEach(() => {
@@ -40,6 +41,23 @@ describe('formatDetectChangesResult — zero-symbol honesty (#3131)', () => {
     expect(text).not.toContain('PARTIAL RESULT');
   });
 
+  it('shows keyword locations, the omitted count, and documentation sections', () => {
+    const text = formatDetectChangesResult({
+      summary: { changed_count: 1, documentation_sections: 3, incompatible_call_count: 16 },
+      incompatible_calls: Array.from({ length: 16 }, (_, i) => ({
+        filePath: 'use.py',
+        line: i + 1,
+        name: 'charge',
+        keyword: 'legacy',
+      })),
+    });
+    expect(text).toContain('Documentation sections changed: 3');
+    expect(text).toContain('Incompatible calls:');
+    expect(text).toMatch(/use\.py:15.*charge.*legacy/);
+    expect(text).not.toContain('use.py:16');
+    expect(text).toContain('... and 1 more');
+  });
+
   it('does not claim no-overlap when a degraded query left changed_count at zero', () => {
     const text = formatDetectChangesResult({
       partial: true,
@@ -60,6 +78,74 @@ describe('formatDetectChangesResult — zero-symbol honesty (#3131)', () => {
       summary: { changed_count: 0, affected_count: 0, changed_files: 0, risk_level: 'none' },
     });
     expect(text).toBe('No changes detected.');
+  });
+
+  it('explains the indexed snapshot even when a new Markdown heading has no matching symbol', () => {
+    const text = formatDetectChangesResult({
+      summary: { changed_files: 1, changed_count: 0, documentation_basis: 'indexed_headings' },
+    });
+    expect(text).toContain('indexed Markdown headings');
+    expect(text).toContain('gitnexus analyze --index-only');
+  });
+
+  it('explains unmapped source files without claiming a query failed or retry will repair the index', () => {
+    const text = formatDetectChangesResult({
+      partial: true,
+      unmapped_files: ['src/index-lock.ts'],
+      summary: { changed_count: 0, affected_count: 0, changed_files: 1, risk_level: 'unknown' },
+    });
+    expect(text).toContain('PARTIAL RESULT');
+    expect(text).toContain('src/index-lock.ts');
+    expect(text).toMatch(/rebuild/i);
+    expect(text).not.toMatch(/queries failed|No changes detected|no indexed symbols overlap/i);
+  });
+
+  it('prints a verified caller when shifted hunks overlap no indexed symbol', () => {
+    const text = formatDetectChangesResult({
+      partial: true,
+      unmapped_files: ['model.py'],
+      summary: {
+        changed_count: 0,
+        changed_files: 1,
+        risk_level: 'high',
+        incompatible_call_count: 1,
+      },
+      incompatible_calls: [{ name: 'charge', filePath: 'use.py', line: 2, keyword: 'legacy' }],
+    });
+    expect(text).toContain('use.py:2');
+    expect(text).toContain('legacy');
+    expect(text).toContain('high');
+  });
+
+  it('escapes Git-decoded terminal controls while leaving structured paths intact', () => {
+    const diff = [
+      'diff --git "a/evil\\033]52;c;VEVTVA==\\007.ts" "b/evil\\033]52;c;VEVTVA==\\007.ts"',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n');
+    const paths = parseDiffHunks(diff).map((file) => file.filePath);
+    expect(paths[0]).toContain('\u001b');
+    const text = formatDetectChangesResult({
+      partial: true,
+      unmapped_files: paths,
+      summary: { changed_count: 0, changed_files: 1, risk_level: 'unknown' },
+    });
+    expect(text).toContain('\\u001b]52;c;VEVTVA==\\u0007.ts');
+    expect(text).not.toContain('\u001b');
+    expect(text).not.toContain('\u0007');
+    expect(paths[0]).toContain('\u0007');
+  });
+
+  it('leads a populated summary with the incomplete source-mapping explanation', () => {
+    const text = formatDetectChangesResult({
+      partial: true,
+      unmapped_files: ['other.ts'],
+      summary: { changed_count: 1, changed_files: 2, affected_count: 0, risk_level: 'unknown' },
+      changed_symbols: [{ type: 'Function', name: 'known', filePath: 'code.py' }],
+    });
+    expect(text.indexOf('other.ts')).toBeLessThan(text.indexOf('Changes:'));
+    expect(text).toContain('known');
+    expect(text).toContain('unknown');
   });
 
   it('localizes the production clean-tree payload that carries English summary.message', () => {

@@ -363,6 +363,7 @@ export const CLASS_CONTAINER_TYPES = new Set([
   // Dart
   'mixin_declaration',
   'extension_declaration',
+  'extension_type_declaration',
   // Ruby
   'class',
   'module',
@@ -430,6 +431,7 @@ export const CONTAINER_TYPE_TO_LABEL: Record<string, string> = {
   protocol_declaration: 'Interface',
   mixin_declaration: 'Mixin',
   extension_declaration: 'Class',
+  extension_type_declaration: 'Class',
   class: 'Class',
   // Ruby `module` declarations map to `Trait` so they participate in the
   // class-like type registry used by `lookupClassByName` / inheritance
@@ -458,19 +460,27 @@ export const CONTAINER_TYPE_TO_LABEL: Record<string, string> = {
  * clones that every language's capture-synthesis walker re-implemented (#1956
  * tri-review U6).
  *
- * Iterates by index with a null guard: `node.namedChild(i)` is typed
- * `SyntaxNode | null`, and most callers already guarded it. The Go and C#
- * callers previously iterated `node.namedChildren`; the Go one had no null
- * guard, so this standardizes them onto the guarded indexed form — a deliberate,
- * strictly-safer behavior addition (the traversal *sequence* is identical, so
- * capture output stays byte-identical on well-formed trees; the guard only
- * matters for a null named child, which the fixture corpus never produces).
+ * Iterative (an explicit stack of frames) so syntax depth cannot overflow the
+ * call stack. It reads `namedChild(i)` with a null guard in the same order as
+ * the old recursion, so both the traversal sequence and the per-node
+ * navigation calls are unchanged and capture output stays byte-identical.
  */
 export function walkNamedTree(node: SyntaxNode, cb: (node: SyntaxNode) => void): void {
+  // Syntax depth is input-controlled, and recursion here overflowed V8's stack
+  // near depth 8,000. Each frame is a node and the index of its next named
+  // child: the same namedChild(i) reads, in the same order, as the recursion.
   cb(node);
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child !== null) walkNamedTree(child, cb);
+  const frames: { node: SyntaxNode; next: number }[] = [{ node, next: 0 }];
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.next >= frame.node.namedChildCount) {
+      frames.pop();
+      continue;
+    }
+    const child = frame.node.namedChild(frame.next++);
+    if (child === null) continue;
+    cb(child);
+    frames.push({ node: child, next: 0 });
   }
 }
 
@@ -604,7 +614,11 @@ export function getLabelFromCaptures(
     !captureMap['definition.constructor'] &&
     !captureMap['definition.class'] &&
     !captureMap['definition.struct'] &&
-    !hasDefaultExportHocNameSeed
+    !hasDefaultExportHocNameSeed &&
+    !(
+      captureMap['definition.function'] &&
+      provider.methodExtractor?.extractFunctionName?.(captureMap['definition.function'])?.funcName
+    )
   )
     return null;
 
@@ -650,9 +664,9 @@ export function getLabelFromCaptures(
   return 'CodeElement';
 }
 
-/** Enclosing class info: both the generated node ID and the bare class name. */
+/** Enclosing owner name, and its graph id when the declaration is local. */
 export interface EnclosingClassInfo {
-  classId: string; // e.g. "Class:animal.dart:Animal"
+  classId?: string; // e.g. "Class:animal.dart:Animal"; absent for a detached owner
   className: string; // e.g. "Animal"
   /**
    * The owner node id keyed by the enclosing type's FULLY-QUALIFIED path
@@ -666,7 +680,8 @@ export interface EnclosingClassInfo {
 }
 
 /** Walk up AST to find enclosing class/struct/interface/impl, return its ID and name.
- *  For Go method_declaration nodes, extracts receiver type (e.g. `func (u *User) Save()` → User struct).
+ *  Detached owners retain their name for member identity; the workspace
+ *  resolver supplies ownership once the declaration is known.
  *
  *  @param resolveEnclosingOwner  Optional language-specific hook for container remapping.
  *    When provided and a CLASS_CONTAINER_TYPES node is found, this hook is called:
@@ -937,6 +952,7 @@ export const findEnclosingClassInfo = (
     container: SyntaxNode,
     filePath: string,
   ) => { readonly name: string; readonly label: NodeLabel } | null,
+  resolveDetachedOwnerName?: LanguageProvider['resolveDetachedOwnerName'],
 ): EnclosingClassInfo | null => {
   let current = node.parent;
   let iterations = 0;
@@ -949,27 +965,8 @@ export const findEnclosingClassInfo = (
       // Bail out rather than hang ingestion.
       return null;
     }
-    // Go: method_declaration has a receiver parameter with the struct type
-    if (current.type === 'method_declaration') {
-      const receiver = current.childForFieldName?.('receiver');
-      if (receiver) {
-        const paramDecl = receiver.namedChildren?.find?.(
-          (c: SyntaxNode) => c.type === 'parameter_declaration',
-        );
-        if (paramDecl) {
-          const typeNode = paramDecl.childForFieldName?.('type');
-          if (typeNode) {
-            const inner = typeNode.type === 'pointer_type' ? typeNode.firstNamedChild : typeNode;
-            if (inner && (inner.type === 'type_identifier' || inner.type === 'identifier')) {
-              return {
-                classId: generateId('Struct', `${filePath}:${inner.text}`),
-                className: inner.text,
-              };
-            }
-          }
-        }
-      }
-    }
+    const detachedOwnerName = resolveDetachedOwnerName?.(current);
+    if (detachedOwnerName !== undefined) return { className: detachedOwnerName };
     // Go: the `type_spec` IS the declared type (`type User struct { ... }`, and
     // one per member of a grouped `type ( A struct{…}; B struct{…} )` block).
     //

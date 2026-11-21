@@ -56,7 +56,7 @@ export interface McpJsoncTarget {
 export interface CodexMcpTarget {
   id: 'codex';
   label: string;
-  /** Absolute path to ~/.codex/config.toml. */
+  /** Absolute path to CODEX_HOME/config.toml (default ~/.codex/config.toml). */
   configFile: string;
   /** The TOML table header (without brackets) setup writes / uninstall strips. */
   tomlSection: string;
@@ -82,6 +82,19 @@ export interface HookTarget {
   scriptDir: string;
 }
 
+/**
+ * An editor whose hooks ship as a plugin file auto-loaded from a plugins
+ * directory (no settings-file entry). Currently OpenCode only: its official
+ * plugin surface (`tool.execute.after` in `~/.config/opencode/plugins/`)
+ * needs no config edit — dropping the file in is the whole registration.
+ */
+export interface PluginFileTarget {
+  id: EditorId;
+  label: string;
+  /** Absolute path to the installed gitnexus plugin file. */
+  file: string;
+}
+
 export interface EditorTargets {
   /** JSONC-format MCP entries: Cursor, Claude Code, Antigravity, OpenCode, CodeBuddy, Qoder. */
   mcpJsonc: McpJsoncTarget[];
@@ -91,15 +104,53 @@ export interface EditorTargets {
   skills: SkillTarget[];
   /** Hook registrations + their bundled script directories. */
   hooks: HookTarget[];
+  /** Plugin-file hooks (auto-loaded, no settings entry). */
+  plugins: PluginFileTarget[];
+}
+
+/** Where Claude Code keeps its config root and its user-scope MCP file. */
+export interface ClaudeConfigPaths {
+  /** Config root: settings.json, skills/, hooks/. */
+  dir: string;
+  /** User-scope MCP config (`mcpServers`). */
+  mcpFile: string;
 }
 
 /**
- * Resolve all editor targets for the given home directory. Defaults to
- * `os.homedir()`; call sites pass it through so tests can point HOME at a temp
- * dir. Paths are computed at call time (not module load) so a test setting
- * `process.env.HOME` before invoking sees the right locations.
+ * Resolve Claude Code's config locations. By default the root is `~/.claude`
+ * and the MCP file sits beside it as `~/.claude.json`. When `CLAUDE_CONFIG_DIR`
+ * is set, Claude Code reads both from that directory instead (the MCP file
+ * becomes `$CLAUDE_CONFIG_DIR/.claude.json`), so writing to the HOME defaults
+ * would install into files Claude Code never reads. An empty value counts as
+ * unset; a relative one is resolved against the working directory.
  */
-export function getEditorTargets(home: string = os.homedir()): EditorTargets {
+export function claudeConfigPaths(
+  home: string = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): ClaudeConfigPaths {
+  const relocated = env.CLAUDE_CONFIG_DIR;
+  if (relocated) {
+    const dir = path.resolve(relocated);
+    return { dir, mcpFile: path.join(dir, '.claude.json') };
+  }
+  return { dir: path.join(home, '.claude'), mcpFile: path.join(home, '.claude.json') };
+}
+
+/**
+ * Resolve all editor targets for the given home directory and environment.
+ * Defaults to `os.homedir()` and `process.env`; call sites pass them through so
+ * tests can point HOME at a temp dir. Paths are computed at call time (not
+ * module load) so a test setting `process.env.HOME` before invoking sees the
+ * right locations. The environment carries per-editor config-dir overrides
+ * (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`).
+ */
+export function getEditorTargets(
+  home: string = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): EditorTargets {
+  const claude = claudeConfigPaths(home, env);
+  const codexHome = env.CODEX_HOME ? path.resolve(env.CODEX_HOME) : path.join(home, '.codex');
+
   const mcpJsonc: McpJsoncTarget[] = [
     {
       id: 'cursor',
@@ -110,7 +161,7 @@ export function getEditorTargets(home: string = os.homedir()): EditorTargets {
     {
       id: 'claude',
       label: 'Claude Code',
-      file: path.join(home, '.claude.json'),
+      file: claude.mcpFile,
       keyPath: ['mcpServers', 'gitnexus'],
     },
     {
@@ -166,12 +217,12 @@ export function getEditorTargets(home: string = os.homedir()): EditorTargets {
   const codex: CodexMcpTarget = {
     id: 'codex',
     label: 'Codex',
-    configFile: path.join(home, '.codex', 'config.toml'),
+    configFile: path.join(codexHome, 'config.toml'),
     tomlSection: 'mcp_servers.gitnexus',
   };
 
   const skills: SkillTarget[] = [
-    { id: 'claude', label: 'Claude Code', dir: path.join(home, '.claude', 'skills') },
+    { id: 'claude', label: 'Claude Code', dir: path.join(claude.dir, 'skills') },
     {
       id: 'antigravity',
       label: 'Antigravity',
@@ -194,10 +245,10 @@ export function getEditorTargets(home: string = os.homedir()): EditorTargets {
     {
       id: 'claude',
       label: 'Claude Code',
-      settingsFile: path.join(home, '.claude', 'settings.json'),
+      settingsFile: path.join(claude.dir, 'settings.json'),
       events: ['PreToolUse', 'PostToolUse'],
       needle: 'gitnexus-hook',
-      scriptDir: path.join(home, '.claude', 'hooks', 'gitnexus'),
+      scriptDir: path.join(claude.dir, 'hooks', 'gitnexus'),
     },
     {
       id: 'codex',
@@ -205,10 +256,10 @@ export function getEditorTargets(home: string = os.homedir()): EditorTargets {
       // Codex hooks use Claude Code's exact {hooks: {Event: [...]}} JSON shape
       // and hookSpecificOutput response contract, in a dedicated hooks.json
       // (https://developers.openai.com/codex/hooks).
-      settingsFile: path.join(home, '.codex', 'hooks.json'),
+      settingsFile: path.join(codexHome, 'hooks.json'),
       events: ['PreToolUse', 'PostToolUse'],
       needle: 'gitnexus-hook',
-      scriptDir: path.join(home, '.codex', 'hooks', 'gitnexus'),
+      scriptDir: path.join(codexHome, 'hooks', 'gitnexus'),
     },
     {
       id: 'antigravity',
@@ -220,27 +271,42 @@ export function getEditorTargets(home: string = os.homedir()): EditorTargets {
     },
   ];
 
-  return { mcpJsonc, codex, skills, hooks };
+  const plugins: PluginFileTarget[] = [
+    {
+      id: 'opencode',
+      label: 'OpenCode',
+      file: path.join(home, '.config', 'opencode', 'plugins', 'gitnexus.js'),
+    },
+  ];
+
+  return { mcpJsonc, codex, skills, hooks, plugins };
 }
 
 /** Look up a single JSONC MCP target by editor id (throws if unknown). */
-export function mcpTarget(id: EditorId, home?: string): McpJsoncTarget {
-  const t = getEditorTargets(home).mcpJsonc.find((m) => m.id === id);
+export function mcpTarget(id: EditorId, home?: string, env?: NodeJS.ProcessEnv): McpJsoncTarget {
+  const t = getEditorTargets(home, env).mcpJsonc.find((m) => m.id === id);
   if (!t) throw new Error(`No JSONC MCP target for editor "${id}"`);
   return t;
 }
 
 /** Look up a single skill target by editor id (throws if unknown). */
-export function skillTarget(id: EditorId, home?: string): SkillTarget {
-  const t = getEditorTargets(home).skills.find((s) => s.id === id);
+export function skillTarget(id: EditorId, home?: string, env?: NodeJS.ProcessEnv): SkillTarget {
+  const t = getEditorTargets(home, env).skills.find((s) => s.id === id);
   if (!t) throw new Error(`No skill target for editor "${id}"`);
   return t;
 }
 
 /** Look up a single hook target by editor id (throws if unknown). */
-export function hookTarget(id: EditorId, home?: string): HookTarget {
-  const t = getEditorTargets(home).hooks.find((h) => h.id === id);
+export function hookTarget(id: EditorId, home?: string, env?: NodeJS.ProcessEnv): HookTarget {
+  const t = getEditorTargets(home, env).hooks.find((h) => h.id === id);
   if (!t) throw new Error(`No hook target for editor "${id}"`);
+  return t;
+}
+
+/** Look up a single plugin-file target by editor id (throws if unknown). */
+export function pluginFileTarget(id: EditorId, home?: string): PluginFileTarget {
+  const t = getEditorTargets(home).plugins.find((p) => p.id === id);
+  if (!t) throw new Error(`No plugin target for editor "${id}"`);
   return t;
 }
 

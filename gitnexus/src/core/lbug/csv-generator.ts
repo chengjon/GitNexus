@@ -17,12 +17,14 @@ import { createWriteStream, WriteStream } from 'fs';
 import path from 'path';
 import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
 import { KnowledgeGraph } from '../graph/types.js';
+import { assertValidGraphNodeId } from '../graph/node-identity.js';
 import { NodeTableName, RELATION_SCHEMA } from './schema.js';
 import type { ContentRetention } from '../../storage/repo-meta.js';
 import { VALID_NODE_TABLES, parseRelationSchemaPairs, RelPairRouter } from './rel-pair-routing.js';
 import { parseTruthyEnv } from '../ingestion/utils/env.js';
 import { SYMBOL_NODE_LABELS } from '../ingestion/utils/symbol-labels.js';
 import { applyCjkSegmentationIfEnabled } from '../search/cjk-segmentation.js';
+import { isNotebookPath, notebookPythonSnippet } from '../ingestion/ipynb-extractor.js';
 
 /** Computed once — `RELATION_SCHEMA` is a static template literal. Exported so
  *  the streamed sinks (`GraphEmitSink`, `PdgEmitSink`) share this parse
@@ -104,14 +106,18 @@ export const sanitizeUTF8 = (str: string): string => {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .replace(/[\uD800-\uDFFF]/g, '')
+    .replace(/[\uD800-\uDFFF]/gu, '')
     .replace(/[\uFFFE\uFFFF]/g, '');
 };
 
 export const escapeCSVField = (value: string | number | undefined | null): string => {
-  if (value === undefined || value === null) return '""';
+  if (value === undefined || value === null) return '';
   let str = String(value);
   str = sanitizeUTF8(str);
+  // Preserve the NULL meaning of absent strings from the 0.18.3 writer.
+  // Newer LadybugDB readers retain a quoted empty field as a STRING value;
+  // it must stay unquoted or unresolved destination addresses can join.
+  if (str.length === 0) return '';
   return `"${str.replace(/"/g, '""')}"`;
 };
 
@@ -325,15 +331,24 @@ const extractContent = async (
   const endLine = node.properties.endLine;
   if (startLine === undefined || endLine === undefined) return '';
 
+  const MAX_SNIPPET = 5000;
+  const capSnippet = (text: string): string =>
+    text.length > MAX_SNIPPET ? text.slice(0, MAX_SNIPPET) + '\n... [truncated]' : text;
+
+  const notebookPath = String(filePath ?? '');
+  if (isNotebookPath(notebookPath)) {
+    const reconstructed = notebookPythonSnippet(content, startLine, endLine, notebookPath);
+    if (reconstructed) {
+      return normalizeFtsText(applyCjkSegmentationIfEnabled(capSnippet(reconstructed)));
+    }
+  }
+
   const lines = prepared.lines;
   const exactSymbolContent = EXACT_SYMBOL_CONTENT_LABELS.has(node.label);
   const start = Math.max(0, exactSymbolContent ? startLine : startLine - 2);
   const end = Math.min(lines.length - 1, exactSymbolContent ? endLine : endLine + 2);
   const snippet = lines.slice(start, end + 1).join('\n');
-  const MAX_SNIPPET = 5000;
-  const capped =
-    snippet.length > MAX_SNIPPET ? snippet.slice(0, MAX_SNIPPET) + '\n... [truncated]' : snippet;
-  return normalizeFtsText(applyCjkSegmentationIfEnabled(capped));
+  return normalizeFtsText(applyCjkSegmentationIfEnabled(capSnippet(snippet)));
 };
 
 // ============================================================================
@@ -429,7 +444,7 @@ export const buildRelRow = (rel: GraphRelationship): string =>
  * No `name` column; blocks are identified by id + source span. Shared by the
  * whole-graph emit pass and the streaming PDG emit sink (issue #2202) so the
  * two paths produce byte-identical BasicBlock rows by construction. */
-export const BASICBLOCK_CSV_HEADER = 'id,filePath,startLine,endLine,text,callees,calleeIds';
+export const BASICBLOCK_CSV_HEADER = 'id,filePath,startLine,endLine,text,callees,calleeIds,ownerId';
 
 /** Build the escaped CSV row (no trailing newline) for one BasicBlock node.
  * Single source of the BasicBlock row bytes — used by `streamAllCSVsToDisk`
@@ -448,6 +463,7 @@ export const buildBasicBlockRow = (node: GraphNode): string =>
     escapeCSVField(node.properties.text || ''),
     escapeCSVField(String(node.properties.callees ?? '')),
     escapeCSVField(String(node.properties.calleeIds ?? '')),
+    escapeCSVField(String(node.properties.ownerId ?? '')),
   ].join(',');
 
 export interface StreamedCSVResult {
@@ -464,7 +480,7 @@ export interface StreamedCSVResult {
 
 /**
  * Stream all CSV data directly to disk files.
- * Iterates graph nodes exactly ONCE — routes each node to the right writer.
+ * Validates node identities in one pass, then streams nodes to their writers.
  * File contents are lazy-read from disk with a generous LRU cache.
  *
  * `onNodePhaseComplete` (optional, #2203 parallelism leg): fired exactly once,
@@ -488,6 +504,10 @@ export const streamAllCSVsToDisk = async (
   onNodePhaseComplete?: (nodeFiles: Map<NodeTableName, { csvPath: string; rows: number }>) => void,
   contentRetention: ContentRetention = 'full',
 ): Promise<StreamedCSVResult> => {
+  // Validate before opening writers: rejection must not strand their handles
+  // or replace existing CSV artifacts. The iterator adds no graph-sized copy.
+  for (const node of graph.iterNodes()) assertValidGraphNodeId(node.id, 'Graph COPY');
+
   // Deterministic (id-sorted) node/relationship row order when enabled;
   // default off = today's graph-insertion order (byte-identical).
   const sortOutput = parseTruthyEnv(process.env.GITNEXUS_SORT_GRAPH_OUTPUT);
@@ -553,7 +573,7 @@ export const streamAllCSVsToDisk = async (
     // Route nodes for API endpoint mapping
     const routeWriter = new BufferedCSVWriter(
       path.join(csvDir, 'route.csv'),
-      'id,name,filePath,responseKeys,errorKeys,middleware,method,handlerSymbolId,runtimeConfirmed,runtimeSource,runtimeStatus',
+      'id,name,filePath,responseKeys,errorKeys,middleware,method,handlerSymbolId,runtimeConfirmed,runtimeSource,runtimeStatus,unverifiedConsumers',
     );
 
     // Tool nodes for MCP tool definitions
@@ -747,6 +767,7 @@ export const streamAllCSVsToDisk = async (
               node.properties.runtimeConfirmed === true ? 'true' : 'false',
               escapeCSVField(String(node.properties.runtimeSource ?? '')),
               escapeCSVField(String(node.properties.runtimeStatus ?? '')),
+              String(node.properties.unverifiedConsumers ?? 0),
             ].join(','),
           );
           break;

@@ -13,7 +13,10 @@ import {
   edgeSet,
   getResolutionOutcomes,
   runPipelineFromRepo,
+  suppressionReasonsAt,
+  useFixture,
   writeFixtureRepo,
+  type OutcomeSite,
   type PipelineResult,
 } from './helpers.js';
 
@@ -563,20 +566,22 @@ describe('TypeScript export type re-export chain resolution', () => {
     expect(getNodesByLabel(result, 'Class')).toEqual(['Repo', 'User']);
   });
 
-  it('resolves new User() through export type re-export chain to base.ts', () => {
+  it('does not resolve runtime construction through a type-only re-export chain', () => {
     const calls = getRelationships(result, 'CALLS');
-    const userCtor = calls.find((c) => c.target === 'User' && c.targetLabel === 'Class');
-    expect(userCtor).toBeDefined();
-    expect(userCtor!.source).toBe('main');
-    expect(userCtor!.targetFilePath).toBe('src/base.ts');
+    expect(calls.filter((c) => c.source === 'main' && c.targetLabel === 'Class')).toEqual([]);
   });
 
-  it('resolves user.save() through export type re-export chain to base.ts', () => {
+  it('does not infer receiver types from invalid type-only construction', () => {
     const calls = getRelationships(result, 'CALLS');
-    const saveCall = calls.find((c) => c.target === 'save');
-    expect(saveCall).toBeDefined();
-    expect(saveCall!.source).toBe('main');
-    expect(saveCall!.targetFilePath).toBe('src/base.ts');
+    expect(calls.filter((c) => c.source === 'main')).toEqual([]);
+  });
+
+  it('resolves annotated parameter receivers through the type-only re-export chain', () => {
+    const calls = getRelationships(result, 'CALLS').filter((c) => c.source === 'typed');
+    expect(calls.map((c) => [c.target, c.targetFilePath]).sort()).toEqual([
+      ['persist', 'src/base.ts'],
+      ['save', 'src/base.ts'],
+    ]);
   });
 });
 
@@ -1845,6 +1850,13 @@ describe('TypeScript member access iterable for-loop', () => {
         c.target === 'save' && c.source === 'processRepos' && c.targetFilePath?.includes('Repo'),
     );
     expect(repoSave).toBeDefined();
+  });
+
+  it('does not borrow a parameter type for a nonexistent receiver field', () => {
+    const calls = getRelationships(result, 'CALLS');
+    expect(calls.filter((c) => c.source === 'processMissingUsers' && c.target === 'save')).toEqual(
+      [],
+    );
   });
 });
 
@@ -3204,6 +3216,20 @@ describe('TS dynamic-this receiver seeding guard', () => {
     const calls = getRelationships(result, 'CALLS');
     expect(calls.some((c) => c.target === 'go' && c.source === 'onClick')).toBe(false);
   });
+
+  // Both sites on `this.route.go()` are lost for ONE reason: the object-literal
+  // method owns `this` and gives it no type. The call's receiver is the chain
+  // `this.route`, and the owned-receiver check was asked about that whole text
+  // — which no scope owns — instead of its base `this`. So the call went on to
+  // the compound fold and was filed as a generic `receiver-unresolved` drop,
+  // or, when the read beside it (same start column) was handled first, as
+  // nothing at all.
+  it.each<readonly [OutcomeSite, readonly string[]]>([
+    [['app.ts', 17, 6, 'route', 'read'], ['receiver-owned-but-unbound']],
+    [['app.ts', 17, 6, 'go', 'call'], ['receiver-owned-but-unbound']],
+  ])('records %j under its real reason', (site, reasons) => {
+    expect(suppressionReasonsAt(result, site)).toEqual(reasons);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3308,10 +3334,8 @@ describe('TypeScript inline constructor receiver resolution', () => {
 // method call. Anything measuring resolver gaps has to tell those apart, and
 // the site kind is the only authoritative signal for it.
 //
-// Both shapes below are empirically confirmed drops: `!` produces a reference
-// site that reaches Case 0. (`?.` and explicit type arguments do NOT record a
-// drop at all — they are invisible to this recorder, which is a property of the
-// capture layer, not of this field.)
+// Both negative cases use untyped receivers, so their drops do not depend on
+// an unsupported expression shape. A typed write is the positive control.
 // ---------------------------------------------------------------------------
 
 describe('TypeScript receiver-unresolved drops carry their site kind (#2744)', () => {
@@ -3350,9 +3374,13 @@ export async function droppedCall(svc): Promise<void> {
   svc.getUser().save();
 }
 
-export function droppedWrite(svc: Service | null): void {
-  // A write receiver mints no chain at all (the emitter gates on CALL_TAGS),
-  // so this keeps dropping and stays separable from the call above.
+export function droppedWrite(svc): void {
+  // The unannotated receiver has no type proof, even though writes now
+  // carry the same structural receiver chains as calls.
+  svc!.getUser().name = 'x';
+}
+
+export function resolvedWrite(svc: Service | null): void {
   svc!.getUser().name = 'x';
 }
 `,
@@ -3376,6 +3404,17 @@ export function droppedWrite(svc: Service | null): void {
       (outcome) => outcome.kind === 'suppressed' && outcome.reason === 'receiver-unresolved',
     );
     expect(drops).toContainEqual(expect.objectContaining({ name: 'name', siteKind: 'write' }));
+  });
+
+  it('resolves the typed compound write while retaining the untyped write drop', () => {
+    const accesses = getRelationships(result, 'ACCESSES').filter((edge) => edge.target === 'name');
+    expect(accesses).toHaveLength(1);
+    expect(accesses[0]).toMatchObject({
+      source: 'resolvedWrite',
+      target: 'name',
+      targetFilePath: 'models.ts',
+      rel: { targetId: 'Property:models.ts:User.name' },
+    });
   });
 
   // The origin travels with the drop too, and its value here is the whole
@@ -3658,5 +3697,184 @@ describe('TypeScript chain-typed receiver folding to an interface (Case 3b, #283
     );
     expect(runCalls.map((e) => e.rel.reason).filter((r) => r === 'interface-dispatch')).toEqual([]);
     expect(runCalls.map((e) => basename(e.targetFilePath))).toEqual(['plain-cache.ts']);
+  });
+});
+
+// #3498: `ns.make()` takes `make`'s return annotation from the namespace's
+// module. A class method of the same name hoists its return type to the module
+// under that name, so the lookup must stay anchored on the module function and
+// fail closed instead of typing the receiver as the method's return.
+describe('TypeScript namespace factory result types (#3498)', () => {
+  let result: PipelineResult;
+  let repoDir: string;
+
+  beforeAll(async () => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gn-ts-namespace-factory-'));
+    writeFixtureRepo(repoDir, {
+      'src/mod.ts': `export class C {
+  m(): number {
+    return 1;
+  }
+}
+
+export class Other {
+  m(): number {
+    return 2;
+  }
+}
+
+export function make(): C {
+  return new C();
+}
+`,
+      'src/hoist.ts': `import { C, Other } from './mod';
+
+export function build(): C {
+  return new C();
+}
+
+export class Builder {
+  build(): Other {
+    return new Other();
+  }
+}
+`,
+      'src/callers.ts': `import * as rp from './mod';
+import * as hz from './hoist';
+
+export function aliasCall() {
+  const x = rp.make();
+  return x.m();
+}
+
+export function inlineCall() {
+  return rp.make().m();
+}
+
+export function hoistedCall() {
+  const y = hz.build();
+  return y.m();
+}
+
+export function hoistedInline() {
+  return hz.build().m();
+}
+`,
+    });
+    result = await runPipelineFromRepo(repoDir, () => {}, {});
+  }, 60000);
+
+  afterAll(() => {
+    if (repoDir !== undefined) fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    { source: 'aliasCall', targets: ['Method:src/mod.ts:C.m#0'] },
+    { source: 'inlineCall', targets: ['Method:src/mod.ts:C.m#0'] },
+    { source: 'hoistedCall', targets: [] },
+    { source: 'hoistedInline', targets: [] },
+  ])('resolves m called from $source to $targets', ({ source, targets }) => {
+    expect(
+      getRelationships(result, 'CALLS')
+        .filter((edge) => edge.source === source && edge.target === 'm')
+        .map((edge) => edge.rel.targetId),
+    ).toEqual(targets);
+  });
+
+  it('records the hoisted sites as dropped instead of an exact miss', () => {
+    const dropped = getResolutionOutcomes(result)
+      .filter((outcome) => outcome.kind === 'suppressed')
+      .filter(
+        (outcome) =>
+          outcome.reason === 'receiver-unresolved' && outcome.filePath === 'src/callers.ts',
+      )
+      .map((outcome) => `${outcome.range.startLine}:${outcome.name}`)
+      .sort();
+    expect(dropped).toEqual(['15:m', '19:m']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #3956: a default import binds the declaration the target module publishes as
+// its default export, whatever the importer calls it locally.
+// ---------------------------------------------------------------------------
+
+describe('TypeScript default imports (#3956)', () => {
+  const result = useFixture('ts-default-import', {
+    'src/c/Child.tsx':
+      'export default function Child({ a }: { a: number }) { return <div>{a}</div>; }\n',
+    'src/c/Named.tsx': 'export function Named() { return <span />; }\n',
+    'src/c/plain.ts': 'export default function plainFn(x: number) { return x + 1; }\n',
+    'src/c/Widget.tsx': 'export default function Panel() { return <div />; }\n',
+    'src/c/helper.ts': 'function helper() { return 1; }\nexport { helper as default };\n',
+    'src/c/arrow.ts': 'const arrowFn = () => 2;\nexport default arrowFn;\n',
+    'src/ui/index.ts': "export { default } from '../c/Child';\n",
+    'src/ui/alias.ts': "export { default as Btn } from '../c/Child';\n",
+    'src/lib/index.ts':
+      "export * from '../c/Child';\nexport default makeClient();\nfunction makeClient() { return () => 3; }\n",
+    'src/route.ts':
+      'const defineEventHandler = <T,>(fn: T) => fn;\nexport default defineEventHandler(async () => 4);\n',
+    'src/Parent.tsx': `import Child from './c/Child';
+import { Named } from './c/Named';
+import plainFn from './c/plain';
+export default function Parent() {
+  const v = plainFn(1);
+  return <div><Child a={v} /><Named /></div>;
+}
+`,
+    'src/Other.tsx': `import Kid from './c/Widget';
+import { default as P } from './c/plain';
+import h from './c/helper';
+import arrow from './c/arrow';
+export function Other() {
+  P(2);
+  h();
+  arrow();
+  return <Kid />;
+}
+`,
+    'src/ViaDefault.tsx':
+      "import C from './ui';\nexport function ViaDefault() { return <C a={1} />; }\n",
+    'src/ViaAlias.tsx':
+      "import { Btn } from './ui/alias';\nexport function ViaAlias() { return <Btn a={2} />; }\n",
+    'src/Client.ts':
+      "import client from './lib';\nexport function useClient() { return client(); }\n",
+    'src/Ghost.ts':
+      "import Ghost from './c/Named';\nexport function useGhost() { return Ghost(); }\n",
+    'src/UseRoute.ts':
+      "import handler from './route';\nexport function useRoute() { return handler(); }\n",
+  });
+  const calls = () => getRelationships(result(), 'CALLS');
+  const callsFrom = (source: string, targetFilePath: string) =>
+    calls().filter((c) => c.source === source && c.targetFilePath === targetFilePath);
+
+  it('links JSX and plain-call default imports to their declarations (issue repro)', () => {
+    expect(callsFrom('Parent', 'src/c/Child.tsx').map((c) => c.target)).toContain('Child');
+    expect(callsFrom('Parent', 'src/c/plain.ts').map((c) => c.target)).toContain('plainFn');
+    expect(callsFrom('Parent', 'src/c/Named.tsx').map((c) => c.target)).toEqual(['Named']);
+  });
+
+  it('binds a local name that differs from both the declared name and the file stem', () => {
+    expect(callsFrom('Other', 'src/c/Widget.tsx').map((c) => c.target)).toContain('Panel');
+  });
+
+  it('binds `{ default as X }`, `export { f as default }` and `export default <const arrow>`', () => {
+    expect(callsFrom('Other', 'src/c/plain.ts').map((c) => c.target)).toContain('plainFn');
+    expect(callsFrom('Other', 'src/c/helper.ts').map((c) => c.target)).toContain('helper');
+    expect(callsFrom('Other', 'src/c/arrow.ts').map((c) => c.target)).toContain('arrowFn');
+  });
+
+  it('carries the default through `export { default }` and `export { default as Btn }` barrels', () => {
+    expect(callsFrom('ViaDefault', 'src/c/Child.tsx').map((c) => c.target)).toContain('Child');
+    expect(callsFrom('ViaAlias', 'src/c/Child.tsx').map((c) => c.target)).toContain('Child');
+  });
+
+  it('does not forward a default through `export *` or invent one for a module without it', () => {
+    expect(callsFrom('useClient', 'src/c/Child.tsx')).toEqual([]);
+    expect(callsFrom('useGhost', 'src/c/Named.tsx')).toEqual([]);
+  });
+
+  it('links a default import of a synthesized HOC default export', () => {
+    expect(callsFrom('useRoute', 'src/route.ts').length).toBeGreaterThan(0);
   });
 });

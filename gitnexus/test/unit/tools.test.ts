@@ -2,7 +2,7 @@
  * Unit Tests: MCP Tool Definitions
  *
  * Tests: GITNEXUS_TOOLS from tools.ts
- * - All 18 tools are defined (per-repo + overview + check + group_list/group_sync)
+ * - All 20 tools are defined (per-repo + overview + check + group_list/group_sync + read_file/grep)
  * - Each tool has valid name, description, inputSchema
  * - Required fields are correct
  * - Optional repo parameter is present on tools that need it
@@ -36,9 +36,34 @@ const CWD_OMITTED_TOOLS = ['list_repos', 'group_list', 'group_sync'] as const;
 const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
 
 describe('GITNEXUS_TOOLS', () => {
-  it('exports all tools (8 base + 1 explain + 1 pdg_query + 3 route/tool/shape + 1 api_impact + 1 trace + 1 overview + 1 check + 2 group)', () => {
-    expect(GITNEXUS_TOOLS).toHaveLength(18);
-    expect(GITNEXUS_TOOLS.map((t) => t.name)).toEqual(
+  it('keeps the complete tool catalog below 80 KB of recurring agent context', () => {
+    // Every exposed tool is sent before the agent chooses one. This is a byte
+    // budget, not a tokenizer estimate or a claim about end-to-end dollar cost.
+    // This fork adds the overview/check tools plus MCP-enrichment descriptions,
+    // so the ceiling is 80 KB rather than upstream's 70 KB.
+    expect(Buffer.byteLength(JSON.stringify(GITNEXUS_TOOLS), 'utf8')).toBeLessThanOrEqual(80_000);
+  });
+
+  it('exports all tools (8 base + 1 explain + 1 pdg_query + 3 route/tool/shape + 1 api_impact + 1 trace + 1 overview + 1 check + 2 group + read_file + grep)', () => {
+    expect(GITNEXUS_TOOLS).toHaveLength(20);
+  });
+
+  it('exposes one rename tool; there is no separate rename_preview (use dry_run)', () => {
+    const names = GITNEXUS_TOOLS.map((t) => t.name);
+    expect(names.filter((name) => name === 'rename')).toHaveLength(1);
+    expect(names).not.toContain('rename_preview');
+    const rename = GITNEXUS_TOOLS.find((t) => t.name === 'rename')!;
+    expect(rename.inputSchema.properties.dry_run).toMatchObject({ type: 'boolean', default: true });
+    expect(rename.inputSchema.required).toEqual(['new_name']);
+    expect(rename.description).toMatch(/dry_run omitted or true never writes/);
+    expect(rename.description).toMatch(/dry_run:false requires the plan_token/);
+    expect(rename.inputSchema.properties.plan_token).toMatchObject({ type: 'string' });
+    expect(rename.description).not.toContain('rename_preview');
+  });
+
+  it('contains all expected tool names', () => {
+    const names = GITNEXUS_TOOLS.map((t) => t.name);
+    expect(names).toEqual(
       expect.arrayContaining([
         'list_repos',
         'query',
@@ -51,8 +76,15 @@ describe('GITNEXUS_TOOLS', () => {
         'impact',
         'explain',
         'pdg_query',
-        'overview',
-        'check',
+        'api_impact',
+        'trace',
+        'read_file',
+        'grep',
+        'route_map',
+        'tool_map',
+        'shape_check',
+        'group_list',
+        'group_sync',
       ]),
     );
   });
@@ -160,9 +192,10 @@ describe('GITNEXUS_TOOLS', () => {
     const queryTool = GITNEXUS_TOOLS.find((t) => t.name === 'query')!;
     const description = queryTool.inputSchema.properties.include_content.description;
     expect(description).toContain('Include source text retained for matching symbols');
-    expect(description).toContain(
-      'Content is sent once per symbol id, on its first process_symbols row; context({uid: "<id>", include_content: true}) returns it for any row.',
-    );
+    expect(description).toContain('once per (repository, symbol id), on its first surviving row');
+    expect(description).toContain('context({uid: "<id>", include_content: true})');
+    expect(description).toContain('in array mode add repo: "<row._repo>"');
+    expect(description).toContain('across the whole response');
   });
 
   it('query tool requires "search_query" parameter (renamed from "query" for #2175)', () => {
@@ -340,7 +373,16 @@ describe('GITNEXUS_TOOLS', () => {
       if (tool.name === 'list_repos') continue;
       if (GROUP_TOOLS.has(tool.name)) continue;
       expect(tool.inputSchema.properties.repo).toBeDefined();
-      expect(tool.inputSchema.properties.repo.type).toBe('string');
+      if (tool.name === 'query') {
+        expect(tool.inputSchema.properties.repo).toMatchObject({
+          type: ['string', 'array'],
+          items: { type: 'string', minLength: 1 },
+          minItems: 1,
+          maxItems: 10,
+        });
+      } else {
+        expect(tool.inputSchema.properties.repo.type).toBe('string');
+      }
       expect(tool.inputSchema.required).not.toContain('repo');
     }
   });
@@ -364,10 +406,18 @@ describe('GITNEXUS_TOOLS', () => {
     }
   });
 
-  it('per-repo tools have an optional branch scope param (#2106); group/list tools do not', () => {
+  it('per-repo tools have an optional branch scope param (#2106); group/list and checkout file tools do not', () => {
+    const noBranch = new Set([
+      'list_repos',
+      'overview',
+      'read_file',
+      'grep',
+      'rename',
+      ...GROUP_TOOLS,
+    ]);
     for (const tool of GITNEXUS_TOOLS) {
-      if (tool.name === 'list_repos' || tool.name === 'overview' || GROUP_TOOLS.has(tool.name)) {
-        expect(tool.inputSchema.properties.branch).toBeUndefined();
+      if (noBranch.has(tool.name)) {
+        expect(tool.inputSchema.properties.branch, tool.name).toBeUndefined();
         continue;
       }
       expect(tool.inputSchema.properties.branch, tool.name).toBeDefined();
@@ -375,6 +425,14 @@ describe('GITNEXUS_TOOLS', () => {
       // Optional — omitting it keeps the default/primary-branch behavior.
       expect(tool.inputSchema.required).not.toContain('branch');
     }
+  });
+
+  it('grep advertises the HTTP caseSensitive and literal flags', () => {
+    const grep = GITNEXUS_TOOLS.find((tool) => tool.name === 'grep')!;
+    expect(grep.inputSchema.properties.caseSensitive.type).toBe('boolean');
+    expect(grep.inputSchema.properties.literal.type).toBe('boolean');
+    expect(grep.description).toContain('hit.line - 1');
+    expect(grep.description).toMatch(/working tree/i);
   });
 
   it('group tools without backend repo param omit repo property', () => {
@@ -486,9 +544,19 @@ describe('GITNEXUS_TOOLS', () => {
     expect(d).toContain('--pdg');
     expect(d).toContain('intra-procedural');
     // The named blind-spot classes (plan KTD10) must reach the consumer.
-    expect(d.toLowerCase()).toContain('closure/callback');
+    expect(d.toLowerCase()).toContain('captured closure-variable flows are not modeled');
+    expect(d.toLowerCase()).toContain(
+      'sources read inside inline callbacks and returned handlers can flow through helper functions',
+    );
     expect(d.toLowerCase()).toContain('property/field');
-    expect(d.toLowerCase()).toContain('guard-style');
+    expect(d.toLowerCase()).toContain(
+      'modeled guards can refine unchanged primitive-string values',
+    );
+    expect(d.toLowerCase()).toContain('imported and wrapper validators');
+    expect(d.toLowerCase()).toContain(
+      'unsupported predicates or sink uses remain conservative findings',
+    );
+    expect(d.toLowerCase()).toContain('declared string types are analysis assumptions');
     expect(d.toLowerCase()).toContain('cross-function');
     expect(d.toLowerCase()).toContain('commonjs');
     expect(d.toLowerCase()).toContain('exception');

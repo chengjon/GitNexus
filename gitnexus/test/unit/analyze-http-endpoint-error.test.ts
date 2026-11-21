@@ -1,3 +1,4 @@
+import '../helpers/mock-analysis-host.js';
 /**
  * Tests for the custom HTTP embedding endpoint failure path in the
  * `analyzeCommand` CLI (#2385).
@@ -30,12 +31,15 @@ const resolveEmbeddingRuntimeMock = vi.fn<() => { source: string } | null>(() =>
   source: 'package',
 }));
 const isPrefixRuntimeLoadableMock = vi.fn(() => true);
-const installEmbeddingRuntimeMock = vi.fn(async () => undefined);
+const installEmbeddingRuntimeMock = vi.fn<
+  typeof import('../../src/core/embeddings/runtime-install.js').installEmbeddingRuntime
+>(async () => undefined);
 vi.mock('../../src/core/embeddings/runtime-install.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/core/embeddings/runtime-install.js')>()),
   resolveEmbeddingRuntime: () => resolveEmbeddingRuntimeMock(),
   isPrefixRuntimeLoadable: () => isPrefixRuntimeLoadableMock(),
-  installEmbeddingRuntime: (...args: unknown[]) => installEmbeddingRuntimeMock(...args),
+  installEmbeddingRuntime: (...args: Parameters<typeof installEmbeddingRuntimeMock>) =>
+    installEmbeddingRuntimeMock(...args),
   getEmbeddingRuntimeDir: () => '/fake/embedding-runtime',
 }));
 
@@ -55,7 +59,12 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
 }));
 
 vi.mock('../../src/storage/repo-manager.js', () => ({
-  getStoragePaths: vi.fn(() => ({ storagePath: '.gitnexus', lbugPath: '.gitnexus/lbug' })),
+  loadMeta: vi.fn(async () => null),
+  getStoragePaths: vi.fn(() => ({
+    storagePath: '.gitnexus',
+    lbugPath: '.gitnexus/lbug',
+    metaPath: '.gitnexus/gitnexus.json',
+  })),
   getGlobalRegistryPath: vi.fn(() => 'registry.json'),
   RegistryNameCollisionError: class RegistryNameCollisionError extends Error {},
   AnalysisNotFinalizedError: class AnalysisNotFinalizedError extends Error {},

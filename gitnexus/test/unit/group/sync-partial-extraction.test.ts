@@ -54,10 +54,12 @@ const grpcExtract = vi.fn();
 // Bound through an arrow so the test body can read its calls: which repos the
 // deferred manifest phase re-opens is the observable side of dropping a failed
 // repo's handle, and a `vi.fn()` created inside the factory is unreachable here.
-const initLbugMock = vi.fn(async () => {});
+const initLbugMock = vi.fn<typeof import('../../../src/core/lbug/pool-adapter.js').initLbug>(
+  async () => true,
+);
 
 vi.mock('../../../src/core/lbug/pool-adapter.js', () => ({
-  initLbug: (...args: unknown[]) => initLbugMock(...args),
+  initLbug: initLbugMock,
   executeParameterized: vi.fn(async () => []),
   pinRepo: vi.fn(() => () => {}),
   getMaxResidentRepos: vi.fn(() => 5),
@@ -518,6 +520,44 @@ describe('syncGroup persisting a manifest link with an unreadable endpoint', () 
     // absent from this sync there is nothing to assert it against, and a
     // half-anchored link is exactly the "confident about something it could not
     // read" answer the registry must not give.
+    expect(readPersistedRegistry(groupDir).crossLinks).toEqual([]);
+  });
+
+  it('does not send the consumer to another repo exposing the same method when the declared provider is unreadable (#1188)', async () => {
+    // A third, healthy repo that happens to serve the same method. The link
+    // says the gateway calls app/backend; losing app/backend for this run must
+    // not reroute the gateway's call to whichever repo is left.
+    const legacy: RepoHandle = {
+      id: 'pool-legacy',
+      path: '/repos/legacy',
+      repoPath: '/repos/legacy',
+      storagePath: '/repos/legacy/.gitnexus',
+    };
+    grpcExtract.mockImplementation(async (_executor: unknown, repoPath: unknown) => {
+      if (repoPath === '/repos/backend') throw new Error('gRPC extraction failed');
+      if (repoPath !== legacy.repoPath) return [];
+      return [
+        {
+          ...PARTIAL_CONTRACT,
+          contractId: LINK_CONTRACT_ID,
+          type: 'grpc',
+          symbolUid: 'Method:src/orders.ts:list',
+          symbolRef: { filePath: 'src/orders.ts', name: 'list' },
+          symbolName: 'list',
+        },
+      ];
+    });
+
+    const result = await syncGroup(
+      { ...linkedConfig(), repos: { ...linkedConfig().repos, 'app/legacy': 'legacy-repo' } },
+      {
+        groupDir,
+        resolveRepoHandle: async (registryName, groupPath) =>
+          groupPath === 'app/legacy' ? legacy : resolveLinkedHandle(registryName, groupPath),
+      },
+    );
+
+    expect(result.unreadableRepos).toEqual(['app/backend']);
     expect(readPersistedRegistry(groupDir).crossLinks).toEqual([]);
   });
 
