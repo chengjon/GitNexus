@@ -4,7 +4,7 @@ import { effectiveRamBytes } from '../utils/effective-ram.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { logger } from '../../logger.js';
+import { logger, writeCoordinatedStderr } from '../../logger.js';
 import { createQuarantine } from './quarantine.js';
 
 /**
@@ -756,7 +756,10 @@ function captureWorkerStderr(worker: Worker): void {
   workerStderrTails.set(worker, buf);
   stream.on('data', (chunk: Buffer | string) => {
     const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-    process.stderr.write(s);
+    // Route through the logger coordinator when the analyze progress bar owns
+    // stderr, so worker log lines land on their own line instead of splicing
+    // onto the bar. Line-buffered inside `writeCoordinatedStderr`.
+    writeCoordinatedStderr(s);
     buf.text = (buf.text + s).slice(-WORKER_STDERR_TAIL_LIMIT);
   });
   // A stderr stream error must never crash the pool.

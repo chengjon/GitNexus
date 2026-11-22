@@ -126,7 +126,7 @@ export function setLogDestinationCoordinator(fn: LogDestinationCoordinator | und
  * Raw stderr text emitted while a progress coordinator is active is buffered
  * to line boundaries so a partially-received chunk (e.g. a worker's piped
  * stderr) cannot clear/redraw the bar mid-line. Complete lines are forwarded
- * immediately; a trailing partial line is held until the next write or
+ * immediately; a trailing partial line is held until the next newline or
  * {@link flushCoordinatedStderr}.
  */
 let _stderrLineBuffer = '';
@@ -134,17 +134,19 @@ let _stderrLineBuffer = '';
 /**
  * Write operator-facing stderr text through the active progress coordinator
  * when one is registered — so it lands on its own line instead of splicing
- * onto the progress bar — otherwise straight to stderr. Used by
- * `cli/cli-message.ts` (plain-text user messages) and the worker pool's
- * stderr mirror, both of which must reach the user without corrupting the bar.
+ * onto the progress bar — otherwise straight to stderr, byte-for-byte (the
+ * no-coordinator path is a faithful replacement for `process.stderr.write`).
+ *
+ * Callers that own a complete line (e.g. `cli/cli-message.ts`) include the
+ * trailing newline themselves; the worker pool passes raw chunks and relies on
+ * the line buffering here.
  */
 export function writeCoordinatedStderr(msg: string): void {
-  const text = msg.endsWith('\n') ? msg : `${msg}\n`;
   if (!_logCoordinator) {
-    process.stderr.write(text);
+    process.stderr.write(msg);
     return;
   }
-  _stderrLineBuffer += text;
+  _stderrLineBuffer += msg;
   let newlineIndex = _stderrLineBuffer.indexOf('\n');
   while (newlineIndex !== -1) {
     const line = _stderrLineBuffer.slice(0, newlineIndex + 1);
@@ -155,16 +157,17 @@ export function writeCoordinatedStderr(msg: string): void {
 }
 
 /**
- * Flush any trailing partial line held by {@link writeCoordinatedStderr}.
- * Call before unregistering the coordinator so the tail is still rendered
- * through the bar-aware path.
+ * Flush any trailing partial line held by {@link writeCoordinatedStderr},
+ * terminating it with a newline. Call before unregistering the coordinator so
+ * the tail is still rendered through the bar-aware path.
  */
 export function flushCoordinatedStderr(): void {
   if (!_stderrLineBuffer) return;
   const rest = _stderrLineBuffer;
   _stderrLineBuffer = '';
-  if (_logCoordinator) _logCoordinator(rest);
-  else process.stderr.write(rest);
+  const text = rest.endsWith('\n') ? rest : `${rest}\n`;
+  if (_logCoordinator) _logCoordinator(text);
+  else process.stderr.write(text);
 }
 
 type DefaultDestination = DestinationStream & { flushSync?: () => void };

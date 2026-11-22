@@ -80,7 +80,7 @@ function writeStderr(msg: string): void {
   // first so this text lands on its own line instead of splicing onto it.
   // The structured tee below still goes through the logger so log
   // aggregation works either way.
-  writeCoordinatedStderr(msg);
+  writeCoordinatedStderr(msg.endsWith('\n') ? msg : `${msg}\n`);
 }
 
 /**

@@ -16,6 +16,7 @@ import cliProgress from 'cli-progress';
 import { formatAnalyzeFtsSkipSummary } from '../core/search/fts-policy.js';
 import { isLbugReady, LbugWipeError } from '../core/lbug/lbug-adapter.js';
 import { findUndeclaredRelationPairError } from '../core/lbug/rel-pair-routing.js';
+import { flushCoordinatedStderr, setLogDestinationCoordinator } from '../core/logger.js';
 import { causeChain } from '../lib/utils.js';
 import {
   getOsPageSize,
@@ -333,8 +334,13 @@ const createAnsiPipeTerminal = (stream: NodeJS.WriteStream): CliProgressTerminal
   };
 
   return {
-    cursorSave: () => write('\x1B7'),
-    cursorRestore: () => write('\x1B8'),
+    // cursorSave/cursorRestore are deliberately no-ops. cli-progress pairs
+    // them with a trailing newline in `stop()`, and restoring a position saved
+    // before log lines advanced the cursor would emit a stray newline high
+    // above the summary. The bar redraws in place via cursorTo(0), so no saved
+    // position is needed.
+    cursorSave: () => {},
+    cursorRestore: () => {},
     cursor: (enabled) => write(enabled ? '\x1B[?25h' : '\x1B[?25l'),
     lineWrapping: (enabled) => {
       linewrap = enabled;
@@ -916,6 +922,7 @@ async function respawnWithHeap(
     [HEAP_LIMIT_SOURCE_ENV]: source,
     GITNEXUS_ANALYSIS_SUPERVISED: '1',
     GITNEXUS_ANALYSIS_MANUAL_HEAP: heapFlag === undefined ? '1' : '0',
+    GITNEXUS_RESPAWN_CHILD: '1',
     GITNEXUS_ANALYSIS_SUPERVISOR_BYTES:
       process.env.GITNEXUS_ANALYSIS_SUPERVISOR_BYTES ?? String(analysisSupervisorReservation()),
   };
@@ -1104,6 +1111,12 @@ const analyzeCommandImpl = async (
   cliOptions?: AnalyzeOptions,
   runnerIdentityAtBootstrap?: AnalyzerRunnerIdentity,
 ): Promise<void> => {
+  // Force the logger onto its interceptable default destination for the whole
+  // analyze run: the progress bar owns stderr, and pino-pretty (a worker thread
+  // writing fd 2 directly) cannot be coordinated with it. Covered by
+  // analyzeCommand's env snapshot/restore.
+  process.env.GITNEXUS_ANALYZE_PROGRESS_ACTIVE = '1';
+
   // ── Resolve the target repo root ──────────────────────────────────
   // Resolved FIRST because `.gitnexusrc` is read from the repo root (not the
   // caller's cwd), and config can set defaults that the validation below
@@ -1661,6 +1674,38 @@ const analyzeCommandImpl = async (
 
   bar.start(100, 0, { phase: 'Initializing...' });
 
+  // ── Progress-line coordination ────────────────────────────────────
+  // cli-progress renders on stderr (its default stream) and the logger writes
+  // to fd 2 as well, so a record emitted while the bar is up would splice onto
+  // the bar line and corrupt both. While the bar is active, route every record
+  // through a coordinator that clears the bar line, writes the record on its
+  // own line, and forces the bar to redraw. `barLog` (console.*) clears and
+  // redraws the same way. `stopProgressCoordination()` tears this down.
+  let barActive = true;
+  let barCurrentValue = 0;
+  const clearBarLine = (): void => {
+    if (!barActive) return;
+    process.stderr.write('\x1b[2K\r');
+  };
+  const redrawBar = (): void => {
+    if (!barActive) return;
+    // cli-progress only repaints when its formatted string changes, so after
+    // clearing the line we must force a repaint or the bar stays missing until
+    // the next phase change. The unit-test double has no `render`, hence the
+    // `update` fallback.
+    const renderable = bar as unknown as { render?: (force?: boolean) => void };
+    if (typeof renderable.render === 'function') renderable.render(true);
+    else bar.update(barCurrentValue);
+  };
+  const stopProgressCoordination = (): void => {
+    if (!barActive) return;
+    // Flush a trailing partial line while the coordinator is still installed so
+    // it is rendered through the bar-aware path, then hand stderr back.
+    flushCoordinatedStderr();
+    barActive = false;
+    setLogDestinationCoordinator(undefined);
+  };
+
   // Signals and IPC only request cancellation. The analysis promise owns its
   // native calls and cleanup; even a repeated interrupt must not exit mid-call.
   const cancellation = new AbortController();
@@ -1694,28 +1739,28 @@ const analyzeCommandImpl = async (
     }
   }
 
-  // Route console output through bar.log() to prevent progress bar corruption.
+  // Route console output through barLog to prevent progress bar corruption.
   // This is a deliberate UI pattern (not a logging concern): analyze runs a
-  // long-lived progress bar on stdout; any concurrent console.* write would
-  // overwrite the bar mid-render. We capture originals, swap to barLog for
-  // the lifetime of the run, and restore on completion/error/SIGINT.
+  // long-lived progress bar on stderr; any concurrent console.* write would
+  // overwrite the bar mid-render. barLog clears the bar line on stderr, writes
+  // the text (console goes to stdout), and forces the bar to redraw. We capture
+  // originals, swap to barLog for the lifetime of the run, and restore on
+  // completion/error/SIGINT.
   const origLog = console.log.bind(console);
   // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   const origWarn = console.warn.bind(console);
   // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   const origError = console.error.bind(console);
-  let barCurrentValue = 0;
   const barLog = (...args: unknown[]) => {
-    process.stdout.write('\x1b[2K\r');
+    clearBarLine();
     origLog(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
-    bar.update(barCurrentValue);
+    redrawBar();
   };
   console.log = barLog;
   // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   console.warn = barLog;
   // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   console.error = barLog;
-  process.env.GITNEXUS_ANALYZE_PROGRESS_ACTIVE = '1';
 
   // Track elapsed time per phase
   let lastPhaseLabel = 'Initializing...';
@@ -1741,6 +1786,19 @@ const analyzeCommandImpl = async (
 
   // ── Run shared analysis orchestrator ───────────────────────────────
   try {
+    // Register the logger coordinator inside the try so the outer finally's
+    // stopProgressCoordination() is the single teardown path; if any setup
+    // above throws, no coordinator is left installed.
+    setLogDestinationCoordinator((record) => {
+      if (!barActive) {
+        process.stderr.write(record);
+        return;
+      }
+      clearBarLine();
+      process.stderr.write(record);
+      redrawBar();
+    });
+
     // The heap supervisor never runs the pipeline. Load it only in the
     // admitted working process, after validation and the re-exec guard.
     const analysis = await import('../core/run-analyze.js');
@@ -1933,6 +1991,7 @@ const analyzeCommandImpl = async (
       // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
       console.error = origError;
       bar.stop();
+      stopProgressCoordination();
       console.log('  Already up to date\n');
       if (result.ftsSkipped) {
         console.log(`  ${formatAnalyzeFtsSkipSummary(result.ftsSkipReason)}\n`);
@@ -1969,6 +2028,7 @@ const analyzeCommandImpl = async (
       // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
       console.error = origError;
       bar.stop();
+      stopProgressCoordination();
       console.log('  FTS indexes repaired successfully\n');
       return;
     }
@@ -2040,6 +2100,7 @@ const analyzeCommandImpl = async (
       // eslint-disable-next-line no-console -- restoring progress-bar routing
       console.error = origError;
       bar.stop();
+      stopProgressCoordination();
       process.exitCode = 0;
       return;
     }
@@ -2065,6 +2126,7 @@ const analyzeCommandImpl = async (
 
     bar.update(100, { phase: 'Done' });
     bar.stop();
+    stopProgressCoordination();
 
     // ── Summary ────────────────────────────────────────────────────
     const s = result.stats;
@@ -2120,6 +2182,7 @@ const analyzeCommandImpl = async (
     // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
     console.error = origError;
     bar.stop();
+    stopProgressCoordination();
 
     if (cancellation.signal.aborted) {
       process.exitCode = cancellationExitCode;
@@ -2502,6 +2565,7 @@ const analyzeCommandImpl = async (
     process.exitCode = 1;
     return;
   } finally {
+    stopProgressCoordination();
     clearInterval(elapsedTimer);
     process.removeListener('SIGINT', sigintHandler);
     process.removeListener('SIGTERM', sigtermHandler);

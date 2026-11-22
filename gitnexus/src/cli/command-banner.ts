@@ -9,6 +9,12 @@ import { packageVersion } from '../core/package-version.js';
 
 const SKIP_COMMAND_BANNER = new Set(['__update-check', 'help']);
 
+/**
+ * Set on the heap-respawn child (see `cli/analyze.ts`). The parent already
+ * printed the banner before re-execing, so the child must not print it again.
+ */
+const RESPAWN_CHILD_ENV = 'GITNEXUS_RESPAWN_CHILD';
+
 const SPECIAL_TITLES: Record<string, string> = {
   analyze: 'Analyzer',
   mcp: 'MCP',
@@ -59,6 +65,7 @@ export function writeCommandBanner(
   deps: WriteCommandBannerDependencies = {},
 ): void {
   if (SKIP_COMMAND_BANNER.has(command.name())) return;
+  if (process.env[RESPAWN_CHILD_ENV] === '1') return;
   const text = formatCommandBanner(
     commandBannerTitle(command),
     deps.version ?? installedCliVersion(),
