@@ -1,4 +1,7 @@
 import '../helpers/mock-analysis-host.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 /**
  * Tests for the local-embedding-runtime blocker error path in the
  * `analyzeCommand` CLI (#1515 / #1987 review follow-up).
@@ -102,8 +105,17 @@ const blockerMessage = getLocalEmbeddingRuntimeBlocker({
 }) as string;
 
 describe('analyzeCommand local-embedding-runtime error handling', () => {
+  // Isolate from the developer's ambient ~/.gitnexus/config.json. If a stored
+  // embedding provider (e.g. ollama) is present, readConfig() is non-null and
+  // isHttpMode() returns true, which skips the local-embedding gate entirely —
+  // so the darwin/x64 blocker tests below would never reach their assertions.
+  const originalHome = process.env.GITNEXUS_HOME;
+  let tempHome: string;
+
   beforeEach(() => {
     vi.resetModules();
+    tempHome = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-embed-gate-home-'));
+    process.env.GITNEXUS_HOME = tempHome;
     runFullAnalysisMock.mockReset();
     isHfDownloadFailureMock.mockReset();
     isHfDownloadFailureMock.mockReturnValue(false);
@@ -116,6 +128,12 @@ describe('analyzeCommand local-embedding-runtime error handling', () => {
     process.exitCode = undefined;
     // Ensure ensureHeap() short-circuits (heap already at target size)
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim();
+  });
+
+  afterEach(() => {
+    rmSync(tempHome, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.GITNEXUS_HOME;
+    else process.env.GITNEXUS_HOME = originalHome;
   });
 
   it('routes the blocker to a clean local-embedding-unsupported message (exit 1)', async () => {

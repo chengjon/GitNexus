@@ -177,6 +177,17 @@ describe('embeddingsSyncCommand writer safety (#3065)', () => {
   beforeEach(() => {
     heap.bytes = 1024 ** 3;
     vi.resetModules();
+    // Isolate from ambient ~/.gitnexus/config.json (e.g. a stored ollama
+    // provider): readConfig() non-null makes isHttpMode() true, which skips the
+    // local-embedding writer-safety gate these tests assert on. Point
+    // GITNEXUS_HOME at a fresh empty dir so readConfig() returns null.
+    vi.stubEnv(
+      'GITNEXUS_HOME',
+      path.join(
+        tmpdir(),
+        `gitnexus-embed-sync-home-${process.pid}-${Math.random().toString(36).slice(2)}`,
+      ),
+    );
     acquireIndexLockMock.mockReset().mockResolvedValue(lockHandle());
     ensurePrivateSharedGraphMock.mockReset().mockResolvedValue(true);
     releaseMock.mockReset();
