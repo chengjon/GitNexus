@@ -131,7 +131,6 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       graphCompaction: { version: 1, compactBytes, incrementalWrites: 0 },
     });
     await fs.mkdir(path.dirname(flat.lbugPath), { recursive: true });
-    await fs.writeFile(flat.lbugPath, ''); // simulate existing graph store (local fork guard)
 
     await rmCtx.realSaveMeta!(flat.storagePath, metaFor('main'));
     const branch = getStoragePaths(tmpRepo.dbPath, 'feature/x');
