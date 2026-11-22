@@ -11,12 +11,17 @@
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
+import { Writable } from 'node:stream';
 import v8 from 'v8';
 import cliProgress from 'cli-progress';
 import { formatAnalyzeFtsSkipSummary } from '../core/search/fts-policy.js';
 import { isLbugReady, LbugWipeError } from '../core/lbug/lbug-adapter.js';
 import { findUndeclaredRelationPairError } from '../core/lbug/rel-pair-routing.js';
-import { flushCoordinatedStderr, setLogDestinationCoordinator } from '../core/logger.js';
+import {
+  configureLoggerSink,
+  flushCoordinatedStderr,
+  setStderrCoordinator,
+} from '../core/logger.js';
 import { causeChain } from '../lib/utils.js';
 import {
   getOsPageSize,
@@ -1113,7 +1118,8 @@ const analyzeCommandImpl = async (
 ): Promise<void> => {
   // Force the logger onto its interceptable default destination for the whole
   // analyze run: the progress bar owns stderr, and pino-pretty (a worker thread
-  // writing fd 2 directly) cannot be coordinated with it. Covered by
+  // writing fd 2 directly) cannot be coordinated with it. Records emitted once
+  // the bar is up are redirected through the host sink instead. Covered by
   // analyzeCommand's env snapshot/restore.
   process.env.GITNEXUS_ANALYZE_PROGRESS_ACTIVE = '1';
 
@@ -1675,12 +1681,13 @@ const analyzeCommandImpl = async (
   bar.start(100, 0, { phase: 'Initializing...' });
 
   // ── Progress-line coordination ────────────────────────────────────
-  // cli-progress renders on stderr (its default stream) and the logger writes
-  // to fd 2 as well, so a record emitted while the bar is up would splice onto
-  // the bar line and corrupt both. While the bar is active, route every record
-  // through a coordinator that clears the bar line, writes the record on its
-  // own line, and forces the bar to redraw. `barLog` (console.*) clears and
-  // redraws the same way. `stopProgressCoordination()` tears this down.
+  // cli-progress renders on stderr and the logger writes to fd 2 as well, so
+  // a record emitted while the bar is up would splice onto the bar line and
+  // corrupt both. While the bar is active, logger records go to a host sink
+  // that clears the bar line, writes the record on its own line, and forces a
+  // redraw; raw stderr (worker mirrors, cli-message) goes through the stderr
+  // coordinator with the same behavior. `stopProgressCoordination()` tears
+  // both down.
   let barActive = true;
   let barCurrentValue = 0;
   const clearBarLine = (): void => {
@@ -1697,13 +1704,31 @@ const analyzeCommandImpl = async (
     if (typeof renderable.render === 'function') renderable.render(true);
     else bar.update(barCurrentValue);
   };
+  const writeAboveBar = (text: string): void => {
+    if (!barActive) {
+      process.stderr.write(text);
+      return;
+    }
+    clearBarLine();
+    process.stderr.write(text);
+    redrawBar();
+  };
+  const progressLogDestination = new Writable({
+    write(chunk, _encoding, callback) {
+      writeAboveBar(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      callback();
+    },
+  });
+  let restoreProgressLoggerSink: (() => void) | undefined;
   const stopProgressCoordination = (): void => {
     if (!barActive) return;
     // Flush a trailing partial line while the coordinator is still installed so
     // it is rendered through the bar-aware path, then hand stderr back.
     flushCoordinatedStderr();
     barActive = false;
-    setLogDestinationCoordinator(undefined);
+    restoreProgressLoggerSink?.();
+    restoreProgressLoggerSink = undefined;
+    setStderrCoordinator(undefined);
   };
 
   // Signals and IPC only request cancellation. The analysis promise owns its
@@ -1786,18 +1811,13 @@ const analyzeCommandImpl = async (
 
   // ── Run shared analysis orchestrator ───────────────────────────────
   try {
-    // Register the logger coordinator inside the try so the outer finally's
-    // stopProgressCoordination() is the single teardown path; if any setup
-    // above throws, no coordinator is left installed.
-    setLogDestinationCoordinator((record) => {
-      if (!barActive) {
-        process.stderr.write(record);
-        return;
-      }
-      clearBarLine();
-      process.stderr.write(record);
-      redrawBar();
+    // Install the logger sink and stderr coordinator inside the try so the
+    // outer finally's stopProgressCoordination() is the single teardown path;
+    // if any setup above throws, neither is left installed.
+    restoreProgressLoggerSink = configureLoggerSink({
+      destination: progressLogDestination,
     });
+    setStderrCoordinator(writeAboveBar);
 
     // The heap supervisor never runs the pipeline. Load it only in the
     // admitted working process, after validation and the re-exec guard.

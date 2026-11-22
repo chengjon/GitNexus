@@ -68,11 +68,9 @@ function shouldUsePretty(): boolean {
   //
   // While the analyze progress bar owns stderr, pretty MUST be disabled: the
   // pino-pretty transport formats in a worker thread and writes to fd 2
-  // directly, so its records cannot be routed through the progress
-  // coordinator and would splice onto the bar. The coordinator (or the
-  // analyze progress env it is paired with) forces the interceptable default
-  // destination instead.
-  if (_logCoordinator) return false;
+  // directly, so its records cannot be routed through the host sink that
+  // coordinates the bar. The analyze progress env forces the interceptable
+  // default destination for records emitted before that sink is installed.
   if (process.env.GITNEXUS_ANALYZE_PROGRESS_ACTIVE === '1') return false;
   return (
     process.stderr.isTTY === true &&
@@ -104,22 +102,22 @@ function shouldUsePretty(): boolean {
  * `_captureLogger()` and never reach this branch.
  */
 /**
- * Coordinator invoked for every record written to the default stderr
- * destination while a full-terminal UI (the analyze progress bar) owns the
- * terminal. It receives the fully-formatted record (an NDJSON line with its
- * trailing newline) and is responsible for clearing the UI's line, writing
- * the record on its own line, and redrawing the UI.
+ * Coordinator invoked for raw stderr text while a full-terminal UI (the
+ * analyze progress bar) owns the terminal. It receives one complete line,
+ * including its trailing newline, and is responsible for clearing the UI's
+ * line, writing the text on its own line, and redrawing the UI.
  *
- * `undefined` (the default) writes straight to the buffered pino destination,
- * preserving the historical behavior. Registered by `cli/analyze.ts` for the
- * lifetime of the progress bar and torn down with the bar.
+ * Structured logger records do not pass through this hook: a host that owns
+ * the terminal installs `configureLoggerSink()` instead, which is the
+ * supported seam for redirecting records. `undefined` (the default) writes
+ * straight to stderr.
  */
-export type LogDestinationCoordinator = (record: string) => void;
+export type StderrCoordinator = (line: string) => void;
 
-let _logCoordinator: LogDestinationCoordinator | undefined;
+let _stderrCoordinator: StderrCoordinator | undefined;
 
-export function setLogDestinationCoordinator(fn: LogDestinationCoordinator | undefined): void {
-  _logCoordinator = fn;
+export function setStderrCoordinator(fn: StderrCoordinator | undefined): void {
+  _stderrCoordinator = fn;
 }
 
 /**
@@ -142,7 +140,7 @@ let _stderrLineBuffer = '';
  * the line buffering here.
  */
 export function writeCoordinatedStderr(msg: string): void {
-  if (!_logCoordinator) {
+  if (!_stderrCoordinator) {
     process.stderr.write(msg);
     return;
   }
@@ -151,7 +149,7 @@ export function writeCoordinatedStderr(msg: string): void {
   while (newlineIndex !== -1) {
     const line = _stderrLineBuffer.slice(0, newlineIndex + 1);
     _stderrLineBuffer = _stderrLineBuffer.slice(newlineIndex + 1);
-    _logCoordinator(line);
+    _stderrCoordinator(line);
     newlineIndex = _stderrLineBuffer.indexOf('\n');
   }
 }
@@ -166,7 +164,7 @@ export function flushCoordinatedStderr(): void {
   const rest = _stderrLineBuffer;
   _stderrLineBuffer = '';
   const text = rest.endsWith('\n') ? rest : `${rest}\n`;
-  if (_logCoordinator) _logCoordinator(text);
+  if (_stderrCoordinator) _stderrCoordinator(text);
   else process.stderr.write(text);
 }
 
@@ -179,10 +177,6 @@ function defaultDestination(): DestinationStream {
   const inner = pino.destination({ dest: 2, sync: false });
   const wrapper: DefaultDestination = {
     write(msg: string): void {
-      if (_logCoordinator) {
-        _logCoordinator(msg);
-        return;
-      }
       inner.write(msg);
     },
     flushSync: () => inner.flushSync(),

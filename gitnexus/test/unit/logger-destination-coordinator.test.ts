@@ -1,81 +1,84 @@
 /**
- * Unit tests for the analyze progress-bar log coordinator in
+ * Unit tests for the analyze progress-bar output coordination in
  * src/core/logger.ts.
  *
- * The analyze progress bar renders on stderr and so does the logger, so a
- * record emitted while the bar is up would splice onto the bar line. The
- * coordinator lets a host (cli/analyze.ts) intercept every record, clear the
- * bar line, write the record on its own line, and redraw the bar.
+ * The analyze progress bar renders on stderr and so do logger records and raw
+ * operator output, so text emitted while the bar is up would splice onto the
+ * bar line. `cli/analyze.ts` installs a host sink for structured records and a
+ * stderr coordinator for raw text; both clear the bar line, write on their own
+ * line, and redraw the bar.
  *
  * These tests assert the wiring:
- *   - a registered coordinator receives NDJSON records and stderr is bypassed
- *   - unregistering restores the direct stderr destination
- *   - writeCoordinatedStderr line-buffers partial chunks
- *   - writeCoordinatedStderr writes straight to stderr with no coordinator
+ *   - `configureLoggerSink` receives NDJSON records and bypasses stderr
+ *   - restoring the sink stops routing records to it
+ *   - `writeCoordinatedStderr` line-buffers partial chunks
+ *   - `writeCoordinatedStderr` writes straight to stderr with no coordinator
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
+  MemoryWritable,
+  configureLoggerSink,
   createLogger,
   flushCoordinatedStderr,
-  flushLoggerSync,
-  setLogDestinationCoordinator,
+  setStderrCoordinator,
   writeCoordinatedStderr,
 } from '../../src/core/logger.js';
 
+let restoreSink: (() => void) | undefined;
+
 afterEach(() => {
-  setLogDestinationCoordinator(undefined);
+  restoreSink?.();
+  restoreSink = undefined;
+  setStderrCoordinator(undefined);
   vi.restoreAllMocks();
 });
 
-describe('setLogDestinationCoordinator — record routing', () => {
-  it('routes records through the coordinator instead of the stderr destination', () => {
-    const records: string[] = [];
-    setLogDestinationCoordinator((record) => records.push(record));
+describe('configureLoggerSink — progress-bar destination', () => {
+  it('routes records to the host sink instead of the stderr destination', () => {
+    const sink = new MemoryWritable();
+    restoreSink = configureLoggerSink({ destination: sink });
 
     const log = createLogger('test-coordinator');
     log.info('hello');
 
+    const records = sink.records();
     expect(records).toHaveLength(1);
-    expect(records[0]).toContain('"hello"');
-    expect(records[0].endsWith('\n')).toBe(true);
+    expect(records[0].msg).toBe('hello');
   });
 
   it('writes a complete NDJSON line per record', () => {
-    const records: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    setLogDestinationCoordinator((record) => records.push(record));
+    const sink = new MemoryWritable();
+    restoreSink = configureLoggerSink({ destination: sink });
 
     const log = createLogger('test-coordinator-lines');
     log.warn('one');
     log.error('two');
 
-    expect(records).toHaveLength(2);
-    for (const record of records) {
-      const lines = record.split('\n').filter((line) => line.length > 0);
-      expect(lines).toHaveLength(1);
-      expect(() => JSON.parse(lines[0])).not.toThrow();
+    expect(sink.records().map((record) => record.msg)).toEqual(['one', 'two']);
+    for (const line of sink
+      .text()
+      .split('\n')
+      .filter((line) => line.length > 0)) {
+      expect(() => JSON.parse(line)).not.toThrow();
     }
-    expect(records[0]).toContain('"msg":"one"');
-    expect(records[1]).toContain('"msg":"two"');
   });
 
-  it('stops routing records to the coordinator once unregistered', () => {
-    const records: string[] = [];
-    setLogDestinationCoordinator((record) => records.push(record));
-    setLogDestinationCoordinator(undefined);
+  it('stops routing records to the sink once restored', () => {
+    const sink = new MemoryWritable();
+    restoreSink = configureLoggerSink({ destination: sink });
+    restoreSink();
+    restoreSink = undefined;
 
-    const log = createLogger('test-coordinator-restore');
-    log.info('after-restore');
-    flushLoggerSync();
+    createLogger('test-coordinator-restore').info('after-restore');
 
-    expect(records).toHaveLength(0);
+    expect(sink.records()).toHaveLength(0);
   });
 });
 
 describe('writeCoordinatedStderr — line buffering', () => {
   it('buffers a partial line and flushes complete lines as they arrive', () => {
     const lines: string[] = [];
-    setLogDestinationCoordinator((record) => lines.push(record));
+    setStderrCoordinator((line) => lines.push(line));
 
     writeCoordinatedStderr('abc');
     expect(lines).toHaveLength(0);
@@ -86,7 +89,7 @@ describe('writeCoordinatedStderr — line buffering', () => {
 
   it('flushes a trailing partial line via flushCoordinatedStderr', () => {
     const lines: string[] = [];
-    setLogDestinationCoordinator((record) => lines.push(record));
+    setStderrCoordinator((line) => lines.push(line));
 
     writeCoordinatedStderr('tail');
     expect(lines).toHaveLength(0);
@@ -97,7 +100,7 @@ describe('writeCoordinatedStderr — line buffering', () => {
 
   it('appends a newline when none is present', () => {
     const lines: string[] = [];
-    setLogDestinationCoordinator((record) => lines.push(record));
+    setStderrCoordinator((line) => lines.push(line));
 
     writeCoordinatedStderr('no-newline');
     flushCoordinatedStderr();
