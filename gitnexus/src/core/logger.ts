@@ -172,17 +172,16 @@ type DefaultDestination = DestinationStream & { flushSync?: () => void };
 
 let _dest: DefaultDestination | undefined;
 
+/**
+ * The default stderr destination. Analyze does NOT use this path while its
+ * progress bar is up — it installs a host sink via `configureLoggerSink` — so
+ * this is a plain buffered pino destination; there is no interception to
+ * preserve here.
+ */
 function defaultDestination(): DestinationStream {
   if (_dest) return _dest;
-  const inner = pino.destination({ dest: 2, sync: false });
-  const wrapper: DefaultDestination = {
-    write(msg: string): void {
-      inner.write(msg);
-    },
-    flushSync: () => inner.flushSync(),
-  };
-  _dest = wrapper;
-  return wrapper;
+  _dest = pino.destination({ dest: 2, sync: false });
+  return _dest;
 }
 
 /**

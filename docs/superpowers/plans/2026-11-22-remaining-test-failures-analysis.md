@@ -205,3 +205,15 @@ mock 的 ELF 崩溃」这个潜在健壮性问题，对这 7 个失败无效（g
 2. **组 B**：B1 已完成 → 定性为 **merge 代码回归**（非既有残留）；已修复（`4729de0e3`，删除 fixture 的 DB 截断行）。
 3. **P2（A1 懒加载）**：已随 `4cabd630c` 实施（独立加固 + 消除 ELF 崩溃）。
 4. **本 MD**：作为决策记录提交（`git add -f`）。
+
+---
+
+## 后续可选清理（2026-11-22 完成）
+
+1. **`logger.ts` 的 `defaultDestination()` 简化**：协调器分支删除后 wrapper 只是纯转发，
+   现直接返回 `pino.destination({ dest: 2, sync: false })`（analyze 在进度条期间走
+   `configureLoggerSink`，无需在此拦截）。tsc 通过；logger/banner/respawn 相关 6 个套件 102 用例通过。
+2. **`graphCompactionReason` 0 字节行为复核**：无需生产改动。`compaction-policy.test.ts:89-94`
+   已用 `it.each([undefined, 0, -1, NaN, Infinity, 1.5])` 断言返回「could not be measured」；
+   `:76-87` 覆盖畸形 baseline。扁平存储下 `resolveGraphPath` 返回的正是 `writeTarget.lbugPath`，
+   故真实环境通常可测量；缺失/0 字节图判为重建是正确行为。
