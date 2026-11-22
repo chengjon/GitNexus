@@ -1,13 +1,17 @@
-# 剩余测试失败：根因评估与修复建议（v3：P0/P2 已实施，组 B 已定性）
+# 剩余测试失败：根因评估与修复建议（v4：P0/P2 与组 B 已全部修复）
 
 > 日期：2026-11-22
 > 范围：GitNexus fork `main` 合并 upstream 后的单元测试残留失败
-> 状态：**分析 + 决策记录**（P0/P2 已实施并推送；组 B 已定性）
+> 状态：**分析 + 决策记录**（P0/P2 与组 B 修复均已实施并推送；31 个失败全部清零）
 >
 > **修订记录 v3**：P0（测试侧 `GITNEXUS_HOME` 隔离，含第二个 describe）与 P2
 > （`parser-loader` 懒加载 tree-sitter）均已实施并推送（`0db7329c7`、`4cabd630c`），
 > 组 A 4 + 组 C 3 全绿。组 B 经 B1 baseline 核查**推翻「既有残留」结论**：
 > fork `436ec6f1c` 上该测试 7/7 通过，当前代码 6/7 失败 → 属 merge 引入的**代码回归**。
+>
+> **修订记录 v4**：组 B 已修复（`4729de0e3`）——见下方「P1」小节。删除 fixture 中
+> 把已种子化的 graph store 截断为 0 字节的那行（merge 自相矛盾：既补了真实 `compactBytes`
+> 基线，又保留 fork 时代的截断），`graphCompactionReason` 的 fast-path 门禁因此放行，7/7 通过。
 >
 > **修订记录 v2**：组 A 的根因经独立复现纠正——主因是**环境配置导致 gate 被跳过**，
 > 不是 ELF（ELF 属新进程下的次要现象）。组 A 的修复是**测试侧配置隔离**，不是
@@ -174,14 +178,23 @@ mock 的 ELF 崩溃」这个潜在健壮性问题，对这 7 个失败无效（g
     等 merge 新增 API，fork 代码上不存在。
 - 结论：**代码回归**（`src/core/run-analyze.ts` 的 fast-path restamp/adopt 逻辑，merge 改写约
   2627 行），**不是测试问题、不是环境残留**。测试文件 fork→HEAD 仅 23+/8−，且换入 fork 测试仍同样失败。
-- 修复方向：定位 merge 后 fast-path 为何不再调用 `saveMeta`/`ensureStoragePathWritable`、
-  且 `result.alreadyUpToDate` 为 undefined（fork 调用点 `run-analyze.ts:1394/2346/4845` vs
-  当前 `:2176/1616/3329`）。属代码级修复，建议单独会话进行。
+- **根因（已定位）**：`runFullAnalysisInner` 的 alreadyUpToDate 早返回块
+  （`:3162-3174`）要求 `!storageCompactionReason`；而 merge 新增的
+  `graphCompactionReason`（`src/core/incremental/compaction-policy.ts:39-62`）在
+  `publishedGraphBytes` 不是正整数时返回「the current graph size could not be
+  measured」。fixture 在 `initLbug` 建好真实 DB 后，又执行
+  `await fs.writeFile(flat.lbugPath, '')` 把库截断为 0 字节（merge 保留了这行
+  fork 时代的「simulate existing graph store」），于是门禁恒真 → fast path 被跳过
+  → `alreadyUpToDate` undefined、`saveMeta`/`ensureStoragePathWritable` 从不被调用
+  （预置的 `mockRejectedValueOnce` 因此泄漏）。fork 无 `graphCompactionReason`，故 7/7 通过。
+- **修复（`4729de0e3`）**：删除该截断行，保留真实 DB → `graphCompactionReason` 返回
+  undefined → 7/7 通过。生产端的 compaction 门禁本身是正确的（不可测/零字节图应重建），
+  矛盾在测试 fixture。
 
 ### 剩余汇总（本文档覆盖）
 - **组 A 4 + 组 C 3：已修复并推送**（`0db7329c7` + `4cabd630c`），standalone 全绿。
-- **组 B 6：已定性为 merge 代码回归**，B1 已完成，待单独会话修复。
-- 总计 31 → 已修 25，剩 6（组 B）。
+- **组 B 6：已修复**（`4729de0e3`）。
+- 总计 31 → **全部修复（31/31）**。
 
 ---
 
@@ -189,6 +202,6 @@ mock 的 ELF 崩溃」这个潜在健壮性问题，对这 7 个失败无效（g
 
 1. **组 A / 组 C**：采纳 P0「测试侧 `GITNEXUS_HOME` 隔离」——已实施（含第二个 describe），
    直接设临时目录（未 stub `loadStoredEmbeddingConfig`）。
-2. **组 B**：B1 已完成 → 定性为 **merge 代码回归**（非既有残留），需代码级修复，单独排期。
+2. **组 B**：B1 已完成 → 定性为 **merge 代码回归**（非既有残留）；已修复（`4729de0e3`，删除 fixture 的 DB 截断行）。
 3. **P2（A1 懒加载）**：已随 `4cabd630c` 实施（独立加固 + 消除 ELF 崩溃）。
 4. **本 MD**：作为决策记录提交（`git add -f`）。
