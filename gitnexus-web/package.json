@@ -86,7 +86,7 @@
     },
     "@vercel/node": {
       "path-to-regexp": "6.3.0",
-      "undici": "6.29.0"
+      "undici": "6.29.1"
     },
     "@vercel/nft": {
       "glob": "^14.0.2"
