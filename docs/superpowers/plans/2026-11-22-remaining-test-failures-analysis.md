@@ -1,8 +1,13 @@
-# 剩余测试失败：根因评估与修复建议（修订版 v2，待审核，未改代码）
+# 剩余测试失败：根因评估与修复建议（v3：P0/P2 已实施，组 B 已定性）
 
 > 日期：2026-11-22
-> 范围：GitNexus fork `main`（HEAD `fa0a7ba1b`）合并 upstream 后的单元测试残留失败
-> 状态：**仅分析文档，未做任何代码改动**（供审核）
+> 范围：GitNexus fork `main` 合并 upstream 后的单元测试残留失败
+> 状态：**分析 + 决策记录**（P0/P2 已实施并推送；组 B 已定性）
+>
+> **修订记录 v3**：P0（测试侧 `GITNEXUS_HOME` 隔离，含第二个 describe）与 P2
+> （`parser-loader` 懒加载 tree-sitter）均已实施并推送（`0db7329c7`、`4cabd630c`），
+> 组 A 4 + 组 C 3 全绿。组 B 经 B1 baseline 核查**推翻「既有残留」结论**：
+> fork `436ec6f1c` 上该测试 7/7 通过，当前代码 6/7 失败 → 属 merge 引入的**代码回归**。
 >
 > **修订记录 v2**：组 A 的根因经独立复现纠正——主因是**环境配置导致 gate 被跳过**，
 > 不是 ELF（ELF 属新进程下的次要现象）。组 A 的修复是**测试侧配置隔离**，不是
@@ -145,32 +150,45 @@ mock 的 ELF 崩溃」这个潜在健壮性问题，对这 7 个失败无效（g
   - `analyze-local-embedding-error`：ambient 下 5 passed / **4 prefix-runtime 仍失败**（见下）。
 - **净改善**：embeddings-sync 3 个修复，analyze-embed 未变差（prefix-runtime 4 个改前改后一致）。
 
-### prefix-runtime 4 个仍失败（P2 范畴，未修）
-- 根因（诊断确认）：测试 `Object.defineProperty(process,'platform',{value:'darwin'})` →
-  `analyze.js` import 图**急切加载 tree-sitter**（`parser-loader.ts:1` 非 type `import Parser from 'tree-sitter'`
-  所在传递链）→ `node-gyp-build` 选 `prebuilds/darwin-x64/`（macOS 二进制）→ Linux `invalid ELF header`
-  → gate 不执行 / 走错路径。
-- **P2 修复方向**（未实施）：让 `analyze.js` 对 tree-sitter 回到懒加载（动态 import），
-  消除 import 时原生绑定加载。fork `436ec6f1c` 即此行为。属 src 重构，有回归风险，需单独做 + analyze 冒烟。
+### prefix-runtime 4 个：已修复（P0 补隔离 + P2 懒加载）
+- **真正的根因**（v3 纠正）：`0db7329c7` 只给第一个 describe（`:107`）的 `beforeEach` 加了
+  `GITNEXUS_HOME` 隔离；第二个 describe（`prefix-runtime capability gate #2372`，`:230`）
+  有**自己的 `beforeEach`（`:231-240`）且没有隔离** → 仍读到 `~/.gitnexus/config.json` 的
+  ollama 配置 → `isHttpMode()=true` → gate 跳过。这与 ELF 无关（先前 5 条
+  `DIAG-GATE {"status":"ready"}` 全部来自第一个 describe，第二个 describe 根本没进 gate）。
+- **修复**（`4cabd630c`，纯测试）：给第二个 describe 的 `beforeEach` 补上同样的
+  `GITNEXUS_HOME` 隔离 → standalone `analyze-local-embedding-error.test.ts` **9/9 通过**。
+- **P2 懒加载**（同提交，src）：`parser-loader.ts` 改 `import type Parser` +
+  在 `loadParser`/`createParserForLanguage` 内 `await import('tree-sitter')`，消除新进程 +
+  darwin/x64 mock 下的 `invalid ELF header` 崩溃（独立健壮性加固，非这 4 个失败的修复）。
+  已验证：standalone 不崩溃、无第二条 `analyze.ts → tree-sitter` 急切边、pty + 非 TTY 冒烟干净。
 
-### P1：组 B baseline 核查（结论：与配置无关，既有残留）
-- 干净临时 HOME 下 `run-analyze-adopt-failure` 单独跑 → **仍 6 failed / 1 passed**。
-- 结论：与 `GITNEXUS_HOME` / embedding 配置无关，确认属**既有环境敏感 fast-path restamp 残留**
-  （commit `1768f9547` 已记录），非 merge 引入、非我方改动引入。
-- 修复（若做）：按 B1 对比 fork `436ec6f1c` 的 `run-analyze.js` 导出 / mock 工厂形状；
-  优先级可降级为「已知残留」。
+### P1：组 B baseline 核查（结论：**merge 引入的代码回归**，非既有残留）
+- 干净临时 HOME 下该文件仍 6 failed / 1 passed → 与配置无关（此点成立）。
+- **但「既有残留」的结论被 B1 推翻**（决定性实验，worktree `/tmp/opencode/fork-base`
+  @ `436ec6f1c`，`node_modules` 软链）：
+  - fork 代码 + fork 测试 → **7/7 通过**；
+  - 当前代码 + **fork 测试**（把 `git show 436ec6f1c:…` 的测试文件换入当前 checkout）→ **6/7 失败**；
+  - 当前代码 + 当前测试 → 6/7 失败（同样 6 个）。
+  - 反向实验（当前测试跑 fork 代码）受阻：当前测试 import `resolveParseCacheIdentity`
+    等 merge 新增 API，fork 代码上不存在。
+- 结论：**代码回归**（`src/core/run-analyze.ts` 的 fast-path restamp/adopt 逻辑，merge 改写约
+  2627 行），**不是测试问题、不是环境残留**。测试文件 fork→HEAD 仅 23+/8−，且换入 fork 测试仍同样失败。
+- 修复方向：定位 merge 后 fast-path 为何不再调用 `saveMeta`/`ensureStoragePathWritable`、
+  且 `result.alreadyUpToDate` 为 undefined（fork 调用点 `run-analyze.ts:1394/2346/4845` vs
+  当前 `:2176/1616/3329`）。属代码级修复，建议单独会话进行。
 
 ### 剩余汇总（本文档覆盖）
-- prefix-runtime 4 个（P2 懒加载）+ 组 B 6 个（既有残留 / B1）= **10 个待修**（均非 P0 引入）。
-- P0 已修 embeddings-sync 3 个（随本次提交）。
+- **组 A 4 + 组 C 3：已修复并推送**（`0db7329c7` + `4cabd630c`），standalone 全绿。
+- **组 B 6：已定性为 merge 代码回归**，B1 已完成，待单独会话修复。
+- 总计 31 → 已修 25，剩 6（组 B）。
 
 ---
 
-## 审核要点（请确认）
+## 审核要点（已决，2026-11-22）
 
-1. **组 A / 组 C 修复**：采纳 P0「测试侧 `GITNEXUS_HOME` 隔离」？是否 stub
-   `loadStoredEmbeddingConfig` 还是直接设 `GITNEXUS_HOME` 临时目录？
-2. **组 B**：采纳 P1「先跑 fork 版 + 对比 mock 工厂形状」？
-3. **P2（A1 懒加载）**：是否本轮做，还是单独排期？
-4. **提交本 MD**：确认按修订后的根因（组 A = 配置隔离，非 ELF）提交为决策记录
-   （`git add -f`）？
+1. **组 A / 组 C**：采纳 P0「测试侧 `GITNEXUS_HOME` 隔离」——已实施（含第二个 describe），
+   直接设临时目录（未 stub `loadStoredEmbeddingConfig`）。
+2. **组 B**：B1 已完成 → 定性为 **merge 代码回归**（非既有残留），需代码级修复，单独排期。
+3. **P2（A1 懒加载）**：已随 `4cabd630c` 实施（独立加固 + 消除 ELF 崩溃）。
+4. **本 MD**：作为决策记录提交（`git add -f`）。
