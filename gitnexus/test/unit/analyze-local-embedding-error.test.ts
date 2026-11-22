@@ -228,8 +228,17 @@ describe('analyzeCommand local-embedding-runtime error handling', () => {
 });
 
 describe('analyzeCommand — prefix-runtime capability gate (#2372)', () => {
+  // Same ambient-config isolation as the describe above: the developer's
+  // ~/.gitnexus/config.json (e.g. an ollama provider) makes isHttpMode() true,
+  // which skips the local-embedding gate entirely, so these tests would never
+  // see the recoveryHint records / install call they assert on.
+  const originalHome = process.env.GITNEXUS_HOME;
+  let tempHome: string;
+
   beforeEach(() => {
     vi.resetModules();
+    tempHome = mkdtempSync(path.join(os.tmpdir(), 'gitnexus-embed-gate-home-'));
+    process.env.GITNEXUS_HOME = tempHome;
     runFullAnalysisMock.mockReset();
     isHfDownloadFailureMock.mockReset().mockReturnValue(false);
     resolveEmbeddingRuntimeMock.mockReset();
@@ -237,6 +246,12 @@ describe('analyzeCommand — prefix-runtime capability gate (#2372)', () => {
     installEmbeddingRuntimeMock.mockReset().mockResolvedValue(undefined);
     process.exitCode = undefined;
     process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim();
+  });
+
+  afterEach(() => {
+    rmSync(tempHome, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.GITNEXUS_HOME;
+    else process.env.GITNEXUS_HOME = originalHome;
   });
 
   it('does not spawn npm on darwin/x64 even when the stack is missing', async () => {

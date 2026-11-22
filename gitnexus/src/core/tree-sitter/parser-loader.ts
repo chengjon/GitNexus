@@ -1,4 +1,11 @@
-import Parser from 'tree-sitter';
+// Type-only import: importing this module must NOT load the tree-sitter native
+// binding. The value import is deferred to the async loadParser /
+// createParserForLanguage paths (dynamic import), so merely importing the CLI
+// (analyze.js → optional-grammars.js → parser-loader.js) does not touch the
+// native module. Under a platform/arch mismatch (e.g. a test mocking
+// darwin/x64 on Linux) a top-level value import crashes the whole import graph
+// with "invalid ELF header" before any gate can run.
+import type Parser from 'tree-sitter';
 import { SupportedLanguages } from 'gitnexus-shared';
 
 import { logger } from '../logger.js';
@@ -198,7 +205,13 @@ export const getLanguageGrammar = (
 
 let sharedParser: Parser | null = null;
 
-export const loadParser = async (): Promise<Parser> => (sharedParser ??= new Parser());
+export const loadParser = async (): Promise<Parser> => {
+  if (sharedParser === null) {
+    const { default: Parser } = await import('tree-sitter');
+    sharedParser = new Parser();
+  }
+  return sharedParser;
+};
 
 export const loadLanguage = async (
   language: SupportedLanguages,
@@ -212,6 +225,7 @@ export const createParserForLanguage = async (
   language: SupportedLanguages,
   filePath?: string,
 ): Promise<Parser> => {
+  const { default: Parser } = await import('tree-sitter');
   const parser = new Parser();
   parser.setLanguage(getLanguageGrammar(language, filePath));
   return parser;
