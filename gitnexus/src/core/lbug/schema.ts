@@ -641,7 +641,10 @@ export const STRUCTURAL_PAIR_DDL = `  FROM File TO Folder,
   FROM Route TO Process,
   FROM Tool TO Process,
   FROM Destination TO \`Property\`,
-  FROM BasicBlock TO BasicBlock`;
+  FROM BasicBlock TO BasicBlock,
+  FROM \`Function\` TO \`Static\`,
+  FROM \`Method\` TO \`Static\`,
+  FROM \`Constructor\` TO \`Static\``;
 
 /**
  * The generated half of the DDL — one `  FROM \`x\` TO \`y\`` line per pair of

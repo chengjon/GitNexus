@@ -85,7 +85,7 @@ const infrastructurePackages: Record<string, string> = {
   'core/ingestion/community-processor.ts:graphology':
     'Community detection runs after parsing and does not produce cached parser facts.',
   'core/ingestion/community-processor.ts:graphology-types': 'Type-only community graph contract.',
-  'core/ingestion/ast-cache.ts:package:lru-cache':
+  'core/ingestion/ast-cache.ts:lru-cache':
     'Parse artifact cache is not stored in the parsed tree; no content hash.',
 };
 const dynamicBoundaries: Record<string, string> = {

@@ -295,9 +295,12 @@ describe('LadybugDB Schema', () => {
       }
 
       // Object-literal / exported-binding owners (#1718): Const/Variable are
-      // HAS_METHOD sources for Method members only (never Constructor).
-      expect(RELATION_SCHEMA).toContain('FROM `Const` TO Method');
-      expect(RELATION_SCHEMA).toContain('FROM `Variable` TO Method');
+      // HAS_METHOD sources for Method members only (never Constructor). The
+      // generated bridge half declares these as `FROM \`Const\` TO \`Method\``
+      // (backticks on both labels), which the runtime parser sees as
+      // `Const|Method`.
+      expect(RELATION_SCHEMA).toContain('FROM `Const` TO `Method`');
+      expect(RELATION_SCHEMA).toContain('FROM `Variable` TO `Method`');
     });
 
     it('has all FROM/TO pairs needed for method ACCESSES edges to module values', () => {
@@ -306,8 +309,8 @@ describe('LadybugDB Schema', () => {
       // gitnexus-shared/src/scope-resolution/registries/field-registry.ts).
       // Property is covered above; Const/Variable are the module-scope value
       // labels reachable from a Method body.
-      expect(RELATION_SCHEMA).toContain('FROM Method TO `Const`');
-      expect(RELATION_SCHEMA).toContain('FROM Method TO `Variable`');
+      expect(RELATION_SCHEMA).toContain('FROM `Method` TO `Const`');
+      expect(RELATION_SCHEMA).toContain('FROM `Method` TO `Variable`');
     });
 
     it('declares every function-like callable → FieldRegistry value-target pair', () => {
