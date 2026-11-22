@@ -1678,8 +1678,6 @@ const analyzeCommandImpl = async (
   }
   const bar = new cliProgress.SingleBar(barOptions, cliProgress.Presets.shades_grey);
 
-  bar.start(100, 0, { phase: 'Initializing...' });
-
   // ── Progress-line coordination ────────────────────────────────────
   // cli-progress renders on stderr and the logger writes to fd 2 as well, so
   // a record emitted while the bar is up would splice onto the bar line and
@@ -1811,9 +1809,11 @@ const analyzeCommandImpl = async (
 
   // ── Run shared analysis orchestrator ───────────────────────────────
   try {
-    // Install the logger sink and stderr coordinator inside the try so the
-    // outer finally's stopProgressCoordination() is the single teardown path;
-    // if any setup above throws, neither is left installed.
+    // Start the bar and install its logger sink + stderr coordinator together,
+    // inside the try, so the outer finally's stopProgressCoordination() is the
+    // single teardown path and the bar is never active without coordination.
+    // If any setup above the try throws, neither is installed yet.
+    bar.start(100, 0, { phase: 'Initializing...' });
     restoreProgressLoggerSink = configureLoggerSink({
       destination: progressLogDestination,
     });
