@@ -2888,7 +2888,12 @@ export class LocalBackend {
       child.startsWith(parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`);
     const canonicalCwd = normalize(cwd);
     const cwdRoot = getGitRoot(cwd) ?? findGitRootByDotGit(cwd);
-    const canonicalRoot = cwdRoot ? normalize(getCanonicalRepoRoot(cwdRoot)) : null;
+    // `getCanonicalRepoRoot` maps a linked-worktree path onto the main
+    // checkout so cwd routing treats the two as the same repo. When it cannot
+    // resolve (git unavailable, or a checkout with no real .git), fall back to
+    // the git root `getGitRoot` reported — the fork's behavior — so the
+    // boundary/exact-match constraint below still has a usable anchor.
+    const canonicalRoot = cwdRoot ? normalize(getCanonicalRepoRoot(cwdRoot) ?? cwdRoot) : null;
     if (allowContaining) {
       const containing = candidates
         .map((handle) => ({ handle, repoPath: normalize(handle.repoPath) }))
