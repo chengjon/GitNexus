@@ -657,6 +657,19 @@ Small edits, deletions and renames use selective graph writes. To limit native s
 
 ## Troubleshooting
 
+### Analyze progress output is garbled, spliced, or the banner prints twice
+
+On machines with a lot of RAM, `analyze` re-execs itself to apply a RAM-aware
+heap cap. The child's progress bar and its logs both write to stderr, so log
+records used to splice onto the progress bar line, long lines were clipped, and
+the command banner could print twice. This is fixed in the current build: log
+records clear the bar line, print on their own line, and the bar redraws, and
+the respawn child skips the duplicate banner.
+
+If you still see this, you are running a stale CLI — rebuild a local checkout
+(`npm run build`) or upgrade (`npm install -g gitnexus@latest`). Declining the
+autopilot with `GITNEXUS_MEMORY=off` is not required for readable output.
+
 ### `Cannot destructure property 'package' of 'node.target' as it is null`
 
 This error comes from **npm 11.x's arborist** while installing a package with platform-filtered `optionalDependencies` (often via `npx`), before gitnexus code runs. Default `npm install` / `npx gitnexus` no longer fetch `@huggingface/transformers` or `onnxruntime-node`; those packages appear only if you run `gitnexus embeddings install` (or you still have a leftover 1.6.12 package-first tree). Other native optionals can still trigger the same arborist crash. GitNexus cannot catch it at runtime — use one of these workarounds:
