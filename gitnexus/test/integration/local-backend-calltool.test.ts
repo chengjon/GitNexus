@@ -361,7 +361,9 @@ withTestLbugDB(
         const result = await backend.callTool('tool_map', {});
         expect(result).not.toHaveProperty('error');
 
-        const tools = new Map(result.tools.map((tool: any) => [tool.name, tool]));
+        const tools = new Map<string, any>(
+          result.tools.map((tool: any): [string, any] => [tool.name, tool]),
+        );
         expect(tools.get('alpha')?.description).toBe('Calls chain A.');
         expect(tools.get('beta')?.description).toBe('Calls chain B.');
         expect(tools.get('alpha')?.flows).toEqual(['AlphaFlow']);

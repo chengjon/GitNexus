@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runDoctor, type DoctorDeps } from '../../src/cli/doctor.js';
+import { DEFAULT_EMBEDDING_CONFIG } from '../../src/core/embeddings/types.js';
 
 const tempDirs: string[] = [];
 
@@ -29,16 +30,9 @@ const baseDeps = (): DoctorDeps => ({
     exactScanLimit: 10_000,
   }),
   resolveEmbeddingConfig: () => ({
-    provider: 'huggingface',
-    embeddingUrl: undefined,
-    embeddingModel: 'Xenova/all-MiniLM-L6-v2',
-    embeddingApiKey: undefined,
-    embeddingDims: 384,
-    nodeLimit: 10_000,
-    batchSize: 16,
-    subBatchSize: 8,
-    threads: 4,
-    device: 'auto',
+    // Full current EmbeddingConfig shape (the interface outgrew the original
+    // hand-written fixture: modelId/maxInputChars/dimensions/... are required).
+    ...DEFAULT_EMBEDDING_CONFIG,
   }),
   isHttpMode: () => false,
   checkNative: () => ({ ok: true, binaryPath: '/native/lbugjs.node' }),

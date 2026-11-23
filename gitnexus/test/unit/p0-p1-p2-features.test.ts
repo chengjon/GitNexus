@@ -152,8 +152,8 @@ describe('index-status fields', () => {
   });
 
   it('stale_reasons concept: commit mismatch detected', () => {
-    const indexedCommit = 'abc123';
-    const currentCommit = 'def456';
+    const indexedCommit: string = 'abc123';
+    const currentCommit: string = 'def456';
     const reasons: string[] = [];
     if (indexedCommit !== currentCommit) reasons.push('commit_mismatch');
     expect(reasons).toEqual(['commit_mismatch']);
