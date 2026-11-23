@@ -1,6 +1,6 @@
 # CI flaky 治理方案（诊断报告 + 治理提案）
 
-> **状态**：待审核（本文档只做诊断与提案，未改动任何代码/workflow）
+> **状态**：已审核（2026-11-24，结论见 §9；本文档 §1-§8 为诊断与提案原文）
 > **排查窗口**：2026-11-20 ~ 2026-11-23（upstream `abhigyanpatwari/GitNexus` 最近 100 个已完成 run）
 > **排查方法**：systematic-debugging Phase 1-3（逐 run 下载日志归因，未跳过任何失败 run）
 > **证据留档**：`/tmp/opencode/log-*.txt`（15 个失败 run 的关键 job 日志）、`/tmp/opencode/failjob-details.json`（全部失败 job 明细）
@@ -129,3 +129,23 @@ P2（排期）: B2 perf 基线治理 + B3 sandbox bug + B4 windows flake + C2
 - 不给 ubuntu coverage 分片加自动 retry（会掩盖源码扫描守卫的真失败，守卫本身就是内容敏感设计）。
 - 不动 LadybugDB 锁机制相关测试（CI 日志证明它们没有失败）。
 - 不在本提案里改任何业务代码（literal-collectors、query-determinism-guard 等 11-20/23 的测试红是 PR 内容问题，由对应 PR 自行修复）。
+
+---
+
+## 9. 审核结论（2026-11-24）
+
+| 决策点 | 结论 |
+|---|---|
+| A1 镜像改名 | ✅ 落地为 PR [abhigyanpatwari/GitNexus#4048](https://github.com/abhigyanpatwari/GitNexus/pull/4048)（改名 `platform-evidence audit: {os} {n}/3` + 守卫期望集同 commit 更新，225 passed；PR 内含 6 个 required-check 新旧名原子替换清单）。交付经真 fork `chengjon/GitNexus-upstream-prs`（原 chengjon/GitNexus 非 fork 网络成员，跨仓 PR 不可用） |
+| B1 方向 | ❌ **取消**。取证推翻前提：fork 的 test_workflow_bench.py 是旧版；upstream 守卫已白名单 `(coverage-merge, sonar-coverage)` 原始 upload（"scanner's optional LCOV handoff"），workflow 的 continue-on-error 是刻意设计（保真实测试结果不被传输失败掩盖）。11-21 红潮 = upstream 短暂失配、已双侧自愈，无物可修 |
+| B2-④ perf 跳过 | P2 排期，暂不动 |
+| B3 / B4 issue | ✅ 已开：[#4046](https://github.com/abhigyanpatwari/GitNexus/issues/4046)（SandboxError 矛盾报错）、[#4047](https://github.com/abhigyanpatwari/GitNexus/issues/4047)（Windows 双 flake） |
+| C1 重跑纪律 | ✅ **团队约定先**：红了先同-SHA re-run 一次再动手；转绿=真 flake 记录，仍红=确定性失败按根因处理。攒 2-4 周真 flake 率数据后再议自动化 |
+| 配套（fork 侧） | workflow/守卫对已同步 upstream（`8eb1a2c3a`：ci-tests.yml + ci.yml + test_workflow_bench.py），消除下次 upstream 合并触发旧守卫误红的隐患 |
+
+### C1 重跑纪律（团队约定，v1）
+
+1. CI 红 → 先同-SHA re-run 一次（attempt 2），不做任何代码改动。
+2. 转绿 → 记录为真 flake（测试名 + run id），累计真 flake 率。
+3. 仍红 → 按确定性失败处理：跑 systematic-debugging Phase 1（归因）后再修。
+4. 镜像门禁（`platform-evidence audit:*`）红 ≠ 平台分片红：先看 `test-completeness` 与其上游生产者 job。
