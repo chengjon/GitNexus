@@ -8396,11 +8396,15 @@ export class LocalBackend {
             error: `Target '${missing}' not found`,
             target: { name: target },
             direction,
-            // #3074 follow-up: do not ship a normal-shaped 0/UNKNOWN blast radius
-            // alongside the error — it reads as a real "nothing depends on this"
-            // answer. The enrichment contract keeps the count at 0 here so the
-            // recovery guidance (suggestion/next_actions) stays actionable.
-            impactedCount: null,
+            // Fork enrichment contract (deliberate divergence from upstream's
+            // #3074 `null`): this not-found envelope already carries `error`,
+            // so the miss cannot be misread as a measured "nothing depends on
+            // this" — the count stays 0 to keep the recovery guidance
+            // (suggestion/next_actions) actionable. Upstream's `null`
+            // UNDETERMINED semantics remain on the ambiguous path (#2687),
+            // which has no `error` field and would read a numeric zero as a
+            // false-safe all-clear.
+            impactedCount: 0,
             risk: 'UNKNOWN',
             suggestion:
               'Run query to find candidate symbols or execution flows, inspect the candidate with context, then retry impact with target_uid.',
