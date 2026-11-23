@@ -517,7 +517,11 @@ withTestLbugDB(
         // impactedCount/risk/suggestion/next_actions (no `status` field on the
         // not-found path — only `ambiguous` carries `status: 'ambiguous'`).
         expect(result.error).toBe("Target 'nonexistent_symbol_xyz_999' not found");
-        expect(result.impactedCount).toBe(0);
+        // Upstream #3074/#3084 contract: not-found is UNDETERMINED (`null`),
+        // not a measured zero — even though the fork's recovery-guidance
+        // enrichment (suggestion/next_actions below) is present on this
+        // envelope.
+        expect(result.impactedCount).toBeNull();
         expect(result.risk).toBe('UNKNOWN');
         expect(result.suggestion).toContain('query');
         expect(result.suggestion).toContain('context');

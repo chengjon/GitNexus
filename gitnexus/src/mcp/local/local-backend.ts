@@ -8396,15 +8396,15 @@ export class LocalBackend {
             error: `Target '${missing}' not found`,
             target: { name: target },
             direction,
-            // Fork enrichment contract (deliberate divergence from upstream's
-            // #3074 `null`): this not-found envelope already carries `error`,
-            // so the miss cannot be misread as a measured "nothing depends on
-            // this" — the count stays 0 to keep the recovery guidance
-            // (suggestion/next_actions) actionable. Upstream's `null`
-            // UNDETERMINED semantics remain on the ambiguous path (#2687),
-            // which has no `error` field and would read a numeric zero as a
-            // false-safe all-clear.
-            impactedCount: 0,
+            // Upstream #3074/#3084 contract (enforced by
+            // test/unit/calltool-dispatch.test.ts across callgraph and pdg
+            // modes): a not-found target is UNDETERMINED, not a measured
+            // zero — `0` would read as a confident all-clear to consumers
+            // testing `impactedCount === 0`. The fork keeps its recovery
+            // guidance enrichment (suggestion/next_actions) on top of the
+            // upstream envelope; the ambiguous path (#2687) carries the same
+            // `null` UNDETERMINED semantics.
+            impactedCount: null,
             risk: 'UNKNOWN',
             suggestion:
               'Run query to find candidate symbols or execution flows, inspect the candidate with context, then retry impact with target_uid.',
