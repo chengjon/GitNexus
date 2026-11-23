@@ -306,6 +306,7 @@ import {
   candidateTestsOf,
   readWorkFile,
   runCoverage,
+  writeWorkFile,
   type CoverageTest,
   type CoverageWorkFile,
 } from './path-coverage/run-coverage.js';
@@ -1963,7 +1964,10 @@ function mergeCoverage(
   );
   const work = mergeCoverageSlices(assignment, reported);
   ctx.log(`plan: layer 1 from ${reported.length} of ${first.of} coverage slices`);
-  writeJson(ctx.layout.coverage, work);
+  // The merged coverage can exceed the V8 single-string limit (~512M chars)
+  // with real repo slices — write it as a multipart work file (see
+  // writeWorkFile); readWorkFile reassembles it transparently downstream.
+  writeWorkFile(ctx.layout.coverage, work);
   return work;
 }
 

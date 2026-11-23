@@ -90,7 +90,7 @@ import {
   type Eligibility,
   type RunMode,
 } from '../types.js';
-import { ascending, byText, sortedUnique, toPosixSeparators } from '../util.js';
+import { ascending, byText, sortedUnique, toPosixSeparators, writeJson } from '../util.js';
 import { findCandidates, type CandidateResult, type CandidateTest } from './candidates.js';
 import { copyBuildOutput, partitionFiles, sequentialMatcherFor } from './partitions.js';
 import { fixtureCapturePlugin } from './fixture-plugin.js';
@@ -451,7 +451,14 @@ export function buildWorkFile(input: WorkFileInput): CoverageWorkFile {
   };
 }
 
-/** Reads a work file written by this module; a wrong schema version throws. */
+/**
+ * Reads a work file written by this module; a wrong schema version throws.
+ *
+ * Work files written by {@link writeWorkFile} split `tests[]` — the only array
+ * that grows with the repo's test count — into bounded part files beside the
+ * head (see {@link writeWorkFile} for why). Legacy single-file work files and
+ * hand-written JSON still read as-is.
+ */
 export function readWorkFile(file: string): CoverageWorkFile {
   const data = readJsonFile(file);
   const version =
@@ -461,7 +468,71 @@ export function readWorkFile(file: string): CoverageWorkFile {
   if (version !== WORK_FILE_SCHEMA_VERSION) {
     throw new Error(`coverage: ${file} is not a version ${WORK_FILE_SCHEMA_VERSION} work file`);
   }
-  return data as CoverageWorkFile;
+  const head = data as CoverageWorkFile & { testParts?: unknown; testCount?: unknown };
+  if (head.testParts === undefined) return head as CoverageWorkFile; // legacy single file
+  const parts = head.testParts;
+  if (typeof parts !== 'number' || !Number.isInteger(parts) || parts < 1) {
+    throw new Error(`coverage: ${file} has a malformed testParts marker ${String(parts)}`);
+  }
+  const tests: CoverageTest[] = [];
+  for (let part = 0; part < parts; part += 1) {
+    const piece = readJsonFile(workPartFile(file, part)) as {
+      schemaVersion?: unknown;
+      part?: unknown;
+      tests?: unknown;
+    };
+    if (piece.schemaVersion !== WORK_FILE_SCHEMA_VERSION) {
+      throw new Error(
+        `coverage: ${workPartFile(file, part)} is not a version ${WORK_FILE_SCHEMA_VERSION} work file`,
+      );
+    }
+    if (piece.part !== part || !Array.isArray(piece.tests)) {
+      throw new Error(`coverage: ${workPartFile(file, part)} is not work-file test part ${part}`);
+    }
+    tests.push(...(piece.tests as CoverageTest[]));
+  }
+  if (head.testCount !== undefined && tests.length !== head.testCount) {
+    throw new Error(
+      `coverage: ${file} declares ${String(head.testCount)} tests but its parts hold ${tests.length}`,
+    );
+  }
+  const { testParts: _parts, testCount: _count, ...rest } = head;
+  return { ...(rest as CoverageWorkFile), tests };
+}
+
+/** The test-part file for part `index` beside the work file `file`. */
+export function workPartFile(file: string, index: number): string {
+  return file.replace(/\.json$/, '') + `.tests-${index}.json`;
+}
+
+/**
+ * Tests per part file. Worst case ~20KB/test serialized → ~200MB per part, a
+ * 2.5x margin under V8's ~512M-char single-string ceiling that killed the
+ * first scheduled scenario-map Plan run (2026-11-23, `Invalid string length`).
+ */
+const WORK_PART_TESTS = 10_000;
+
+/**
+ * Writes a work file, splitting `tests[]` into bounded part files beside the
+ * head: `<file>` holds everything else plus `testParts`/`testCount` markers,
+ * `<file-without-.json>.tests-<n>.json` holds each ≤10k-test slice. The whole
+ * document is never built as one string — `JSON.stringify` on the merged
+ * ~1.2GB Plan-stage work file dies at V8's ~512M-char string limit.
+ *
+ * {@link readWorkFile} reassembles the exact object; legacy single-file work
+ * files (including hand-written fixtures in older shards) still read as-is.
+ */
+export function writeWorkFile(file: string, work: CoverageWorkFile): void {
+  const { tests, ...head } = work;
+  const parts = Math.max(1, Math.ceil(tests.length / WORK_PART_TESTS));
+  writeJson(file, { ...head, testParts: parts, testCount: tests.length });
+  for (let part = 0; part < parts; part += 1) {
+    writeJson(workPartFile(file, part), {
+      schemaVersion: WORK_FILE_SCHEMA_VERSION,
+      part,
+      tests: tests.slice(part * WORK_PART_TESTS, (part + 1) * WORK_PART_TESTS),
+    });
+  }
 }
 
 // ── Candidates ─────────────────────────────────────────────────────────────
@@ -633,7 +704,7 @@ export async function runCoverage(options: CoverageOptions): Promise<CoverageRun
       unhandledErrors: [],
     });
     work.fixtureCaptureVersion = 2;
-    writeFileSync(layout.workFile, JSON.stringify(work));
+    writeWorkFile(layout.workFile, work);
     return { work, workFile: layout.workFile, wallClockMs: 0 };
   }
   const started = performance.now();
@@ -767,7 +838,7 @@ export async function runCoverage(options: CoverageOptions): Promise<CoverageRun
   const wallClockMs = Math.round(performance.now() - started);
   work.fixtureCaptureVersion = 2;
   work.fixtureSources = capturedFixtureSources(raws);
-  writeFileSync(layout.workFile, JSON.stringify(work));
+  writeWorkFile(layout.workFile, work);
   return { work, workFile: layout.workFile, wallClockMs };
 }
 

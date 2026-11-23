@@ -252,7 +252,7 @@ jobs:
             ${{ runner.temp }}/scenario-map/consolidation.json
             ${{ runner.temp }}/scenario-map/consolidation.html
             ${{ runner.temp }}/scenario-map/fixtures.json
-            ${{ runner.temp }}/scenario-map/coverage/coverage.json
+            ${{ runner.temp }}/scenario-map/coverage/coverage*.json
           if-no-files-found: error
           retention-days: 14
       - name: Name the plan artifact
