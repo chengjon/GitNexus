@@ -7721,6 +7721,31 @@ export class LocalBackend {
       risk = 'unknown';
     }
 
+    // Risk rationale. Restored verbatim from the fork side of merge 436ec6f1c:
+    // its conflict resolution dropped the field wiring while the P2 3.5/3.6
+    // response contract tests (p0-p1-p2-mcp-response) stayed in the tree.
+    let riskRationale: string[] = [];
+    try {
+      const { generateRiskRationale } = await import('../../core/risk-rationale.js');
+      const rr = generateRiskRationale(risk, [
+        {
+          name: 'affected_processes',
+          value: processCount,
+          threshold: 0,
+          breached: processCount > 0,
+        },
+        {
+          name: 'affected_processes_high',
+          value: processCount,
+          threshold: 5,
+          breached: processCount > 5,
+        },
+      ]);
+      riskRationale = rr.rationale;
+    } catch {
+      /* best-effort */
+    }
+
     // A repo-wide diff can touch thousands of symbols, and the whole array goes
     // into one MCP payload (the CLI slices with --limit; an MCP client has no
     // such control). Cap the LISTING, never the counts: `changed_count` stays
@@ -7753,6 +7778,7 @@ export class LocalBackend {
         ...(brokenCalls.length > 0 && { incompatible_call_count: brokenCalls.length }),
         ...(keywordCheck && { incompatible_calls_checked: keywordCheck.complete }),
       },
+      risk_rationale: riskRationale,
       changed_symbols: listedSymbols,
       ...(keywordCheck?.skipped.length && {
         incompatible_call_skips: keywordCheck.skipped.slice(0, DETECT_CHANGES_MAX_LISTED_SYMBOLS),
@@ -10218,6 +10244,7 @@ export class LocalBackend {
       direction,
       impactedCount: impacted.length,
       risk,
+      risk_rationale: impactRationale,
       riskSharedAxes,
       riskScale,
       ...(omittedNameOnlyCalls > 0
