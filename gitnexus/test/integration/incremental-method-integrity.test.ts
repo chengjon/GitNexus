@@ -18,6 +18,14 @@ import { getStoragePaths } from '../../src/storage/repo-manager.js';
 import { commitAll, initGitRepo } from '../helpers/temp-git-repo.js';
 import { createTempDir } from '../helpers/test-db.js';
 
+// Pin the embedding width before any import loads schema.js — same
+// module-load-vs-runtime divergence fix as embedding-chunking-lifecycle
+// (hoisted env read wins in both schema.js and the http client's readConfig,
+// so fixture/DDL/expected agree on machines with a stored embeddingDims).
+vi.hoisted(() => {
+  process.env.GITNEXUS_EMBEDDING_DIMS ??= '384';
+});
+
 type SymbolTuple = {
   uid: string;
   name: string;

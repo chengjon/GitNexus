@@ -12,6 +12,19 @@ import { EmbeddingSourceReader } from '../../src/core/embeddings/source-reader.j
 import { searchFTSFromLbug } from '../../src/core/search/bm25-index.js';
 import { createTempDir } from '../helpers/test-db.js';
 
+// Pin the embedding width before any import loads schema.js: EMBEDDING_DIMS
+// and the http client's expected width both read GITNEXUS_EMBEDDING_DIMS at
+// MODULE LOAD from `env ?? stored config`, and vi.stubEnv (runtime) cannot
+// reach an already-frozen constant. On a machine whose real GITNEXUS_HOME
+// stores embeddingDims (e.g. 1024 for a local qwen model), the frozen DDL/
+// fixture width (1024) would diverge from the runtime-expected width under
+// the stubbed fresh home (384 default) and every analyze here would die in
+// http-client's dimension check. Hoisted code runs before imports, so the
+// env branch wins in both readers and everything agrees — on any machine.
+vi.hoisted(() => {
+  process.env.GITNEXUS_EMBEDDING_DIMS ??= '384';
+});
+
 afterEach(() => vi.unstubAllEnvs());
 
 it('persists policy changes, source ranges and complete replacement rows through analyze (#702)', async () => {
