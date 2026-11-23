@@ -16,9 +16,11 @@
  */
 
 import { writeSync } from 'node:fs';
+import v8 from 'node:v8';
 import { LocalBackend, VALID_NODE_LABELS } from '../mcp/local/local-backend.js';
 import { cliErrorKey, cliWarnKey } from './cli-message.js';
 import { formatDetectChangesResult } from './detect-changes-format.js';
+import { getMaxFileSizeBytes } from '../core/ingestion/utils/max-file-size.js';
 import {
   ImpactBudgetExceededError,
   shapeImpactForAgent,
@@ -477,6 +479,12 @@ export async function detectChangesCommand(options?: {
   limit?: string;
 }): Promise<void> {
   const limit = parseLimit(options?.limit);
+  // Post-mortem anchor (factor-pool runaway, 2026-11-23): attribute a runaway
+  // process to its PID plus the heap/file-size budget it ran with.
+  const heapLimitMb = Math.round(v8.getHeapStatistics().heap_size_limit / (1024 * 1024));
+  process.stderr.write(
+    `gitnexus detect-changes pid=${process.pid} heap=${heapLimitMb}MB fileCap=${Math.round(getMaxFileSizeBytes() / 1024)}KB\n`,
+  );
   const backend = await getBackend();
   try {
     const result = await backend.callTool('detect_changes', {

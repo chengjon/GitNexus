@@ -35,6 +35,7 @@ import {
   type PythonModuleFiles,
 } from './signature-images.js';
 import { getGitRoot } from '../../../../storage/git.js';
+import { getMaxFileSizeBytes } from '../../utils/max-file-size.js';
 import { isPythonSourceFile } from './query-provider.js';
 import { compareCodeUnits } from '../../../../lib/utils.js';
 import { nodeRange, rangeKey } from '../rename-tree-sitter.js';
@@ -57,6 +58,10 @@ const maxSourceBytes = 64 * 1024 * 1024;
 const maxEndpointReads = 256;
 const maxExportHops = 4;
 const maxAliasHops = 4;
+// Mirrors the image cap in signature-images.ts (walker policy), so skip reasons
+// report the effective limit instead of a stale hard-coded number.
+const unreadableSource = (): string =>
+  `Source unreadable or exceeds the ${Math.round(getMaxFileSizeBytes() / 1024)}KB file limit`;
 type Node = Parser.SyntaxNode;
 type SignatureChange = {
   target: CallCompatibilityTarget;
@@ -825,7 +830,7 @@ export async function findBrokenKeywordCalls(
       })`,
     );
   const parse = (file: string, source: Image) => {
-    if (source === undefined) skip(file, 'Source unreadable or exceeds the 4 MiB file limit');
+    if (source === undefined) skip(file, unreadableSource());
     if (source == null) return;
     let tree: Parser.Tree;
     try {
@@ -1219,7 +1224,7 @@ export async function findBrokenKeywordCalls(
   )) {
     scanned++;
     if (text === undefined) {
-      skip(file, 'Source unreadable or exceeds the 4 MiB file limit');
+      skip(file, unreadableSource());
       continue;
     }
     if (!text) continue;

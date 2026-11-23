@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getProviderForFile } from '../../src/core/ingestion/languages/index.js';
 import * as signatureImages from '../../src/core/ingestion/languages/python/signature-images.js';
+import { getMaxFileSizeBytes } from '../../src/core/ingestion/utils/max-file-size.js';
 import { commitAll, initGitRepo } from '../helpers/temp-git-repo.js';
 
 // Pass-through by default; one test replaces a single caller-image read.
@@ -620,10 +621,33 @@ it.each(['all', 'staged', 'compare'])(
     expect(result).toMatchObject({
       complete: false,
       findings: [{ filePath: 'use.py' }],
-      skipped: [{ filePath: 'big.py', reason: expect.stringContaining('4 MiB') }],
+      skipped: [
+        {
+          filePath: 'big.py',
+          reason: expect.stringContaining(`${getMaxFileSizeBytes() / 1024}KB`),
+        },
+      ],
     });
   },
 );
+
+it('skips callers over the walker file-size limit even below the legacy 4 MiB cap', async () => {
+  await writeModel('');
+  await fs.writeFile(path.join(dir, 'big.py'), '#' + 'x'.repeat(600 * 1024));
+  execFileSync('git', ['add', '.'], { cwd: dir });
+  const calls = async () => [
+    ...(await incoming()),
+    { target: target.id, filePath: 'big.py', relationType: 'CALLS' as const },
+  ];
+  const result = await findBrokenKeywordCalls(dir, 'all', undefined, [target], calls);
+  expect(result).toMatchObject({
+    complete: false,
+    findings: [{ filePath: 'use.py' }],
+    skipped: [
+      { filePath: 'big.py', reason: expect.stringContaining(`${getMaxFileSizeBytes() / 1024}KB`) },
+    ],
+  });
+});
 
 it('reports syntax-error, wildcard, and dense callers without asserting a clean check', async () => {
   await writeModel('');

@@ -4,11 +4,15 @@ import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { readSafeBounded } from '../../../group/extractors/fs-utils.js';
+import { getMaxFileSizeBytes } from '../../utils/max-file-size.js';
 import { isPythonSourceFile } from './query-provider.js';
 
 const run = promisify(execFile);
 const timeout = 15_000;
-const sourceLimit = 4 * 1024 * 1024;
+// Checker images honor the walker's file-size policy (GITNEXUS_MAX_FILE_SIZE,
+// default 512KB): any file the walker refuses to index is also refused here,
+// bounding per-file parse/analysis cost by the same operator-facing knob.
+const sourceLimit = (): number => getMaxFileSizeBytes();
 // A missing file is an ordinary addition/deletion. An unavailable file leaves
 // the compatibility check incomplete in every image.
 export type Image = string | null | undefined;
@@ -19,7 +23,7 @@ export async function readImage(
   file: string,
 ): Promise<Image> {
   if (rev === undefined) {
-    const text = await readSafeBounded(cwd, file, sourceLimit);
+    const text = await readSafeBounded(cwd, file, sourceLimit());
     if (text !== null) return text;
     const relative = path.relative(cwd, path.resolve(cwd, file));
     if (relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
@@ -35,7 +39,7 @@ export async function readImage(
       await run('git', ['cat-file', 'blob', rev + ':' + file], {
         cwd,
         timeout,
-        maxBuffer: sourceLimit,
+        maxBuffer: sourceLimit(),
         env: { ...process.env, LC_ALL: 'C' },
       })
     ).stdout;
@@ -125,7 +129,7 @@ export async function* callerImages(
     const missing: string[] = [];
     for (const [index, file] of regular.entries()) {
       const header = /^([a-f\d]+) blob (\d+)$/.exec(lines[index]);
-      if (header && Number(header[2]) <= sourceLimit)
+      if (header && Number(header[2]) <= sourceLimit())
         headers.set(file, { oid: header[1], bytes: Number(header[2]) });
       else if (lines[index]?.endsWith(' missing')) missing.push(file);
     }
@@ -145,7 +149,7 @@ export async function* callerImages(
       let bytes = 0;
       while (index < group.length) {
         const header = headers.get(group[index]);
-        if (!header || bytes + header.bytes > sourceLimit) break;
+        if (!header || bytes + header.bytes > sourceLimit()) break;
         batch.push({ file: group[index++], ...header });
         bytes += header.bytes;
       }

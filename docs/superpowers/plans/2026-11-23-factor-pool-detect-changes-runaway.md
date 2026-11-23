@@ -2,6 +2,8 @@
 
 > 状态：**调查记录**。用户报告 `gitnexus` 全量检测在 `/opt/claude/factor-pool` 本机 OOM。
 > 结论：**未发现任何内核 OOM 或 V8 堆 OOM 记录**；实际抓到的是 `detect-changes --scope all` 的 **CPU 死循环**（不是内存耗尽）。已终止该进程，当前构建下不可复现。
+>
+> **第二轮（2026-11-23 晚）**：完成 signature-changes.ts 全部 AST 遍历审计 —— **无无界路径**（§8）；同日核实报告的「V8 堆 OOM 定案」与「同源推断」被五项证据**推翻**（§9）；按「无根因」条款转防御，三项防御已落地/提案（§10）。
 
 ## 1. 现象
 
@@ -62,5 +64,50 @@ cwd = /opt/claude/factor-pool
 
 1. **本机的「OOM」不是内核 OOM，也不是 detect-changes 的内存耗尽**；抓到的是 `detect-changes --scope all` 的单线程 CPU 死循环（tree-sitter `Type()` 热路径），已终止。
 2. 当前构建下 `--scope all` 正常，**死循环不可复现**（疑似与进程启动时的仓库/registry 状态相关；`~/.gitnexus/registry.json` mtime 为 2026-11-22 17:31）。
-3. 待补：**用户看到的 OOM 原文**，用于确认是 detect-changes 路径还是 analyze 路径。
+3. 待补：**用户看到的 OOM 原文**，用于确认是 detect-changes 路径还是 analyze 路径。→ *已由第二轮 §9 处理：OOM 原文叙事被否定，见 §9。*
 4. 若确为 analyze：建议给 `.wslconfig` 提内存，或用 `GITNEXUS_MEMORY=off` / 显式 `NODE_OPTIONS=--max-old-space-size`、`GITNEXUS_WORKER_POOL_SIZE` 压低总提交量（58GB → 低于 52GB）。
+
+## 8. 第二轮：signature-changes.ts 全量 AST 遍历审计（无界路径排查）
+
+**结论：未发现任何无界路径。** 对 `signature-changes.ts`（1551 行）全文及其调用的全部 helper 逐一审计，每条遍历要么结构上线性、要么带环检测/预算封顶：
+
+| 遍历 / 循环 | 位置 | 界 |
+|---|---|---|
+| `definitionIndex` → `walkPythonScopes` | type-imports.ts:157 | 显式栈，每节点入栈一次，线性，不回读 `.parent` |
+| `defaultMetaclass` | sig-changes:241 | `proven` memo + 深度>32 截断；scope 链构造上无环 |
+| `fingerprintOf`（预算块，用户指定豁免） | sig-changes:370-413 | budget+memo+深度≤64 |
+| `endpoint` | sig-changes:875 | hops≤4（maxExportHops）、endpointReads≤256、definitionBytes≤64MiB |
+| `exportResolver`（含 loadFile→loadExport） | sig-changes:598 | `seen` 环检测（(file,name) 键）；moduleReads≤4096、callerBytes≤64MiB、extractions≤256、remainingNodes≤8×12000 |
+| `importDecoder` | sig-changes | ≤4096 次（maxDecodedImports），按语句 memo |
+| `scopeOf` / `pythonNameResolver` | type-imports.ts | parent/outer 链爬升 memo 化，链构造上无环 |
+| `lookupLexicalName` | gitnexus-shared name-claims.ts:271 | 两个 while 均有 visited-set + skippedIds |
+| `literalKeys` / `resolveCall` / `pythonDottedName` 括号剥离 | 各处 | 严格单调下降（dotted name limit 32） |
+| `followAlias` / `resolveSpelling` | sig-changes | hops≤4（maxAliasHops） |
+| `tooDenseForScopeExtraction` | sig-changes:735 | descendantCount 门（12k/64k）+ walk 带 `'stop'` |
+| `mayImportLocalModule` | sig-changes | 单次 descendantsOfType |
+| `callerImages` / `definitionImages` | signature-images.ts | 下标严格推进；git execFile 15s 超时 + maxBuffer；`guarded()` 包裹 |
+| `splitImportStatement` / interpret.ts / import-file-index.ts 字符串扫描 | 各处 | `while(slash!==-1)` 线性 |
+| `pythonFileExportsName` | import-target.ts:198 | nextDefinition 游标单调 |
+| ScopeExtractor.extract | scope-extractor.ts | 线性趟；栈弹出台摊还线性；scope 爬升构造上无环（源码注释明示） |
+
+另确认：**解析已有超时保护** —— checker 的 `parse()` 由 `parseSourceSafe` 包裹（sig-changes:827-843），`ParseTimeoutError` → `skip(file, 'Python parse timed out')`。
+
+## 9. 第二轮：对同日核实报告的勘误（五项证据）
+
+核实报告（[verification](./2026-11-23-factor-pool-detect-changes-runaway-verification.md)）§2.1-2.2「V8 堆 OOM 定案」与 §3「PID 990707 与 01:04 会话同源」被以下证据**推翻**：
+
+1. **时间线修正**：PID 990707 启动时间 ≈ **2026-11-22 16:05±**（01:07 观测点 − 9h+ ELAPSED），**不是凌晨 1 点前后**。核实报告 §3 表内「9h+ → 启动 ≈ 凌晨 1 点前后」为算术错误；进程早于 01:04 会话约 9 小时，「同源残留」推断不成立。
+2. **512MB 复现成功**：仅给 `--max-old-space-size=512` 复跑 `detect-changes --scope all --repo .` → **EXIT=0 正常完成**。与「默认 4.29GB 首次 OOM、提额 8GB 仍 OOM」（核实报告 §2.1）直接矛盾 —— 若该路径会堆耗尽，512MB 不可能跑通。OOM 叙事否定。
+3. **转录考古否定**：在 opencode 会话转录中检索 V8 heap OOM 原文（"heap out of memory"/"JavaScript heap" 等）→ **未找到任何匹配**。核实报告 §2.1「原文留存于会话转录」无证据支撑，§2.3 的解释随之失去依托。
+4. **MCP 存活矛盾**：`gitnexus mcp` 常驻进程（PID 228907）自 **2026-11-21 19:59:45** 起运行，贯穿整个事件窗口（11-22 16:05 → 11-23 01:07+）且至今存活。注：V8 堆 OOM 属进程内故障，MCP 存活不单独反驳进程级 OOM，但与「机器内存告急」的整体叙事矛盾，并与第 2、3 项共同否定 OOM 定案。
+5. **解析超时覆盖确认**：见 §8 末条 —— 解析路径已有超时保护，不是失控点。
+
+**修正后结论**：回到原调查 §7.1 —— 抓到的是 `detect-changes --scope all` 的单线程 CPU 死循环；根因未复现、未定位；OOM 定案作废。核实报告 §7.3「待补 OOM 原文」就此关闭（答案：不存在该原文）。
+
+## 10. 第二轮：防御落地（本轮提交）
+
+审计走「无根因」条款（systematic-debugging：穷尽排查无果 → 转防御 + 监控），三项措施：
+
+1. **checker 文件大小上限对齐 walker**（已落地）：`signature-images.ts` 的 `sourceLimit` 从硬编码 4MiB 改为 `getMaxFileSizeBytes()`（`GITNEXUS_MAX_FILE_SIZE`（KB），默认 **512KB**，超 tree-sitter 上限自动 clamp）—— 任何 walker 拒绝索引的文件，checker 同样拒绝，解析/分析成本与索引策略同界。两处 skip 消息（sig-changes:828/:1222）改为动态 `unreadableSource()`。测试：更新 3 处 oversized 断言 + 新增 600KB 回归测试（旧代码下该文件被正常解析 → 新代码跳过）。
+2. **detect-changes 启动打印**（已落地）：`detectChangesCommand`（src/cli/tool.ts）启动时向 stderr 输出一行 `gitnexus detect-changes pid=N heap=XMB fileCap=YKB`，事后 PID 归因不再依赖 ps 考古。MCP 路径（local-backend 直接 `callTool`）不经过该命令，stderr 卫生不受影响（detect-changes-stderr.test.ts 仍全绿）。
+3. **Worker 隔离提案**（未实施，建议单独开 issue）：`detect_changes` 在 local-backend.ts:7580-7604 **进程内**直跑 `checkCallCompatibility` → `findBrokenKeywordCalls`，无 worker、无 wall-clock 预算 —— 单线程 CPU 失控会无限楔死 CLI（本次事件形态）。提案：将 `checkCallCompatibility` 移入 worker_threads/子进程 + 30-60s 硬超时，超时 → `complete:false` + skip 理由。前置评估：tree-sitter napi parser 当前在主线程创建，跨 worker 需重建；LBUG 查询结果已物化为数组，序列化边界清晰。收益（彻底免疫 CPU 失控）远大于成本，建议下一轮落实。
