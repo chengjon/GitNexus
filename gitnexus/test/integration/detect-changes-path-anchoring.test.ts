@@ -26,7 +26,11 @@ import { withTestLbugDB } from '../helpers/test-indexed-db.js';
 import { createTempDirPool } from '../helpers/temp-dir-pool.js';
 import { commitAll, initGitRepo } from '../helpers/temp-git-repo.js';
 
-vi.mock('../../src/storage/repo-manager.js', () => ({
+vi.mock('../../src/storage/repo-manager.js', async (importOriginal) => ({
+  // Real module first: canonicalizePath (and any future pure helpers) stay
+  // genuine — the code under test calls it on every registry comparison, and
+  // a missing mock export here used to break this whole file.
+  ...(await importOriginal<object>()),
   listRegisteredRepos: vi.fn().mockResolvedValue([]),
   cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
   findSiblingClones: vi.fn().mockResolvedValue([]),
