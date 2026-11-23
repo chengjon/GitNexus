@@ -7583,9 +7583,9 @@ export class LocalBackend {
     if (targetsByChecker.size) {
       try {
         const unavailable = await this.fullSourceUnavailable(repo);
-        const { checkCallCompatibility } =
-          await import('../../core/analysis/call-compatibility.js');
-        keywordCheck = await checkCallCompatibility(
+        const { checkCallCompatibilityInWorker } =
+          await import('../../core/analysis/call-compatibility-worker.js');
+        keywordCheck = await checkCallCompatibilityInWorker(
           repo.lbugPath,
           { directory: diffCwd, scope, base: params.base_ref, files: fileDiffs },
           targetsByChecker,

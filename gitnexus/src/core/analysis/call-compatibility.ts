@@ -1,5 +1,6 @@
 import type {
   BrokenKeywordCall,
+  CallCompatibilityCaller,
   CallCompatibilityFile,
   CallCompatibilityProvider,
   CallCompatibilityTarget,
@@ -14,6 +15,41 @@ export interface CallCompatibilityReport {
   skipped: { filePath?: string; reason: string }[];
 }
 
+/**
+ * Resolves caller rows for one compatibility check. Returns `null` when any
+ * batch failed (the check then degrades to `caller-query-failed`), matching
+ * the in-process `mapConcurrent` semantics — so a worker RPC can stand in for
+ * the direct database call without changing observable behavior.
+ */
+export type CallCompatibilityCallerQuery = (
+  ids: string[],
+  relationTypes: readonly string[],
+) => Promise<CallCompatibilityCaller[] | null>;
+
+export async function queryCompatibilityCallers(
+  graph: string,
+  ids: string[],
+  relationTypes: readonly string[],
+  onError: (context: string, error: unknown) => void,
+): Promise<CallCompatibilityCaller[] | null> {
+  const batches = await mapConcurrent(
+    chunk(ids, LBUG_ID_PROBE_BATCH_SIZE),
+    (batchIds) =>
+      executeParameterized(
+        graph,
+        `
+              MATCH (caller)-[r:CodeRelation]->(target)
+              WHERE target.id IN $ids AND r.type IN $relationTypes
+              RETURN DISTINCT target.id AS target, caller.filePath AS filePath, r.type AS relationType
+            `,
+        { ids: batchIds, relationTypes },
+      ),
+    { onError: (error) => onError('detect-changes:callers', error) },
+  );
+  if (batches.includes(undefined)) return null;
+  return batches.flatMap((rows) => rows ?? []);
+}
+
 export async function checkCallCompatibility(
   graph: string,
   image: {
@@ -25,6 +61,8 @@ export async function checkCallCompatibility(
   groups: ReadonlyMap<CallCompatibilityProvider, CallCompatibilityTarget[]>,
   onError: (context: string, error: unknown) => void,
   callerSourceUnavailable?: string,
+  queryCallers: CallCompatibilityCallerQuery = (ids, relationTypes) =>
+    queryCompatibilityCallers(graph, ids, relationTypes, onError),
 ): Promise<CallCompatibilityReport> {
   const report: CallCompatibilityReport = { findings: [], complete: true, skipped: [] };
   const unavailable = new Error('Caller source unavailable');
@@ -39,25 +77,13 @@ export async function checkCallCompatibility(
           // A declaration-only comparison uses the selected diff images. Enforce
           // retention before a changed signature can trigger any caller reads.
           if (callerSourceUnavailable) throw unavailable;
-          const batches = await mapConcurrent(
-            chunk(targetIds, LBUG_ID_PROBE_BATCH_SIZE),
-            (ids) =>
-              executeParameterized(
-                graph,
-                `
-              MATCH (caller)-[r:CodeRelation]->(target)
-              WHERE target.id IN $ids AND r.type IN $relationTypes
-              RETURN DISTINCT target.id AS target, caller.filePath AS filePath, r.type AS relationType
-            `,
-                { ids, relationTypes: checker.relationTypes },
-              ),
-            { onError: (error) => onError('detect-changes:callers', error) },
-          );
-          if (batches.includes(undefined)) {
+          const rows = await queryCallers(targetIds, checker.relationTypes);
+          if (rows === null) {
             report.complete = false;
             report.skipped.push({ reason: 'caller-query-failed' });
+            return [];
           }
-          return batches.flatMap((rows) => rows ?? []);
+          return rows;
         },
         image.files,
         callerSourceUnavailable,

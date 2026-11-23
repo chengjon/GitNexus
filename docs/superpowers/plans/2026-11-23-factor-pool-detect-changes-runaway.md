@@ -3,7 +3,7 @@
 > 状态：**调查记录**。用户报告 `gitnexus` 全量检测在 `/opt/claude/factor-pool` 本机 OOM。
 > 结论：**未发现任何内核 OOM 或 V8 堆 OOM 记录**；实际抓到的是 `detect-changes --scope all` 的 **CPU 死循环**（不是内存耗尽）。已终止该进程，当前构建下不可复现。
 >
-> **第二轮（2026-11-23 晚）**：完成 signature-changes.ts 全部 AST 遍历审计 —— **无无界路径**（§8）；同日核实报告的「V8 堆 OOM 定案」与「同源推断」被五项证据**推翻**（§9）；按「无根因」条款转防御，三项防御已落地/提案（§10）。
+> **第二轮（2026-11-23 晚）**：完成 signature-changes.ts 全部 AST 遍历审计 —— **无无界路径**（§8）；同日核实报告的「V8 堆 OOM 定案」与「同源推断」被五项证据**推翻**（§9）；按「无根因」条款转防御，三项防御已全部落地（§10，worker 隔离于同日第三轮补齐）。
 
 ## 1. 现象
 
@@ -110,4 +110,4 @@ cwd = /opt/claude/factor-pool
 
 1. **checker 文件大小上限对齐 walker**（已落地）：`signature-images.ts` 的 `sourceLimit` 从硬编码 4MiB 改为 `getMaxFileSizeBytes()`（`GITNEXUS_MAX_FILE_SIZE`（KB），默认 **512KB**，超 tree-sitter 上限自动 clamp）—— 任何 walker 拒绝索引的文件，checker 同样拒绝，解析/分析成本与索引策略同界。两处 skip 消息（sig-changes:828/:1222）改为动态 `unreadableSource()`。测试：更新 3 处 oversized 断言 + 新增 600KB 回归测试（旧代码下该文件被正常解析 → 新代码跳过）。
 2. **detect-changes 启动打印**（已落地）：`detectChangesCommand`（src/cli/tool.ts）启动时向 stderr 输出一行 `gitnexus detect-changes pid=N heap=XMB fileCap=YKB`，事后 PID 归因不再依赖 ps 考古。MCP 路径（local-backend 直接 `callTool`）不经过该命令，stderr 卫生不受影响（detect-changes-stderr.test.ts 仍全绿）。
-3. **Worker 隔离提案**（未实施，建议单独开 issue）：`detect_changes` 在 local-backend.ts:7580-7604 **进程内**直跑 `checkCallCompatibility` → `findBrokenKeywordCalls`，无 worker、无 wall-clock 预算 —— 单线程 CPU 失控会无限楔死 CLI（本次事件形态）。提案：将 `checkCallCompatibility` 移入 worker_threads/子进程 + 30-60s 硬超时，超时 → `complete:false` + skip 理由。前置评估：tree-sitter napi parser 当前在主线程创建，跨 worker 需重建；LBUG 查询结果已物化为数组，序列化边界清晰。收益（彻底免疫 CPU 失控）远大于成本，建议下一轮落实。
+3. **Worker 隔离**（已落地，2026-11-23 第三轮）：`detect_changes` 不再在 handler 进程内直跑 `checkCallCompatibility` → `findBrokenKeywordCalls`。实现：`call-compatibility-worker.ts`（主线程 runner：60s 默认硬超时 → worker.terminate() + 回退 `{complete:false, skipped:[{reason:'signature-check-timed-out'}]}`）+ `call-compatibility-worker-entry.ts`（worker 内重跑 CPU 密集签名检查；LBUG 无法在 worker 内重开 → caller 查询经 MessagePort RPC 留在主线程，`checkCallCompatibility` 增加可注入 `queryCallers` 参数，默认实现 = 原进程内查询，语义零变化）。结果：单线程 CPU 失控最多消耗一个可终止的 worker + 60s，CLI 不再被无限楔死。**落地中发现并修复**：优雅收尾路径调用 `worker.terminate()` 会与 worker 自身退出/原生 tree-sitter 卸载竞态，在 vitest fork 内触发 **SIGABRT**（整 fork 崩溃）——修复为优雅路径不 terminate（entry 返回 → 线程自然退出），terminate 仅保留在 fail/timeout 路径。测试：新增 worker 集成测试 3 例（round-trip / 超时回退 / caller 查询失败降级 'caller-query-failed'）+ 进程内 `call-compatibility.test.ts` 2 例（多 checker 隔离、单 checker 失败不牵连）；hunk-scale 中依赖主线程 vi.spyOn 的用例迁移/改接线（跨线程 spy 不可见），:389 用例删除并留档理由（fixture 本就未到达 retention 路径，契约由 :376 经真实 worker 覆盖）。5 套件 169/169 全绿。

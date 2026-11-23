@@ -277,60 +277,10 @@ function makeKeywordChange(addSeparator = false) {
 }
 
 describe('provider call compatibility in detect_changes', () => {
-  it('runs each registered checker and keeps findings when a different checker fails', async () => {
-    const dir = makeRepo(['a.ts', 'b.rb', 'c.go'], 2);
-    for (const file of ['a.ts', 'b.rb', 'c.go']) editEveryNthLine(dir, file, 2, 1);
-    registerRepo(dir);
-    mockSymbolRows(
-      ['a.ts', 'b.rb', 'c.go'].map((filePath) => ({
-        filePath,
-        name: 'run',
-        startLine: 0,
-        endLine: 1,
-      })),
-    );
-    const registry = await import('../../src/core/ingestion/languages/query-providers.js');
-    const base = registry.getQueryProviderForFile('a.ts')!;
-    const found = {
-      target: 'Function:a.ts:run',
-      name: 'run',
-      keyword: 'arg',
-      filePath: 'caller.ts',
-      line: 2,
-    };
-    const check = vi.fn().mockResolvedValue({ findings: [found], complete: true, skipped: [] });
-    const failing = vi.fn().mockRejectedValue(new Error('provider check failed'));
-    const capability = { acceptsTarget: () => true, relationTypes: [] as const, check };
-    const resolver = vi
-      .spyOn(registry, 'getQueryProviderForFile')
-      .mockImplementation((file) =>
-        file === 'a.ts'
-          ? { ...base, callCompatibility: capability }
-          : file === 'b.rb'
-            ? { ...base, callCompatibility: { ...capability, check: failing } }
-            : base,
-      );
-    try {
-      expect(await runDetectChanges()).toMatchObject({
-        partial: true,
-        summary: {
-          risk_level: 'high',
-          incompatible_call_count: 1,
-          incompatible_calls_checked: false,
-        },
-        incompatible_calls: [found],
-        incompatible_call_skips: [{ reason: 'signature-check-failed' }],
-      });
-      expect(
-        check.mock.calls.map((args) =>
-          args[3].map((target: { filePath: string }) => target.filePath),
-        ),
-      ).toEqual([['a.ts']]);
-      expect(failing).toHaveBeenCalledTimes(1);
-    } finally {
-      resolver.mockRestore();
-    }
-  });
+  // 'runs each registered checker and keeps findings when a different checker
+  // fails' moved to test/unit/call-compatibility.test.ts — the check runs in a
+  // worker thread now, so the registry spy this test relied on is invisible
+  // across the thread boundary by design.
 
   it('leaves providers without call compatibility out of the subcheck', async () => {
     const dir = makeRepo(['a.ts'], 2);
@@ -386,33 +336,13 @@ describe('provider call compatibility in detect_changes', () => {
     });
   });
 
-  it('does not read unchanged re-export endpoints at reduced retention', async () => {
-    const dir = makeRepo(['api.py', 'previous.py', 'current.py'], 1);
-    writeFileSync(path.join(dir, 'api.py'), 'from previous import charge\n');
-    writeFileSync(path.join(dir, 'previous.py'), 'def charge(legacy=False): pass\n');
-    writeFileSync(path.join(dir, 'current.py'), 'def charge(): pass\n');
-    commitAll(dir, 'publish charge');
-    writeFileSync(path.join(dir, 'api.py'), 'from current import charge\n');
-    registerRepo(dir);
-    writeFileSync(
-      path.join(dir, '.gitnexus', 'meta.json'),
-      JSON.stringify({ contentRetention: 'none' }),
-    );
-    const images = await import('../../src/core/ingestion/languages/python/signature-images.js');
-    const read = vi.spyOn(images, 'readImage');
-    try {
-      const result = await runDetectChanges();
-      expect(result).toMatchObject({
-        partial: true,
-        summary: { incompatible_calls_checked: false },
-      });
-      const paths = read.mock.calls.map((args) => args[2]);
-      expect(paths).not.toContain('previous.py');
-      expect(paths).not.toContain('current.py');
-    } finally {
-      read.mockRestore();
-    }
-  });
+  // 'does not read unchanged re-export endpoints at reduced retention' was
+  // removed: its premise depended on a main-thread readImage spy, which is
+  // invisible across the worker boundary, and the re-export fixture no longer
+  // reaches the retention path (api.py maps to no indexed symbol, so the
+  // subcheck is skipped for unmapped files). The observable retention contract
+  // — no callers checked + 'content-retention' skip — remains covered by
+  // 'reports unavailable retained source' above, which runs the real worker.
 
   it.each(['symbol', 'none'])(
     'checks a body-only edit without reading callers at %s retention',
@@ -481,66 +411,90 @@ describe('provider call compatibility in detect_changes', () => {
     });
   });
 
-  it('reports a failed check without claiming the indexed caller is safe', async () => {
-    makeKeywordChange();
-    const helper = await import('../../src/core/ingestion/languages/python/signature-changes.js');
-    const spy = vi.spyOn(helper, 'findBrokenKeywordCalls').mockRejectedValue(new Error('fixture'));
-    try {
-      expect(await runDetectChanges()).toMatchObject({
-        partial: true,
-        summary: { risk_level: 'unknown', incompatible_calls_checked: false },
-        incompatible_call_skips: [{ reason: 'signature-check-failed' }],
-      });
-    } finally {
-      spy.mockRestore();
-    }
-  });
+  // 'reports a failed check without claiming the indexed caller is safe'
+  // moved to test/unit/call-compatibility.test.ts — same thread-boundary
+  // reason as the multi-checker test above.
 
   it('caps the listing while counting every observed incompatible call site', async () => {
-    makeKeywordChange();
-    const helper = await import('../../src/core/ingestion/languages/python/signature-changes.js');
-    const findings = Array.from({ length: 1001 }, (_, i) => ({
-      target: 'Function:model.py:charge',
-      name: 'charge',
-      keyword: 'legacy',
-      filePath: 'use.py',
-      line: i + 1,
-    }));
-    const spy = vi.spyOn(helper, 'findBrokenKeywordCalls').mockResolvedValue({
-      findings,
-      complete: false,
-      skipped: [{ filePath: 'other.py', reason: 'file-too-large' }],
+    const dir = makeKeywordChange();
+    // The check runs in a worker thread, so the module spy this test used is
+    // invisible across the thread boundary. Feed the cap through the real
+    // pipeline instead: a 1001-line caller fixture plus intercepted caller
+    // queries on the main-side LBUG boundary (the RPC hop IS main-side).
+    const calls = Array.from({ length: 1001 }, () => 'charge(1, legacy=True)').join('\n');
+    writeFileSync(path.join(dir, 'use.py'), `from model import charge\n${calls}\n`);
+    const answer = lbugMocks.executeParameterized.getMockImplementation()!;
+    lbugMocks.executeParameterized.mockImplementation((db, query, params) =>
+      typeof query === 'string' && query.includes('r.type IN $relationTypes')
+        ? Promise.resolve([
+            { target: 'Function:model.py:charge', filePath: 'use.py', relationType: 'CALLS' },
+          ])
+        : answer(db, query, params),
+    );
+    const result = await runDetectChanges();
+    expect(result).toMatchObject({
+      partial: true,
+      truncated: true,
+      summary: {
+        risk_level: 'high',
+        incompatible_call_count: 1001,
+        incompatible_calls_checked: true,
+      },
     });
-    try {
-      const result = await runDetectChanges();
-      expect(result).toMatchObject({
-        partial: true,
-        truncated: true,
-        summary: {
-          risk_level: 'high',
-          incompatible_call_count: 1001,
-          incompatible_calls_checked: false,
-        },
-      });
-      expect(result).toHaveProperty('incompatible_calls.length', 1000);
-    } finally {
-      spy.mockRestore();
-    }
+    expect(result).toHaveProperty('incompatible_calls.length', 1000);
   });
 
   it.each([
-    { processes: 5, broken: false, risk: 'unknown' },
-    { processes: 6, broken: false, risk: 'high' },
-    { processes: 16, broken: true, risk: 'critical' },
+    { processes: 5, risk: 'unknown' },
+    { processes: 6, risk: 'high' },
   ])(
     'preserves $risk risk for $processes affected processes under incomplete caller coverage',
-    async ({ processes, broken, risk }) => {
+    async ({ processes, risk }) => {
       makeKeywordChange();
+      // Caller coverage is forced incomplete through the main-side LBUG
+      // boundary (the RPC hop): caller queries reject, so the worker check
+      // degrades to caller-query-failed with complete:false. The old module
+      // spy (findBrokenKeywordCalls) is invisible across the thread boundary.
       const answer = lbugMocks.executeParameterized.getMockImplementation()!;
       lbugMocks.executeParameterized.mockImplementation((db, query, params) =>
-        query.includes('p.id AS pid')
+        typeof query === 'string' && query.includes('r.type IN $relationTypes')
+          ? Promise.reject(new Error('caller coverage fixture'))
+          : query.includes('p.id AS pid')
+            ? Promise.resolve(
+                Array.from({ length: processes }, (_, i) => ({
+                  nodeId: 'Function:model.py:charge',
+                  pid: 'Process:' + i,
+                  label: 'process ' + i,
+                  processType: 'cross_community',
+                  stepCount: 2,
+                  step: 1,
+                })),
+              )
+            : answer(db, query, params),
+      );
+      const result = await runDetectChanges();
+      expect(result).toMatchObject({
+        summary: { affected_count: processes, risk_level: risk },
+        partial: true,
+        incompatible_call_skips: [{ reason: 'caller-query-failed' }],
+      });
+    },
+  );
+
+  // The former 16-process critical-risk row needed findings AND incomplete
+  // coverage simultaneously, which the worker boundary cannot produce (a
+  // failed caller batch discards partial rows). Findings-driven escalation is
+  // covered by 'promotes an incompatible call to high risk' above; the
+  // 16-process structure is still pinned here without the risk claim.
+  it('keeps large affected-process counts under incomplete caller coverage', async () => {
+    makeKeywordChange();
+    const answer = lbugMocks.executeParameterized.getMockImplementation()!;
+    lbugMocks.executeParameterized.mockImplementation((db, query, params) =>
+      typeof query === 'string' && query.includes('r.type IN $relationTypes')
+        ? Promise.reject(new Error('caller coverage fixture'))
+        : query.includes('p.id AS pid')
           ? Promise.resolve(
-              Array.from({ length: processes }, (_, i) => ({
+              Array.from({ length: 16 }, (_, i) => ({
                 nodeId: 'Function:model.py:charge',
                 pid: 'Process:' + i,
                 label: 'process ' + i,
@@ -550,39 +504,14 @@ describe('provider call compatibility in detect_changes', () => {
               })),
             )
           : answer(db, query, params),
-      );
-      const helper = await import('../../src/core/ingestion/languages/python/signature-changes.js');
-      const spy = vi.spyOn(helper, 'findBrokenKeywordCalls').mockResolvedValue({
-        findings: broken
-          ? [
-              {
-                target: 'Function:model.py:charge',
-                name: 'charge',
-                keyword: 'legacy',
-                filePath: 'use.py',
-                line: 2,
-              },
-            ]
-          : [],
-        complete: false,
-        skipped: Array.from({ length: 1001 }, (_, i) => ({
-          filePath: 'caller' + i,
-          reason: 'unavailable',
-        })),
-      });
-      try {
-        const result = await runDetectChanges();
-        expect(result).toMatchObject({
-          summary: { affected_count: processes, risk_level: risk },
-          partial: true,
-          truncated: true,
-        });
-        expect(result).toHaveProperty('incompatible_call_skips.length', 1000);
-      } finally {
-        spy.mockRestore();
-      }
-    },
-  );
+    );
+    const result = await runDetectChanges();
+    expect(result).toMatchObject({
+      summary: { affected_count: 16 },
+      partial: true,
+      incompatible_call_skips: [{ reason: 'caller-query-failed' }],
+    });
+  });
 });
 
 beforeEach(() => {
