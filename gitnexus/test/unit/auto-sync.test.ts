@@ -27,26 +27,95 @@ import {
 import { absoluteAutoSyncRemoteUrl } from '../../src/core/auto-sync/config.js';
 import { acquireFileLock } from '../../src/storage/file-lock.js';
 
+/** Writable-base candidates probed before falling back to a repo-relative dir. */
+const MKDTEMP_BASE_CANDIDATES = ['/home', '/workspace', '/data', '/mnt', '/srv'];
+
+/**
+ * mkdtemp under the first writable candidate. Existence is not enough (GH
+ * runners have a root-owned /home the runner user cannot write, run
+ * 45217262006), so candidates are probed by actually creating the temp
+ * directory; a candidate failing with EACCES falls through to the next. When
+ * every candidate fails, the repo-relative fallbackBase is created and used —
+ * the test process can always write there.
+ */
+async function pickWritableBase(
+  fallbackBase: string,
+  options: {
+    candidates?: string[];
+    mkdtemp?: (prefix: string) => Promise<string>;
+  } = {},
+): Promise<string> {
+  const mkdtemp = options.mkdtemp ?? ((prefix: string) => fs.mkdtemp(prefix));
+  for (const candidate of options.candidates ?? MKDTEMP_BASE_CANDIDATES) {
+    try {
+      return await mkdtemp(path.join(candidate, 'gitnexus-auto-sync-'));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      // Unusable candidate: unwritable (EACCES) or missing (ENOENT) — fall
+      // through. Anything else is a real error worth surfacing.
+      if (code !== 'EACCES' && code !== 'ENOENT') throw error;
+    }
+  }
+  await fs.mkdir(fallbackBase, { recursive: true });
+  return mkdtemp(path.join(fallbackBase, 'gitnexus-auto-sync-'));
+}
+
 describe('auto-sync', () => {
   let tempDir: string;
   let gitnexusHome: string;
   let oldHome: string | undefined;
 
+  describe('pickWritableBase', () => {
+    it('takes the first candidate a real mkdtemp succeeds in', async () => {
+      const picked = await pickWritableBase(path.join(os.tmpdir(), 'fallback-base'), {
+        candidates: ['/nope', os.tmpdir()],
+      });
+      expect(picked).toContain(path.join(os.tmpdir(), 'gitnexus-auto-sync-'));
+      await fs.rm(picked, { recursive: true, force: true });
+    });
+    it('falls through candidates that exist but are unwritable (EACCES)', async () => {
+      const calls: string[] = [];
+      const picked = await pickWritableBase(path.join(os.tmpdir(), 'fallback-base'), {
+        candidates: ['/locked', os.tmpdir()],
+        mkdtemp: async (prefix) => {
+          calls.push(prefix);
+          if (prefix.startsWith('/locked/')) {
+            throw Object.assign(new Error("EACCES: permission denied, mkdir '/locked'"), {
+              code: 'EACCES',
+            });
+          }
+          return fs.mkdtemp(prefix);
+        },
+      });
+      expect(calls).toEqual([
+        expect.stringContaining('/locked/'),
+        expect.stringContaining(path.join(os.tmpdir(), '/')),
+      ]);
+      expect(picked).toContain(os.tmpdir());
+      await fs.rm(picked, { recursive: true, force: true });
+    });
+    it('uses the fallback base when every candidate fails', async () => {
+      const fallbackBase = path.join(os.tmpdir(), 'fallback-base');
+      const picked = await pickWritableBase(fallbackBase, {
+        candidates: ['/nope-1', '/nope-2'],
+        mkdtemp: async (prefix) => {
+          if (!prefix.startsWith(fallbackBase)) {
+            throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+          }
+          return fs.mkdtemp(prefix);
+        },
+      });
+      expect(picked).toContain('fallback-base');
+      await fs.rm(picked, { recursive: true, force: true });
+    });
+  });
+
   beforeEach(async () => {
     // Use a base outside the unsafe auto-sync roots (/, /tmp, /opt, /root, ...).
-    // CI usually has the repo in a safe location; this environment keeps it under /opt.
-    let base = path.join(process.cwd(), '.tmp-test');
-    for (const candidate of ['/home', '/workspace', '/data', '/mnt', '/srv']) {
-      try {
-        await fs.access(candidate);
-        base = candidate;
-        break;
-      } catch {
-        // try the next candidate
-      }
-    }
-    await fs.mkdir(base, { recursive: true });
-    tempDir = await fs.realpath(await fs.mkdtemp(path.join(base, 'gitnexus-auto-sync-')));
+    // Existence is not enough: GH runners have a root-owned /home the runner
+    // user cannot write (EACCES on mkdtemp, run 45217262006), so candidates
+    // are probed by actually creating the directory.
+    tempDir = await fs.realpath(await pickWritableBase(path.join(process.cwd(), '.tmp-test')));
     gitnexusHome = path.join(tempDir, '.gitnexus');
     await fs.mkdir(gitnexusHome);
     oldHome = process.env.GITNEXUS_HOME;
