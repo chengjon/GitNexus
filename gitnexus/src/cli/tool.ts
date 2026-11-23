@@ -20,6 +20,10 @@ import v8 from 'node:v8';
 import { LocalBackend, VALID_NODE_LABELS } from '../mcp/local/local-backend.js';
 import { cliErrorKey, cliWarnKey } from './cli-message.js';
 import { formatDetectChangesResult } from './detect-changes-format.js';
+import {
+  detectChangesWatchdogOptionsFromEnv,
+  startDetectChangesWatchdog,
+} from './detect-changes-watchdog.js';
 import { getMaxFileSizeBytes } from '../core/ingestion/utils/max-file-size.js';
 import {
   ImpactBudgetExceededError,
@@ -485,6 +489,17 @@ export async function detectChangesCommand(options?: {
   process.stderr.write(
     `gitnexus detect-changes pid=${process.pid} heap=${heapLimitMb}MB fileCap=${Math.round(getMaxFileSizeBytes() / 1024)}KB\n`,
   );
+  // Runtime half of the runaway alarm (factor-pool, 2026-11-23): after the
+  // startup anchor names the process, the watchdog makes a wedge VISIBLE while
+  // it runs — one ELAPSED×CPU warning on stderr, then silence. Armed BEFORE
+  // the backend opens so every phase is covered (backend init included — the
+  // incident's wedge point was never identified). Knobs come from the
+  // environment so ops can tune or disable (`…WATCHDOG=off`) without code.
+  const watchdogOptions = detectChangesWatchdogOptionsFromEnv(process.env);
+  const watchdog = watchdogOptions ? startDetectChangesWatchdog(watchdogOptions) : undefined;
+  // The alarm can only fire once the sampler worker is loaded and armed, so
+  // wait for the handshake (capped — a broken watchdog degrades to none).
+  await watchdog?.ready;
   const backend = await getBackend();
   try {
     const result = await backend.callTool('detect_changes', {
@@ -506,6 +521,8 @@ export async function detectChangesCommand(options?: {
     output(result, formatDetectChangesResult);
   } catch (err) {
     output({ error: err instanceof Error ? err.message : String(err) }, formatDetectChangesResult);
+  } finally {
+    watchdog?.stop();
   }
 }
 
