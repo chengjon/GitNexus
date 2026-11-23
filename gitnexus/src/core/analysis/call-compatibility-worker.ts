@@ -44,13 +44,19 @@ export interface CallCompatibilityWorkerDone {
   errors: { context: string; message: string }[];
 }
 
-/** Sibling entry file; `.ts` beside this module in dev, `.js` in dist. */
-export function callCompatibilityWorkerPath(): string {
+/** Sibling entry file + tsx loader args; `.ts` beside this module in dev, `.js` in dist. */
+export function callCompatibilityWorkerEntry(): { path: string; execArgv: string[] } {
   const self = fileURLToPath(import.meta.url);
-  const entry = self.endsWith('.ts')
-    ? 'call-compatibility-worker-entry.ts'
-    : 'call-compatibility-worker-entry.js';
-  return path.join(path.dirname(self), entry);
+  // Source/compiled worker selection is about the running GitNexus module:
+  // the .ts sibling only exists when executing TypeScript sources (dev).
+  const isDev = self.endsWith('.ts');
+  return {
+    path: path.join(
+      path.dirname(self),
+      isDev ? 'call-compatibility-worker-entry.ts' : 'call-compatibility-worker-entry.js',
+    ),
+    execArgv: isDev ? ['--import', pathToFileURL(_require.resolve('tsx/esm')).href] : [],
+  };
 }
 
 export async function checkCallCompatibilityInWorker(
@@ -62,13 +68,10 @@ export async function checkCallCompatibilityInWorker(
   timeoutMs = 60_000,
 ): Promise<CallCompatibilityReport> {
   const targets = [...groups.values()].flat();
-  const workerPath = callCompatibilityWorkerPath();
-  const worker = new Worker(workerPath, {
+  const entry = callCompatibilityWorkerEntry();
+  const worker = new Worker(entry.path, {
     workerData: { image, targets, callerSourceUnavailable } satisfies CallCompatibilityWorkerInput,
-    // tsx hook only in dev, where the entry is TypeScript source.
-    execArgv: workerPath.endsWith('.ts')
-      ? ['--import', pathToFileURL(_require.resolve('tsx/esm')).href]
-      : [],
+    execArgv: entry.execArgv,
   });
 
   return await new Promise<CallCompatibilityReport>((resolve, reject) => {
