@@ -250,6 +250,8 @@ Gitea API（v1.27.3 实例）全量核证：**177 runs 活跃，但 `ci.yml` / `
 
 **终态（同日采集）**：run 45312847767 conclusion=**cancelled**（非 failure）。归因已由 check-run 注记实锤：`(real)` job **自动超时**——注记 "The job has exceeded the maximum execution time of 2h30m0s"，即撞自身 `timeout-minutes: 150`（ci-tests.yml:15）。job log 同时证明**它不是挂死而是正常推进**：测量循环已跑到 "Pair 21 of up to 21"（末对 cold baseline 05:35:24 开始，05:36:49 被超时取消，完成度 ~95%）——节奏 ≈7 分钟/pair × 21 pair ≈ 150+ 分钟，job 固有时长恰好贴死超时预算；"Require parse-cache speed and memory improvements" 判定步骤（:48）从未执行。synthetic 变体 03:17 即绿。75/76 非 perf job 全绿，⑧ 修复据此判定 **VERIFIED**；CI Gate failure 仅为超时取消的级联。fork 首次 81/81 全绿里程碑未落地属 **B2 类结构问题**（真实语料 perf 基准时长 ≥ 超时预算，非 flake），按 §10/§12 裁决容忍，与开放项"RAM budget（待用户决策）"同族。运维注记：若日后要拿 `(real)` 绿灯，选项 = 调大 timeout-minutes / 缩减语料 pair 数 / 放宽基线；取消前先看 log "Pair N of up to 21" 进度行。
 
+**遗留项终局（2026-11-24，用户委托决策）**：① perf `(real)` 超时 / "RAM budget" 开放项**裁决为容忍归档**——⑧ 修复已由 coverage 9/9 与 dispatch run 45312888499 双重独立验证，重跑无信息增量（~95% 完成度贴死 150 分钟预算，重跑大概率同样超时）；该门禁仅存在于 origin（GitHub）线且属咨询性质（gitea 生产线 `ci-tests.yml` 零运行，见 §10 A1 核证），与 §10/§12 的 B2 容忍裁决一致。② 同日收割权威裁决 run **45312888499**（`2c40feb86`，⑦⑧ 修复的 dispatch 验证）：**Plan ✓、Coverage 0-3 全 ✓ → ⑦⑧ 批次判定通过**；唯一红 job `Value flow` 为**设计内降级**——trace 跑 89.7 分钟后 traced 测试撞 30 秒单测超时（"trace run invalid, every pair inconclusive"，exit 1 = 警告级 incomplete results），步骤随即撞自身 90 分钟预算；按 workflow 设计（全 job continue-on-error，exit 2 才是真错误）只把报告标为 partial，不构成阻塞，随 B2 一并容忍。③ C1 同-SHA 重跑纪律的复盘窗口定为 2026-12-07 ~ 12-21（纪律落地后 2-4 周）。至此本提案无待决策开放项，仅余已归档的容忍项（#4046/#4047、B2、value-flow partial）。
+
 ### ⚠️ 漏项说明
 
 C2（镜像 job 日志首行加"本 job 是审计镜像"注记）未进入任何处置表（§10 / §12 均未提及）。其前提与 A1 相同——镜像门禁在本地化线零存在——故随 A1 一并自然失效，视为默认归档。
