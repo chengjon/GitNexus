@@ -158,7 +158,7 @@ P2（排期）: B2 perf 基线治理 + B3 sandbox bug + B4 windows flake + C2
 
 | 条目 | 本地化裁决 |
 |---|---|
-| A1 镜像改名 | 条件性保留：Gitea runner 确证在跑 `.github/workflows` 后，cherry-pick `872beaabb`（225 passed，含守卫期望集），零新开发；gitea/main 需先 fast-forward 到 origin/main |
+| A1 镜像改名 | **归档**（11-24 核实结论）：Gitea Actions 在跑（171 runs：schedule/安全/发布类），但 `ci.yml`/`ci-tests.yml` 从未运行 → 本地无镜像门禁红噪，改名无对象；gitea 亦无分支保护规则。若日后 gitea 启用测试链路或需治理 fork CI 观感，再取 `872beaabb`（225 passed，含守卫期望集） |
 | B1 | 维持取消（双帧一致） |
 | A2/A3/B2 | 容忍（不碍解析使用的 CI 观感优化，不做） |
 | B3/B4（#4046/#4047） | 容忍；issue 留 upstream 存档，本地零动作 |
