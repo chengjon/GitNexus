@@ -252,6 +252,10 @@ Gitea API（v1.27.3 实例）全量核证：**177 runs 活跃，但 `ci.yml` / `
 
 **遗留项终局（2026-11-24，用户委托决策）**：① perf `(real)` 超时 / "RAM budget" 开放项**裁决为容忍归档**——⑧ 修复已由 coverage 9/9 与 dispatch run 45312888499 双重独立验证，重跑无信息增量（~95% 完成度贴死 150 分钟预算，重跑大概率同样超时）；该门禁仅存在于 origin（GitHub）线且属咨询性质（gitea 生产线 `ci-tests.yml` 零运行，见 §10 A1 核证），与 §10/§12 的 B2 容忍裁决一致。② 同日收割权威裁决 run **45312888499**（`2c40feb86`，⑦⑧ 修复的 dispatch 验证）：**Plan ✓、Coverage 0-3 全 ✓ → ⑦⑧ 批次判定通过**；唯一红 job `Value flow` 为**设计内降级**——trace 跑 89.7 分钟后 traced 测试撞 30 秒单测超时（"trace run invalid, every pair inconclusive"，exit 1 = 警告级 incomplete results），步骤随即撞自身 90 分钟预算；按 workflow 设计（全 job continue-on-error，exit 2 才是真错误）只把报告标为 partial，不构成阻塞，随 B2 一并容忍。③ C1 同-SHA 重跑纪律的复盘窗口定为 2026-12-07 ~ 12-21（纪律落地后 2-4 周）。至此本提案无待决策开放项，仅余已归档的容忍项（#4046/#4047、B2、value-flow partial）。
 
+### 本地构建维护注记（2026-11-24）
+
+dist 新鲜度复核结论：**无需重建**。上次全量重建在 `f4edc7930` 时代（569 files，CLI 1.6.12，`risk_rationale` 在 dist 验证在案）；此后 origin/main 仅 docs-only 提交（`925da7fae`、`1ce80fa50`），`gitnexus/src/**` 零改动。复核方法须对文件而非目录 mtime：以 dist 内最新文件为基准（`find dist -type f -printf '%T@ %p\n' | sort -rn | head -1`），再 `find src -type f -newer <该文件>` —— 本轮 0 命中。触发规则不变（CLAUDE.md）：仅 docs/markdown 改动不重建；下次 `gitnexus/src/**` 的 TS 提交落地后跑 `cd gitnexus && npm run build`（全局 gitnexus CLI 走本仓 dist；测试文件改动不影响 dist，vitest 直跑 TS 源）。
+
 ### ⚠️ 漏项说明
 
 C2（镜像 job 日志首行加"本 job 是审计镜像"注记）未进入任何处置表（§10 / §12 均未提及）。其前提与 A1 相同——镜像门禁在本地化线零存在——故随 A1 一并自然失效，视为默认归档。
