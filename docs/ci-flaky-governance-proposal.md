@@ -246,7 +246,7 @@ Gitea API（v1.27.3 实例）全量核证：**177 runs 活跃，但 `ci.yml` / `
 - **级联**：`every test executed`（coverage-reports artifact 缺失）、`CI Gate`（聚合）、6 个 platform-sensitive 镜像门禁复述；
 - **其余全绿**：quality/format、typecheck（含 language-boundary 守卫——HEAD^1 差集机制按预期只看相邻提交）、benchmarks、11+11 原生平台分片、eval/locked pytest、lint、typecheck-web。
 
-⑧ 的修复验证 run（45312847767 = `2c40feb86`）写作时 in_progress；若绿，fork 主链路首次 81/81 全绿。
+⑧ 的修复验证 run（45312847767 = `2c40feb86`）中期实证（2026-11-24 采集，75/76 jobs 已完成）：**0 失败**，**全部 9 个 coverage job 绿**（1/8-8/8 分片 + coverage merge）——上轮唯一真实失败的 coverage 6/8（`cli-incremental-analyze.test.ts` ×5 所在分片）随 heap-pin 移除翻绿，⑧ 修复获实证。收尾中仅剩 `ci / tests / parse cache / speed and memory (real)`（真实解析内存/速度基准，属长时 perf 套件）仍在跑；若最终绿，fork 主链路首次 81/81 全绿。
 
 ### ⚠️ 漏项说明
 
