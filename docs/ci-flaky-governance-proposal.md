@@ -248,6 +248,8 @@ Gitea API（v1.27.3 实例）全量核证：**177 runs 活跃，但 `ci.yml` / `
 
 ⑧ 的修复验证 run（45312847767 = `2c40feb86`）中期实证（2026-11-24 采集，75/76 jobs 已完成）：**0 失败**，**全部 9 个 coverage job 绿**（1/8-8/8 分片 + coverage merge）——上轮唯一真实失败的 coverage 6/8（`cli-incremental-analyze.test.ts` ×5 所在分片）随 heap-pin 移除翻绿，⑧ 修复获实证。收尾中仅剩 `ci / tests / parse cache / speed and memory (real)`（真实解析内存/速度基准，属长时 perf 套件）仍在跑；若最终绿，fork 主链路首次 81/81 全绿。
 
+**终态（同日采集）**：run 45312847767 conclusion=**cancelled**（非 failure）。归因已由 check-run 注记实锤：`(real)` job **自动超时**——注记 "The job has exceeded the maximum execution time of 2h30m0s"，即撞自身 `timeout-minutes: 150`（ci-tests.yml:15）。job log 同时证明**它不是挂死而是正常推进**：测量循环已跑到 "Pair 21 of up to 21"（末对 cold baseline 05:35:24 开始，05:36:49 被超时取消，完成度 ~95%）——节奏 ≈7 分钟/pair × 21 pair ≈ 150+ 分钟，job 固有时长恰好贴死超时预算；"Require parse-cache speed and memory improvements" 判定步骤（:48）从未执行。synthetic 变体 03:17 即绿。75/76 非 perf job 全绿，⑧ 修复据此判定 **VERIFIED**；CI Gate failure 仅为超时取消的级联。fork 首次 81/81 全绿里程碑未落地属 **B2 类结构问题**（真实语料 perf 基准时长 ≥ 超时预算，非 flake），按 §10/§12 裁决容忍，与开放项"RAM budget（待用户决策）"同族。运维注记：若日后要拿 `(real)` 绿灯，选项 = 调大 timeout-minutes / 缩减语料 pair 数 / 放宽基线；取消前先看 log "Pair N of up to 21" 进度行。
+
 ### ⚠️ 漏项说明
 
 C2（镜像 job 日志首行加"本 job 是审计镜像"注记）未进入任何处置表（§10 / §12 均未提及）。其前提与 A1 相同——镜像门禁在本地化线零存在——故随 A1 一并自然失效，视为默认归档。
