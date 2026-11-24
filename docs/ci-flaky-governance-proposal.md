@@ -164,3 +164,22 @@ P2（排期）: B2 perf 基线治理 + B3 sandbox bug + B4 windows flake + C2
 | B3/B4（#4046/#4047） | 容忍；issue 留 upstream 存档，本地零动作 |
 | C1 重跑纪律 | 保留为个人约定（本文件 C1 v1 四条流程继续有效，不再追求 upstream CONTRIBUTING 落地） |
 | §6 实施约束 | 过时，视为历史记录 |
+
+---
+
+## 11. 六根因批次落地记录（2026-11-24）
+
+Run B（45217262006）取证的六个独立根因 + Run A（45219457647）暴露的 jscpd 下游 bug 已按批次全部修复并推送；⑦ 已本地端到端复验（EXIT=0）。CI 权威裁决 = run 45312888499 的 Plan job 结论（全 workflow continue-on-error，run 级 success 是假象，必须看 job 明细）。
+
+| # | 根因 | 修复 | 提交 |
+|---|---|---|---|
+| ① | language-boundary 守卫抓到 `call-compatibility-worker.ts` 的 `.ts` 字面量（quality/typecheck + coverage 3/8；worker 隔离引入的回归） | `callCompatibilityWorkerEntry()` 返回 `{path, execArgv}`，isDev 改从守卫白名单模式 `self` 派生 | `6f988f8ad` |
+| ② | prettier --check 唯一违例 `gitnexus-web/src/components/Header.tsx`（quality/format） | 纯格式化 | `898babe20` |
+| ③ | `docs/law/gitnexus-agent-rules.md` 未被 git 跟踪（shipped-skills-sync ENOENT，coverage 1/8） | force-add 入库（docs/* gitignore 吞没了它） | `a1780ff36` |
+| ④ | auto-sync mkdtemp EACCES ×42（coverage 6/8）：beforeEach 用 fs.access（只查存在不查 W_OK）选 base，runner 上 /home 不可写；上游 merge 70ce30d2d 测试基建 bug | `pickWritableBase` 用真实 mkdtemp 探针逐候选探测，EACCES/ENOENT 落空回退仓库内 `.tmp-test` | `40ca7e4c8` |
+| ⑤ | detect_changes/impact 响应缺 `risk_rationale` ×3（coverage 8/8）：merge 436ec6f1c 冲突解决取 upstream 侧丢 fork 侧接线（merge-loss 第三例，同 Task 1 impactedCount / Task 2 lockfile 病灶） | 恢复两处 `risk_rationale` 附件 + detect_changes 计算块（原样恢复，无新语义） | `7ee2dc3ea` |
+| ⑥ | bench 基线 19 vs 实际 20：fork 独有 `overview` 工具（8c4ed991f）在 GITNEXUS_TOOLS 内（refresh_index 是 opt-in 名单外，不计） | baselines.json `tools_listed` 19→20 + `_roster` 说明备忘（经用户同意） | `d609cc804` |
+| ⑦ | fixture-clones `invalid jscpd source span` 杀死 Plan 阶段（Run A 下游，continue-on-error 掩盖于 run 级）：jscpd 5.4.3 gap-merge 对 markdown 克隆产生反转 span（本地以 CI 真实切片精确复现：82.7 万克隆边中 5 条 end<start，全部 markdown） | 新导出纯函数 `clonesFromReport`：反转 span 跳过并计数，lookup-miss/越界仍大声抛错；本地端到端复验 EXIT=0 | `840bd4dee` |
+| ⑧ | cli-incremental-analyze RAM 预算败 ×5（coverage 1/8）：测试样板 `NODE_OPTIONS --max-old-space-size=8192` 被 manualHeapAdmission 当作显式预留，16GB runner 预算（11987 MiB）装不下 | 删 heap pin（全仓仅此一处集成测试有；本机 RAM 大所以一直本地绿，掩盖了问题） | `2c40feb86` |
+
+连坐说明：平台敏感 N/3 全败（双 OS 六门）不是平台问题——coverage merge skipped → coverage-reports artifact 缺失 → `every test executed` 败的级联；11+11 native 分片实际全过。⑦ 依赖链：multipart writeWorkFile（`1354b1da1`）先消掉 `Invalid string length` 崩点，jscpd 崩点才首次可见——修复下游 bug 时预期会有「修一个露一个」，按 C1 纪律逐个归因处理。
