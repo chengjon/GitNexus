@@ -149,3 +149,18 @@ P2（排期）: B2 perf 基线治理 + B3 sandbox bug + B4 windows flake + C2
 2. 转绿 → 记录为真 flake（测试名 + run id），累计真 flake 率。
 3. 仍红 → 按确定性失败处理：跑 systematic-debugging Phase 1（归因）后再修。
 4. 镜像门禁（`platform-evidence audit:*`）红 ≠ 平台分片红：先看 `test-completeness` 与其上游生产者 job。
+
+---
+
+## 10. 本地化裁决附注（2026-11-24，v2）
+
+> 项目已本地化到 gitea 私库（`john/gitnexus`），upstream PR 轨道政策性作废（A1 PR #4048 已被 upstream 关闭，未合并）。核心需求 = 解析（parsing）；不过度开发；允许不碍使用的小 issue 存在。本表取代 §6 的 fork→upstream 实施约束，完整论证见 `.work/review-ci-flaky-governance-proposal.md`（v2）。
+
+| 条目 | 本地化裁决 |
+|---|---|
+| A1 镜像改名 | 条件性保留：Gitea runner 确证在跑 `.github/workflows` 后，cherry-pick `872beaabb`（225 passed，含守卫期望集），零新开发；gitea/main 需先 fast-forward 到 origin/main |
+| B1 | 维持取消（双帧一致） |
+| A2/A3/B2 | 容忍（不碍解析使用的 CI 观感优化，不做） |
+| B3/B4（#4046/#4047） | 容忍；issue 留 upstream 存档，本地零动作 |
+| C1 重跑纪律 | 保留为个人约定（本文件 C1 v1 四条流程继续有效，不再追求 upstream CONTRIBUTING 落地） |
+| §6 实施约束 | 过时，视为历史记录 |
