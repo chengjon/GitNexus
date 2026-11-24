@@ -1,6 +1,6 @@
 # CI flaky 治理方案（诊断报告 + 治理提案）
 
-> **状态**：已审核（2026-11-24，结论见 §9；本文档 §1-§8 为诊断与提案原文）
+> **状态**：评审终态 **APPROVE_WITH_NOTES**（2026-11-24 v3，见 §12；§1-§8 为诊断与提案原文，§9-§11 为历次评审与落地记录）
 > **排查窗口**：2026-11-20 ~ 2026-11-23（upstream `abhigyanpatwari/GitNexus` 最近 100 个已完成 run）
 > **排查方法**：systematic-debugging Phase 1-3（逐 run 下载日志归因，未跳过任何失败 run）
 > **证据留档**：`/tmp/opencode/log-*.txt`（15 个失败 run 的关键 job 日志）、`/tmp/opencode/failjob-details.json`（全部失败 job 明细）
@@ -183,3 +183,75 @@ Run B（45217262006）取证的六个独立根因 + Run A（45219457647）暴露
 | ⑧ | cli-incremental-analyze RAM 预算败 ×5（coverage 1/8）：测试样板 `NODE_OPTIONS --max-old-space-size=8192` 被 manualHeapAdmission 当作显式预留，16GB runner 预算（11987 MiB）装不下 | 删 heap pin（全仓仅此一处集成测试有；本机 RAM 大所以一直本地绿，掩盖了问题） | `2c40feb86` |
 
 连坐说明：平台敏感 N/3 全败（双 OS 六门）不是平台问题——coverage merge skipped → coverage-reports artifact 缺失 → `every test executed` 败的级联；11+11 native 分片实际全过。⑦ 依赖链：multipart writeWorkFile（`1354b1da1`）先消掉 `Invalid string length` 崩点，jscpd 崩点才首次可见——修复下游 bug 时预期会有「修一个露一个」，按 C1 纪律逐个归因处理。
+
+---
+
+## 12. 评审终态（2026-11-24，v3）
+
+**Verdict：APPROVE_WITH_NOTES**（作为诊断参考档案）— 总分 4.5 → 3.5
+
+裁决逻辑：本地化四原则下，**诊断层与行动层分离评判**。
+
+| 层面 | 结论 | 依据 |
+|---|---|---|
+| §1-§5 诊断 | ✅ 权威参考档案，予以保留 | 4/4 GitHub 实体抽查全中、行号逐字命中、四层失真机制、"attempt≥2=0"、"真 flake 仅 2 次"——无一反例 |
+| §6 行动轨道 | ❌ 整体过时 | fork→upstream PR 路径随本地化政策作废；PR #4048 被关闭（未合并）成为佐证事件（详见 §10） |
+
+### 行动项终态处置
+
+| 项 | 处置 |
+|---|---|
+| A1 | **归档**（关键实证见下，细化 §10 结论） |
+| B1 | 维持取消（双帧一致） |
+| B2-B4 + A2 + A3 | 容忍 |
+| C1 | 降为个人约定（§9 C1 v1 四条流程继续有效） |
+
+### A1 归档的关键实证（终态核证）
+
+Gitea API（v1.27.3 实例）全量核证：**177 runs 活跃，但 `ci.yml` / `ci-tests.yml` 从未独立运行**；`publish` 在 Gitea 仅 5 jobs（reusable workflow 嵌套不展开，对比 fork 65 jobs）→ **镜像门禁红噪在本地化线零存在** → A1 前提消失，无需 cherry-pick `872beaabb`（该 commit 以 225 passed 留档为备用件，日后 Gitea 支持嵌套展开再启用）。
+
+（177 runs 为终态复核口径，较 §10 记录的 171 略有增长，结论一致。）
+
+---
+
+## 13. 实施状态对照表（2026-11-24 核验）
+
+> 对本文档全部承诺项与仓库实际状态的逐项核验（git 提交、工作区文件、upstream issue 均已实证）。
+
+### ✅ 已实施
+
+| 内容 | 核验结果 |
+|---|---|
+| §11 八个根因修复（①-⑧） | 全部提交在库：`6f988f8ad`、`898babe20`、`a1780ff36`、`40ca7e4c8`、`7ee2dc3ea`、`d609cc804`、`840bd4dee`、`2c40feb86`；⑦ 已本地端到端复验 EXIT=0 |
+| §9 配套 fork 同步 | `8eb1a2c3a`（ci-tests.yml + ci.yml + test_workflow_bench.py）在库 |
+| §9 C1 重跑纪律 | 以个人约定形式在用（§11 实际按此纪律执行） |
+
+注：§11 的修复来自后续 Run A/B（45217262006 / 45219457647）新发现的根因，属同一排查线的延续产出，**不是 §6 提案本身**。
+
+### ❌ 按终态裁决不实施（刻意，非遗漏）
+
+| 提案 | 实际状态（核验口径） |
+|---|---|
+| A1 镜像改名 | 归档：PR #4048 上游关闭未合并；备用 commit `872beaabb` 在库但未合入工作线（`ci-tests.yml:793` 仍为旧名 `(platform-sensitive) N/3`）；等 Gitea 支持嵌套展开再启用 |
+| A2 / A3 | 容忍 = 不做 |
+| B1 | 取消（前提被推翻：upstream 守卫已白名单 upload 步骤，无物可修） |
+| B2 | 容忍（P2 排期暂不动） |
+| B3 / B4 | 半实施：issue [#4046](https://github.com/abhigyanpatwari/GitNexus/issues/4046)、[#4047](https://github.com/abhigyanpatwari/GitNexus/issues/4047) 已开，**仍 open**，修复零动作，留 upstream 存档 |
+
+### CI 实证：startup 修复后的首个全量 run（45294585796 = `89d648bb8`，⑧ 修复入库前）
+
+81 jobs 仅 9 失败，其中 8 个为同一根因的级联复述——§11 连坐模型获全量实证：
+
+- **唯一真实失败**：coverage 6/8 的 `cli-incremental-analyze.test.ts` 5 例（`--staged-only` / `--changed-only` / `--files` / full / `status --json`，"expected 1 to be +0"）——正是 ⑧ 的靶子套件，该 run 尚未含 `2c40feb86`；
+- **级联**：`every test executed`（coverage-reports artifact 缺失）、`CI Gate`（聚合）、6 个 platform-sensitive 镜像门禁复述；
+- **其余全绿**：quality/format、typecheck（含 language-boundary 守卫——HEAD^1 差集机制按预期只看相邻提交）、benchmarks、11+11 原生平台分片、eval/locked pytest、lint、typecheck-web。
+
+⑧ 的修复验证 run（45312847767 = `2c40feb86`）写作时 in_progress；若绿，fork 主链路首次 81/81 全绿。
+
+### ⚠️ 漏项说明
+
+C2（镜像 job 日志首行加"本 job 是审计镜像"注记）未进入任何处置表（§10 / §12 均未提及）。其前提与 A1 相同——镜像门禁在本地化线零存在——故随 A1 一并自然失效，视为默认归档。
+
+### 结论
+
+本文档定位已由"行动提案"转为**"诊断参考档案 + 落地记录"**：诊断层（§1-§5）使命完成存档；行动层（§6）按本地化裁决大多不实施；真正落地的是 §11 八项修复 + fork 配套 + C1 纪律。**开放尾巴仅 upstream issue #4046、#4047 未修**，按裁决容忍存档。
