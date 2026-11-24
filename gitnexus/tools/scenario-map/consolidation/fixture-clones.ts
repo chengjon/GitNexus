@@ -34,6 +34,8 @@ export interface CloneRun {
   sourceRoot?: string;
   verifiedPairs?: number;
   clones: FixtureClone[];
+  /** jscpd gap-merge records with reversed spans — dropped, not cloned. */
+  skippedReversedSpans?: number;
 }
 export interface FixtureOverlap {
   kind: 'content' | 'clone' | 'cross-language-structure';
@@ -135,6 +137,37 @@ async function scanFixtureClones(
     statistics?: { total?: { sources?: number }; formats?: Record<string, unknown> };
   };
   if (!Array.isArray(report.duplicates)) throw new Error('jscpd did not return a clone report');
+  const { clones, skippedReversedSpans } = clonesFromReport(report, sources, root);
+  clones.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return {
+    tool: 'jscpd',
+    version,
+    sourceRoot: root,
+    sourceCount: Object.keys(sources).length,
+    capturedFiles: Object.values(sources).reduce((n, files) => n + files.length, 0),
+    scannedFiles: report.statistics?.total?.sources ?? 0,
+    formats: Object.keys(report.statistics?.formats ?? {}).sort(),
+    clones,
+    skippedReversedSpans,
+  };
+}
+
+/**
+ * Turns a jscpd JSON report into fixture clones.
+ *
+ * jscpd 5.4.3's gap merge emits REVERSED spans on some markdown clones
+ * (observed 2026-11-24: startLoc.position 10443 > endLoc.position 470). Those
+ * records are engine artifacts, not capturable clones — drop them and count
+ * them instead of failing the advisory consolidation (and the plan stage
+ * behind it). The remaining span() failures still throw: a lookup miss means
+ * the materialization diverged from the report and out-of-bounds offsets mean
+ * corruption, so staying loud is the correct behavior there.
+ */
+export function clonesFromReport(
+  report: { duplicates?: unknown[] },
+  sources: FixtureSources,
+  root: string,
+): { clones: FixtureClone[]; skippedReversedSpans: number } {
   const span = (value: unknown): CloneSpan => {
     const item = value as {
       name: string;
@@ -165,35 +198,36 @@ async function scanFixtureClones(
       endLine: item.end,
     };
   };
-  const clones = report.duplicates
-    .map((value): FixtureClone => {
-      const item = value as {
-        firstFile: unknown;
-        secondFile: unknown;
-        kind: string;
-        similarity?: number;
-        tokens: number;
-      };
-      return {
-        a: span(item.firstFile),
-        b: span(item.secondFile),
-        kind: item.kind,
-        similarity: Math.max(0, Math.min(1, item.similarity ?? 1)),
-        tokens: item.tokens,
-      };
-    })
-    .filter((clone) => clone.a.source !== clone.b.source);
-  clones.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return {
-    tool: 'jscpd',
-    version,
-    sourceRoot: root,
-    sourceCount: Object.keys(sources).length,
-    capturedFiles: Object.values(sources).reduce((n, files) => n + files.length, 0),
-    scannedFiles: report.statistics?.total?.sources ?? 0,
-    formats: Object.keys(report.statistics?.formats ?? {}).sort(),
-    clones,
+  const isReversedSpan = (value: unknown): boolean => {
+    const item = value as { startLoc?: { position?: unknown }; endLoc?: { position?: unknown } };
+    const start = item.startLoc?.position;
+    const end = item.endLoc?.position;
+    return Number.isInteger(start) && Number.isInteger(end) && (end as number) < (start as number);
   };
+  const clones: FixtureClone[] = [];
+  let skippedReversedSpans = 0;
+  for (const value of report.duplicates ?? []) {
+    const item = value as {
+      firstFile: unknown;
+      secondFile: unknown;
+      kind: string;
+      similarity?: number;
+      tokens: number;
+    };
+    if (isReversedSpan(item.firstFile) || isReversedSpan(item.secondFile)) {
+      skippedReversedSpans += 1;
+      continue;
+    }
+    const clone: FixtureClone = {
+      a: span(item.firstFile),
+      b: span(item.secondFile),
+      kind: item.kind,
+      similarity: Math.max(0, Math.min(1, item.similarity ?? 1)),
+      tokens: item.tokens,
+    };
+    if (clone.a.source !== clone.b.source) clones.push(clone);
+  }
+  return { clones, skippedReversedSpans };
 }
 
 /** A large corpus may suppress contained clones behind a longer representative.

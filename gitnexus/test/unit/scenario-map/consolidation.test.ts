@@ -8,6 +8,7 @@ import {
   FixtureCloneCandidates,
   verifyFixtureClonePairs,
   runFixtureClones,
+  clonesFromReport,
   type CloneRun,
 } from '../../../tools/scenario-map/consolidation/fixture-clones.js';
 import {
@@ -747,4 +748,102 @@ it('uses the last static value of duplicate object keys for literals and rows', 
   expect(found[2].atoms[0].key).toBe(found[1].atoms[0].key);
   expect(found[3].atoms[0].key).toBe(found[4].atoms[0].key);
   expect(found[5].atoms[0].key).not.toBe(found[1].atoms[0].key);
+});
+
+// 2026-11-24 plan-stage crash: jscpd 5.4.3's gap merge emits REVERSED spans on
+// markdown (startLoc.position 10443 > endLoc.position 470) and span() threw
+// 'invalid jscpd source span', killing the advisory consolidation AND the plan
+// stage behind it. Reversed-span records must be dropped and counted, while
+// genuine corruption (lookup misses, out-of-bounds offsets) still throws.
+describe('clonesFromReport reversed-span tolerance', () => {
+  const cloneRoot = '/materialized';
+  const sideA: [string, string][] = [['main.ts', SOURCE]];
+  const sideB: [string, string][] = [['other.ts', SOURCE + '\n// tail\n']];
+  const keyA = sha1(JSON.stringify(sideA)),
+    keyB = sha1(JSON.stringify(sideB));
+  const twoSources: FixtureSources = { [keyA]: sideA, [keyB]: sideB };
+  const file = (sha: string, name: string) => `${cloneRoot}/${sha}/${name}`;
+  const spanAt = (sha: string, name: string, start: number, end: number) => ({
+    name: file(sha, name),
+    start: 1,
+    end: 2,
+    startLoc: { position: start },
+    endLoc: { position: end },
+  });
+  const cloneRecord = (a: ReturnType<typeof spanAt>, b: ReturnType<typeof spanAt>): unknown => ({
+    firstFile: a,
+    secondFile: b,
+    kind: 'similar',
+    similarity: 0.9,
+    tokens: 12,
+  });
+
+  it('drops reversed-span clone records and counts them', () => {
+    const reversed = cloneRecord(
+      spanAt(keyA, 'main.ts', 10443, 470),
+      spanAt(keyB, 'other.ts', 10450, 480),
+    );
+    const { clones, skippedReversedSpans } = clonesFromReport(
+      { duplicates: [reversed] },
+      twoSources,
+      cloneRoot,
+    );
+    expect(clones).toEqual([]);
+    expect(skippedReversedSpans).toBe(1);
+  });
+
+  it('keeps valid cross-source clones and still filters same-source pairs', () => {
+    const valid = cloneRecord(
+      spanAt(keyA, 'main.ts', 0, SOURCE.length - 1),
+      spanAt(keyB, 'other.ts', 0, SOURCE.length - 1),
+    );
+    const selfPair = cloneRecord(
+      spanAt(keyA, 'main.ts', 0, SOURCE.length - 1),
+      spanAt(keyA, 'main.ts', 0, SOURCE.length - 1),
+    );
+    const { clones, skippedReversedSpans } = clonesFromReport(
+      { duplicates: [valid, selfPair] },
+      twoSources,
+      cloneRoot,
+    );
+    expect(clones).toHaveLength(1);
+    expect(clones[0].a.file).toBe('main.ts');
+    expect(clones[0].b.file).toBe('other.ts');
+    expect(skippedReversedSpans).toBe(0);
+  });
+
+  it('mixed records drop only the reversed ones', () => {
+    const good = cloneRecord(
+      spanAt(keyA, 'main.ts', 0, SOURCE.length - 1),
+      spanAt(keyB, 'other.ts', 0, SOURCE.length - 1),
+    );
+    const reversed = cloneRecord(
+      spanAt(keyA, 'main.ts', 10443, 470),
+      spanAt(keyB, 'other.ts', 10450, 480),
+    );
+    const { clones, skippedReversedSpans } = clonesFromReport(
+      { duplicates: [good, reversed] },
+      twoSources,
+      cloneRoot,
+    );
+    expect(clones).toHaveLength(1);
+    expect(skippedReversedSpans).toBe(1);
+  });
+
+  it('still throws on lookup misses and out-of-bounds offsets', () => {
+    const missing = cloneRecord(
+      spanAt('f'.repeat(40), 'ghost.ts', 0, 5),
+      spanAt(keyB, 'other.ts', 0, 5),
+    );
+    expect(() => clonesFromReport({ duplicates: [missing] }, twoSources, cloneRoot)).toThrow(
+      /invalid jscpd source span/,
+    );
+    const oob = cloneRecord(
+      spanAt(keyA, 'main.ts', 0, SOURCE.length + 50),
+      spanAt(keyB, 'other.ts', 0, 5),
+    );
+    expect(() => clonesFromReport({ duplicates: [oob] }, twoSources, cloneRoot)).toThrow(
+      /invalid jscpd source span/,
+    );
+  });
 });
