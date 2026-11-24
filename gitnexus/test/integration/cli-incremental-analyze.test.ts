@@ -38,7 +38,9 @@ function cliEnv(extra: Record<string, string> = {}) {
   return {
     ...process.env,
     GITNEXUS_HOME: gnHome,
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=8192`.trim(),
+    // No --max-old-space-size pin here: analyze treats a pinned heap as the
+    // operator's explicit reservation (manualHeapAdmission), which cannot fit
+    // the automatic budget on 16 GB hosted runners (coverage 1/8, 45217262006).
     ...extra,
   };
 }
